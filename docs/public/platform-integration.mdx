@@ -847,6 +847,41 @@ interface TimelineItem {
   </Step>
 </Steps>
 
+### Gemini CLI Extension
+
+Claude-Mem provides an official Gemini CLI extension via the Model Context Protocol (MCP).
+
+#### Installation
+
+```bash
+cd gemini-cli-extension
+npm install
+npm run build
+# Configure Gemini CLI to use the built MCP server
+```
+
+#### MCP Tools
+
+The extension exposes the following tools to Gemini:
+
+- `search_memory`: Search project history and past work.
+- `get_recent_context`: Retrieve recent context for the current project.
+
+#### Implementation
+
+The extension acts as an MCP server that proxies requests to the main `claude-mem` worker service.
+
+```typescript
+// src/index.ts (Snippet)
+server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  const { name, arguments: args } = request.params;
+  if (name === "search_memory") {
+    const response = await axios.get(`${WORKER_URL}/api/search`, { params: args });
+    return { content: [{ type: "text", text: JSON.stringify(response.data) }] };
+  }
+});
+```
+
 ### VSCode Extension Integration
 
 #### Language Model Tool Registration

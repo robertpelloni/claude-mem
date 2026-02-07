@@ -37,13 +37,22 @@ export interface UserPrompt {
   created_at_epoch: number;
 }
 
+export interface LogEntry {
+  timestamp: string;
+  level: string;
+  component: string;
+  message: string;
+  context?: any;
+  data?: any;
+}
+
 export type FeedItem =
   | (Observation & { itemType: 'observation' })
   | (Summary & { itemType: 'summary' })
   | (UserPrompt & { itemType: 'prompt' });
 
 export interface StreamEvent {
-  type: 'initial_load' | 'new_observation' | 'new_summary' | 'new_prompt' | 'processing_status';
+  type: 'initial_load' | 'new_observation' | 'new_summary' | 'new_prompt' | 'processing_status' | 'log';
   observations?: Observation[];
   summaries?: Summary[];
   prompts?: UserPrompt[];
@@ -52,6 +61,7 @@ export interface StreamEvent {
   summary?: Summary;
   prompt?: UserPrompt;
   isProcessing?: boolean;
+  log?: LogEntry;
 }
 
 export interface Settings {

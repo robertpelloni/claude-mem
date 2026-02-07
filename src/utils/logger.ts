@@ -22,13 +22,39 @@ interface LogContext {
   [key: string]: any;
 }
 
+export interface LogEntry {
+  timestamp: string;
+  level: string;
+  component: string;
+  message: string;
+  context?: any;
+  data?: any;
+}
+
+type LogListener = (entry: LogEntry) => void;
+
 class Logger {
   private level: LogLevel | null = null;
   private useColor: boolean;
+  private listeners: LogListener[] = [];
 
   constructor() {
     // Disable colors when output is not a TTY (e.g., PM2 logs)
     this.useColor = process.stdout.isTTY ?? false;
+  }
+
+  /**
+   * Add a listener for log events (e.g., for SSE broadcasting)
+   */
+  addListener(listener: LogListener): void {
+    this.listeners.push(listener);
+  }
+
+  /**
+   * Remove a listener
+   */
+  removeListener(listener: LogListener): void {
+    this.listeners = this.listeners.filter(l => l !== listener);
   }
 
   /**
@@ -198,6 +224,24 @@ class Logger {
     } else {
       console.log(logLine);
     }
+
+    // Notify listeners
+    const entry: LogEntry = {
+      timestamp,
+      level: LogLevel[level],
+      component,
+      message,
+      context,
+      data: data ? this.formatData(data) : undefined
+    };
+
+    this.listeners.forEach(listener => {
+      try {
+        listener(entry);
+      } catch (error) {
+        console.error('Error in log listener:', error);
+      }
+    });
   }
 
   // Public logging methods
