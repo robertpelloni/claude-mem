@@ -1,0 +1,53 @@
+---
+title: 'Web Viewer'
+description: 'Using the real-time memory stream and configuration dashboard'
+---
+
+## Overview
+
+The Web Viewer is a real-time dashboard running at `http://localhost:37777`. It provides a live feed of your memory stream, system status, and configuration controls.
+
+## Features
+
+### Real-Time Feed
+- **Observations**: See memory being created in real-time.
+- **Sessions**: Track session summaries and prompt history.
+- **Live Updates**: The feed updates automatically via Server-Sent Events (SSE).
+
+### Settings Dashboard
+Click the **Settings (gear icon)** in the header to access the configuration dashboard.
+
+#### 1. Context
+Fine-tune how memory is injected into Claude:
+- **Loading**: Control how many recent observations are loaded (Default: 50).
+- **Filters**: Filter context by type (bugfix, feature, etc.) or concept.
+- **Display**: Customize the visual presentation of observations in the context window.
+
+#### 2. System
+Manage core system settings:
+- **Log Level**: Adjust verbosity (DEBUG, INFO, WARN, ERROR).
+- **Worker Port**: Change the port (Default: 37777). Requires restart.
+- **Data Directory**: Change where data is stored. Requires restart.
+
+#### 3. Integrations & Updates
+Manage external connections and version channels:
+- **Version Channel**: Switch between **Stable** and **Beta (Endless Mode)**.
+  - *Note: Switching branches will restart the worker service.*
+- **Chroma Vector DB**: View connection status and vector count.
+- **OpenCode Plugin**: Status of the OpenCode integration.
+
+### Help & Shortcuts
+Press `?` or click the **Help (?)** button in the header to view:
+- **Documentation**: Quick access to guides.
+- **Shortcuts**: Keyboard shortcuts reference.
+- **Search**: Examples of natural language search queries.
+
+## Endless Mode (Beta)
+
+To enable Endless Mode:
+1. Open Settings.
+2. Go to **Integrations & Updates**.
+3. Click **Beta (Endless Mode)**.
+4. Wait for the worker to restart.
+
+Endless Mode compresses tool outputs to save tokens and extend session context.

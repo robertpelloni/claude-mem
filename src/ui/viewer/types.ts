@@ -69,7 +69,11 @@ export interface Settings {
   CLAUDE_MEM_CONTEXT_OBSERVATIONS: string;
   CLAUDE_MEM_WORKER_PORT: string;
   CLAUDE_MEM_WORKER_HOST: string;
-  CLAUDE_MEM_LOG_LEVEL: string;
+
+  // System Configuration
+  CLAUDE_MEM_DATA_DIR?: string;
+  CLAUDE_MEM_LOG_LEVEL?: string;
+  CLAUDE_MEM_PYTHON_VERSION?: string;
 
   // Token Economics Display
   CLAUDE_MEM_CONTEXT_SHOW_READ_TOKENS?: string;
@@ -108,4 +112,14 @@ export interface DatabaseStats {
 export interface Stats {
   worker?: WorkerStats;
   database?: DatabaseStats;
+}
+
+export interface IntegrationStatus {
+  chroma: {
+    connected: boolean;
+    collectionName: string;
+    vectorDbDir: string;
+    itemCount?: number;
+    error?: string;
+  };
 }

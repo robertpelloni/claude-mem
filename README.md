@@ -84,7 +84,7 @@ Restart Claude Code. Context from previous sessions will automatically appear in
 - 💻 **Claude Desktop Skill** - Search memory from Claude Desktop conversations
 - ♊ **Gemini CLI Extension** - Connect Google Gemini to your persistent memory via MCP
 - 🔒 **Privacy Control** - Use `<private>` tags to exclude sensitive content from storage
-- ⚙️ **Context Configuration** - Fine-grained control over what context gets injected
+- ⚙️ **Configuration Dashboard** - Full system control via UI including Endless Mode toggle
 - 🤖 **Automatic Operation** - No manual intervention required
 - 🔗 **Citations** - Reference past observations with IDs (access via http://localhost:37777/api/observation/{id} or view all in the web viewer at http://localhost:37777)
 - 🧪 **Beta Channel** - Try experimental features like Endless Mode via version switching
@@ -251,6 +251,12 @@ See [Beta Features Documentation](https://docs.claude-mem.ai/beta-features) for 
 
 ## What's New
 
+**v7.4.0 - Enhanced UI Dashboard:**
+- **Configuration Dashboard**: Manage settings, integrations, and version switching directly from the Web Viewer
+- **Integrations Status**: Monitor Chroma Vector DB and OpenCode plugin connectivity
+- **Endless Mode Toggle**: Switch between Stable and Beta channels with one click
+- **Help & Shortcuts**: New in-app documentation and keyboard shortcuts
+
 **v6.4.9 - Context Configuration Settings:**
 - 11 new settings for fine-grained control over context injection
 - Configure token economics display, observation filtering by type/concept
@@ -325,7 +331,7 @@ See [CHANGELOG.md](CHANGELOG.md) for complete version history.
 
 ## Configuration
 
-Settings are managed in `~/.claude-mem/settings.json`. The file is auto-created with defaults on first run.
+Settings are managed via the **Web Viewer Dashboard** (click Settings gear icon) or in `~/.claude-mem/settings.json`.
 
 **Available Settings:**
 
