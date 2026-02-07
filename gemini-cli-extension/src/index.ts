@@ -49,6 +49,60 @@ const CONTEXT_TOOL: Tool = {
   },
 };
 
+const OBSERVATION_TOOL: Tool = {
+  name: "record_observation",
+  description: "Record a new observation or action into the persistent memory.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      tool_name: {
+        type: "string",
+        description: "Name of the tool that was executed (e.g., 'Bash', 'Write', 'Decision').",
+      },
+      tool_input: {
+        type: "object",
+        description: "Input parameters passed to the tool.",
+      },
+      tool_response: {
+        type: "object",
+        description: "Result or output from the tool execution.",
+      },
+      claudeSessionId: {
+        type: "string",
+        description: "Session identifier (optional, auto-generated if missing).",
+      },
+      cwd: {
+        type: "string",
+        description: "Current working directory (optional).",
+      },
+    },
+    required: ["tool_name", "tool_input", "tool_response"],
+  },
+};
+
+const SUMMARY_TOOL: Tool = {
+  name: "record_summary",
+  description: "Record a summary of the current session or task.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      claudeSessionId: {
+        type: "string",
+        description: "Session identifier to summarize.",
+      },
+      last_user_message: {
+        type: "string",
+        description: "The last message from the user.",
+      },
+      last_assistant_message: {
+        type: "string",
+        description: "The last response from the assistant.",
+      },
+    },
+    required: ["claudeSessionId"],
+  },
+};
+
 // Server Implementation
 const server = new Server(
   {
@@ -65,7 +119,7 @@ const server = new Server(
 // List Tools Handler
 server.setRequestHandler(ListToolsRequestSchema, async () => {
   return {
-    tools: [SEARCH_TOOL, CONTEXT_TOOL],
+    tools: [SEARCH_TOOL, CONTEXT_TOOL, OBSERVATION_TOOL, SUMMARY_TOOL],
   };
 });
 
@@ -106,6 +160,36 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           {
             type: "text",
             text: typeof response.data === 'string' ? response.data : JSON.stringify(response.data, null, 2),
+          },
+        ],
+      };
+    }
+
+    if (name === "record_observation") {
+      const response = await axios.post(`${WORKER_URL}/api/sessions/observations`, args, {
+        timeout: TIMEOUT_MS,
+      });
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(response.data, null, 2),
+          },
+        ],
+      };
+    }
+
+    if (name === "record_summary") {
+      const response = await axios.post(`${WORKER_URL}/api/sessions/summarize`, args, {
+        timeout: TIMEOUT_MS,
+      });
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(response.data, null, 2),
           },
         ],
       };

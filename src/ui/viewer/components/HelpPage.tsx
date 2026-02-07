@@ -15,7 +15,8 @@ export const HelpPage: React.FC = () => {
   const tabs = [
     { id: 'overview', label: 'Overview' },
     { id: 'search', label: 'Search Tools' },
-    { id: 'concepts', label: 'Concepts' },
+    { id: 'concepts', label: 'Concepts & Privacy' },
+    { id: 'features', label: 'Endless Mode' },
     { id: 'integrations', label: 'Integrations' },
     { id: 'config', label: 'Configuration' },
   ];
@@ -77,7 +78,7 @@ export const HelpPage: React.FC = () => {
         )}
 
         {activeTab === 'concepts' && (
-          <HelpSection title="Concepts">
+          <HelpSection title="Concepts & Privacy">
             <h4>Observations</h4>
             <p>
               Every action (tool use, file edit) is recorded as an "Observation". These are compressed into semantic summaries.
@@ -86,10 +87,44 @@ export const HelpPage: React.FC = () => {
             <p>
               A "Session" groups related observations. When a session ends, it is summarized and stored in the long-term memory.
             </p>
-            <h4>Endless Mode (Beta)</h4>
+            <h4>Privacy Control</h4>
             <p>
-              An experimental feature that compresses context in real-time, allowing for much longer coding sessions by
-              moving older details into "Archive Memory".
+              Claude-Mem respects your privacy. You can exclude sensitive content from being stored by wrapping it in tags:
+            </p>
+            <div className="code-block">
+              &lt;private&gt;<br />
+              API Key: sk-12345...<br />
+              &lt;/private&gt;
+            </div>
+            <p>
+              Content within these tags is stripped before it reaches the memory database.
+            </p>
+          </HelpSection>
+        )}
+
+        {activeTab === 'features' && (
+          <HelpSection title="Endless Mode (Beta)">
+            <p>
+              <strong>Status: Experimental</strong>
+            </p>
+            <p>
+              Endless Mode is a biomimetic memory architecture that dramatically extends session length by compressing
+              context in real-time.
+            </p>
+            <h4>How it Works</h4>
+            <ul>
+              <li><strong>Real-time Compression:</strong> Tool outputs are compressed into concise observations immediately.</li>
+              <li><strong>Working Memory:</strong> Only relevant, compressed context is kept in the active window.</li>
+              <li><strong>Archive Memory:</strong> Full details are moved to disk but remain searchable.</li>
+            </ul>
+            <h4>Benefits</h4>
+            <ul>
+              <li>Significantly reduces token usage.</li>
+              <li>Allows for much longer coding sessions without hitting context limits.</li>
+              <li>Scales linearly instead of quadratically.</li>
+            </ul>
+            <p>
+              <em>Note: You can enable/disable experimental features in the Settings menu (switch to Beta channel).</em>
             </p>
           </HelpSection>
         )}
@@ -106,15 +141,21 @@ export const HelpPage: React.FC = () => {
             </p>
             <h4>Gemini CLI</h4>
             <p>
-              Connects via <code>gemini-cli-extension</code> (MCP). Allows Gemini to search memory and read project context using standard MCP tools.
+              Connects via <code>gemini-cli-extension</code> (MCP). Allows Gemini to:
             </p>
+            <ul>
+              <li><strong>Search Memory:</strong> Query project history.</li>
+              <li><strong>Get Context:</strong> Retrieve recent work context.</li>
+              <li><strong>Record Observations:</strong> Save new actions to memory.</li>
+              <li><strong>Summarize:</strong> Generate session summaries.</li>
+            </ul>
           </HelpSection>
         )}
 
         {activeTab === 'config' && (
           <HelpSection title="Configuration">
             <p>
-              Configure Claude-Mem via <code>~/.claude-mem/settings.json</code> or environment variables.
+              Configure Claude-Mem via <code>~/.claude-mem/settings.json</code> or the Settings menu in this UI.
             </p>
             <h4>Key Settings</h4>
             <ul>

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useStats } from '../hooks/useStats';
 import { LogEntry } from '../types';
 
@@ -13,6 +13,9 @@ interface SystemStatusProps {
 export const SystemStatus: React.FC<SystemStatusProps> = ({ isConnected, mcpReady, initialized, version, logs = [] }) => {
   const { stats } = useStats();
   const [workerVersion, setWorkerVersion] = useState<string | null>(null);
+  const [logFilter, setLogFilter] = useState<'ALL' | 'INFO' | 'WARN' | 'ERROR'>('ALL');
+  const [autoScroll, setAutoScroll] = useState(true);
+  const logsEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     fetch('/api/version')
@@ -20,6 +23,20 @@ export const SystemStatus: React.FC<SystemStatusProps> = ({ isConnected, mcpRead
       .then(data => setWorkerVersion(data.version))
       .catch(() => setWorkerVersion('Unknown'));
   }, []);
+
+  const filteredLogs = logs.filter(log => {
+    if (logFilter === 'ALL') return true;
+    if (logFilter === 'ERROR') return log.level === 'ERROR';
+    if (logFilter === 'WARN') return log.level === 'WARN' || log.level === 'ERROR';
+    if (logFilter === 'INFO') return log.level === 'INFO' || log.level === 'WARN' || log.level === 'ERROR';
+    return true;
+  });
+
+  useEffect(() => {
+    if (autoScroll && logsEndRef.current) {
+      logsEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [logs, autoScroll, logFilter]);
 
   return (
     <div className="status-container">
@@ -68,7 +85,39 @@ export const SystemStatus: React.FC<SystemStatusProps> = ({ isConnected, mcpRead
       </div>
 
       <div style={{ marginTop: '40px' }}>
-        <h2 className="status-title">Live Logs</h2>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+          <h2 className="status-title" style={{ marginBottom: 0 }}>Live Logs</h2>
+
+          <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: 'var(--color-text-secondary)', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={autoScroll}
+                onChange={e => setAutoScroll(e.target.checked)}
+              />
+              Auto-scroll
+            </label>
+
+            <select
+              value={logFilter}
+              onChange={e => setLogFilter(e.target.value as any)}
+              style={{
+                background: 'var(--color-bg-card)',
+                border: '1px solid var(--color-border-primary)',
+                borderRadius: '4px',
+                padding: '4px 8px',
+                fontSize: '12px',
+                color: 'var(--color-text-primary)'
+              }}
+            >
+              <option value="ALL">All Levels</option>
+              <option value="INFO">Info+</option>
+              <option value="WARN">Warn+</option>
+              <option value="ERROR">Error only</option>
+            </select>
+          </div>
+        </div>
+
         <div style={{
           background: 'var(--color-bg-card)',
           border: '1px solid var(--color-border-primary)',
@@ -79,12 +128,12 @@ export const SystemStatus: React.FC<SystemStatusProps> = ({ isConnected, mcpRead
           fontSize: '12px',
           padding: '16px'
         }}>
-          {logs.length === 0 ? (
+          {filteredLogs.length === 0 ? (
             <div style={{ color: 'var(--color-text-muted)', textAlign: 'center', padding: '20px' }}>
-              Waiting for logs...
+              {logs.length === 0 ? 'Waiting for logs...' : 'No logs match filter'}
             </div>
           ) : (
-            logs.map((log, i) => (
+            filteredLogs.map((log, i) => (
               <div key={i} style={{ marginBottom: '8px', display: 'flex', gap: '8px' }}>
                 <span style={{ color: 'var(--color-text-muted)', whiteSpace: 'nowrap' }}>
                   {log.timestamp.split(' ')[1]}
@@ -113,6 +162,7 @@ export const SystemStatus: React.FC<SystemStatusProps> = ({ isConnected, mcpRead
               </div>
             ))
           )}
+          <div ref={logsEndRef} />
         </div>
       </div>
     </div>

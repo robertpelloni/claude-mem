@@ -2519,10 +2519,17 @@
       margin-bottom: 16px;
     }
 
+    .search-controls-container {
+      max-width: 800px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
     .search-form {
       display: flex;
       gap: 12px;
-      max-width: 800px;
+      width: 100%;
     }
 
     .search-input {
@@ -2534,6 +2541,36 @@
       border: 1px solid var(--color-border-primary);
       background: var(--color-bg-input);
       color: var(--color-text-primary);
+    }
+
+    .search-filters {
+      display: flex;
+      gap: 20px;
+      flex-wrap: wrap;
+    }
+
+    .filter-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .filter-group label {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--color-text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .filter-select {
+      background: var(--color-bg-card);
+      border: 1px solid var(--color-border-primary);
+      border-radius: 4px;
+      padding: 4px 8px;
+      font-size: 13px;
+      color: var(--color-text-primary);
+      min-width: 120px;
     }
 
     .search-input:focus {
