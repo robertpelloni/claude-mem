@@ -1,6 +1,9 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Header } from './components/Header';
 import { Feed } from './components/Feed';
+import { HelpPage } from './components/HelpPage';
+import { SystemStatus } from './components/SystemStatus';
+import { SearchPage } from './components/SearchPage';
 import { ContextSettingsModal } from './components/ContextSettingsModal';
 import { useSSE } from './hooks/useSSE';
 import { useSettings } from './hooks/useSettings';
@@ -12,14 +15,39 @@ import { mergeAndDeduplicateByProject } from './utils/data';
 
 export function App() {
   const [currentFilter, setCurrentFilter] = useState('');
+  const [currentView, setCurrentView] = useState<'feed' | 'help' | 'status' | 'search'>('feed');
   const [contextPreviewOpen, setContextPreviewOpen] = useState(false);
   const [paginatedObservations, setPaginatedObservations] = useState<Observation[]>([]);
   const [paginatedSummaries, setPaginatedSummaries] = useState<Summary[]>([]);
   const [paginatedPrompts, setPaginatedPrompts] = useState<UserPrompt[]>([]);
 
-  const { observations, summaries, prompts, projects, isProcessing, queueDepth, isConnected } = useSSE();
+  // System readiness state
+  const [readiness, setReadiness] = useState({ mcpReady: false, initialized: false });
+
+  const { observations, summaries, prompts, projects, logs, isProcessing, queueDepth, isConnected } = useSSE();
   const { settings, saveSettings, isSaving, saveStatus } = useSettings();
   const { stats, refreshStats } = useStats();
+
+  // Poll for readiness
+  useEffect(() => {
+    const checkReadiness = () => {
+      fetch('/api/readiness')
+        .then(res => res.json())
+        .then(data => {
+          setReadiness({
+            mcpReady: data.mcpReady === true,
+            initialized: data.status === 'ready'
+          });
+        })
+        .catch(() => {
+          setReadiness({ mcpReady: false, initialized: false });
+        });
+    };
+
+    checkReadiness();
+    const interval = setInterval(checkReadiness, 5000);
+    return () => clearInterval(interval);
+  }, []);
   const { preference, resolvedTheme, setThemePreference } = useTheme();
   const pagination = usePagination(currentFilter);
 
@@ -97,16 +125,37 @@ export function App() {
         themePreference={preference}
         onThemeChange={setThemePreference}
         onContextPreviewToggle={toggleContextPreview}
+        currentView={currentView}
+        onViewChange={setCurrentView}
       />
 
-      <Feed
-        observations={allObservations}
-        summaries={allSummaries}
-        prompts={allPrompts}
-        onLoadMore={handleLoadMore}
-        isLoading={pagination.observations.isLoading || pagination.summaries.isLoading || pagination.prompts.isLoading}
-        hasMore={pagination.observations.hasMore || pagination.summaries.hasMore || pagination.prompts.hasMore}
-      />
+      <div className="main-content">
+        {currentView === 'feed' && (
+          <Feed
+            observations={allObservations}
+            summaries={allSummaries}
+            prompts={allPrompts}
+            onLoadMore={handleLoadMore}
+            isLoading={pagination.observations.isLoading || pagination.summaries.isLoading || pagination.prompts.isLoading}
+            hasMore={pagination.observations.hasMore || pagination.summaries.hasMore || pagination.prompts.hasMore}
+          />
+        )}
+
+        {currentView === 'help' && <HelpPage />}
+
+        {currentView === 'search' && <SearchPage />}
+
+        {currentView === 'status' && (
+          <div className="container mx-auto p-4">
+            <SystemStatus
+              isConnected={isConnected}
+              mcpReady={readiness.mcpReady}
+              initialized={readiness.initialized}
+              logs={logs}
+            />
+          </div>
+        )}
+      </div>
 
       <ContextSettingsModal
         isOpen={contextPreviewOpen}

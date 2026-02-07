@@ -81,6 +81,14 @@ export class WorkerService {
     this.dbManager = new DatabaseManager();
     this.sessionManager = new SessionManager(this.dbManager);
     this.sseBroadcaster = new SSEBroadcaster();
+
+    // Attach logger to SSE broadcaster for live log streaming
+    logger.addListener((entry) => {
+      this.sseBroadcaster.broadcast({
+        type: 'log',
+        log: entry
+      });
+    });
     this.sdkAgent = new SDKAgent(this.dbManager, this.sessionManager);
     this.paginationHelper = new PaginationHelper(this.dbManager);
     this.settingsManager = new SettingsManager(this.dbManager);

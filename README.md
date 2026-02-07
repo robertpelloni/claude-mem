@@ -80,8 +80,9 @@ Restart Claude Code. Context from previous sessions will automatically appear in
 - 🧠 **Persistent Memory** - Context survives across sessions
 - 📊 **Progressive Disclosure** - Layered memory retrieval with token cost visibility
 - 🔍 **Skill-Based Search** - Query your project history with mem-search skill
-- 🖥️ **Web Viewer UI** - Real-time memory stream at http://localhost:37777
+- 🖥️ **Web Viewer UI** - Real-time memory stream, search, and system status at http://localhost:37777
 - 💻 **Claude Desktop Skill** - Search memory from Claude Desktop conversations
+- ♊ **Gemini CLI Extension** - Connect Google Gemini to your persistent memory via MCP
 - 🔒 **Privacy Control** - Use `<private>` tags to exclude sensitive content from storage
 - ⚙️ **Context Configuration** - Fine-grained control over what context gets injected
 - 🤖 **Automatic Operation** - No manual intervention required
@@ -163,6 +164,7 @@ npx mintlify dev
 4. **SQLite Database** - Stores sessions, observations, summaries with FTS5 full-text search
 5. **mem-search Skill** - Natural language queries with progressive disclosure
 6. **Chroma Vector Database** - Hybrid semantic + keyword search for intelligent context retrieval
+7. **Gemini CLI Extension** - MCP server for Gemini integration
 
 See [Architecture Overview](https://docs.claude-mem.ai/architecture/overview) for details.
 

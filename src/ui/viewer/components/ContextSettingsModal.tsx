@@ -477,6 +477,21 @@ export function ContextSettingsModal({
                 />
               </FormField>
 
+              <FormField
+                label="Log Level"
+                tooltip="Verbosity of worker logs"
+              >
+                <select
+                  value={formState.CLAUDE_MEM_LOG_LEVEL || 'INFO'}
+                  onChange={(e) => updateSetting('CLAUDE_MEM_LOG_LEVEL', e.target.value)}
+                >
+                  <option value="DEBUG">DEBUG (Detailed)</option>
+                  <option value="INFO">INFO (Standard)</option>
+                  <option value="WARN">WARN (Issues only)</option>
+                  <option value="ERROR">ERROR (Critical only)</option>
+                </select>
+              </FormField>
+
               <div className="toggle-group" style={{ marginTop: '12px' }}>
                 <ToggleSwitch
                   id="show-last-summary"
