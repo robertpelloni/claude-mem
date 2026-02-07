@@ -365,7 +365,10 @@ describe('updateFolderClaudeMdFiles', () => {
     // Should call API with the original absolute path's folder
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const callUrl = (fetchMock.mock.calls[0] as unknown[])[0] as string;
-    expect(callUrl).toContain(encodeURIComponent(folderPath));
+    
+    // Normalize expectation to forward slashes (what the code sends)
+    const expectedPath = process.platform === 'win32' ? folderPath.split(path.sep).join('/') : folderPath;
+    expect(callUrl).toContain(encodeURIComponent(expectedPath));
   });
 
   it('should work without projectRoot for backward compatibility', async () => {
@@ -394,7 +397,10 @@ describe('updateFolderClaudeMdFiles', () => {
     // Should still make API call with the folder path
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const callUrl = (fetchMock.mock.calls[0] as unknown[])[0] as string;
-    expect(callUrl).toContain(encodeURIComponent(folderPath));
+    
+    // Normalize expectation to forward slashes
+    const expectedPath = process.platform === 'win32' ? folderPath.split(path.sep).join('/') : folderPath;
+    expect(callUrl).toContain(encodeURIComponent(expectedPath));
   });
 
   it('should handle projectRoot with trailing slash correctly', async () => {
@@ -714,12 +720,15 @@ describe('issue #859 - skip folders with active CLAUDE.md', () => {
     const fetchMock = mock(() => Promise.resolve({ ok: true } as Response));
     global.fetch = fetchMock;
 
+    const projectRoot = tempDir;
+    const filePath = join(projectRoot, 'src', 'utils', 'CLAUDE.md');
+
     // Simulate reading CLAUDE.md - should skip that folder
     await updateFolderClaudeMdFiles(
-      ['/project/src/utils/CLAUDE.md'],
+      [filePath],
       'test-project',
       37777,
-      '/project'
+      projectRoot
     );
 
     // Should NOT make API call since the CLAUDE.md file was read
@@ -730,12 +739,15 @@ describe('issue #859 - skip folders with active CLAUDE.md', () => {
     const fetchMock = mock(() => Promise.resolve({ ok: true } as Response));
     global.fetch = fetchMock;
 
+    const projectRoot = tempDir;
+    const filePath = join(projectRoot, 'src', 'CLAUDE.md');
+
     // Simulate modifying CLAUDE.md - should skip that folder
     await updateFolderClaudeMdFiles(
-      ['/project/src/CLAUDE.md'],
+      [filePath],
       'test-project',
       37777,
-      '/project'
+      projectRoot
     );
 
     // Should NOT make API call since the CLAUDE.md file was modified
@@ -752,22 +764,39 @@ describe('issue #859 - skip folders with active CLAUDE.md', () => {
     } as Response));
     global.fetch = fetchMock;
 
+    const projectRoot = tempDir;
+    // Create folders to pass validation that relies on existsSync (though isValidPathForClaudeMd doesn't check existence, writeClaudeMdToFolder does)
+    // Actually updateFolderClaudeMdFiles logic:
+    // ... if (isExcludedUnsafeDirectory(folderPath)) ...
+    // It doesn't check existence of input files, but it does check existence of folder before writing.
+    // So we should ensure folders exist if we want write to happen.
+    
+    const utilsDir = join(projectRoot, 'src', 'utils');
+    const servicesDir = join(projectRoot, 'src', 'services');
+    mkdirSync(utilsDir, { recursive: true });
+    mkdirSync(servicesDir, { recursive: true });
+
     // Mix of CLAUDE.md read and other files
     await updateFolderClaudeMdFiles(
       [
-        '/project/src/utils/CLAUDE.md',  // Should skip /project/src/utils
-        '/project/src/services/api.ts'   // Should process /project/src/services
+        join(utilsDir, 'CLAUDE.md'),  // Should skip utilsDir
+        join(servicesDir, 'api.ts')   // Should process servicesDir
       ],
       'test-project',
       37777,
-      '/project'
+      projectRoot
     );
 
-    // Should make ONE API call for /project/src/services, NOT for /project/src/utils
+    // Should make ONE API call for servicesDir, NOT for utilsDir
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const callUrl = (fetchMock.mock.calls[0] as unknown[])[0] as string;
-    expect(callUrl).toContain(encodeURIComponent('/project/src/services'));
-    expect(callUrl).not.toContain(encodeURIComponent('/project/src/utils'));
+    
+    // Normalize expectation
+    const expectedPath = process.platform === 'win32' ? servicesDir.split(path.sep).join('/') : servicesDir;
+    const skippedPath = process.platform === 'win32' ? utilsDir.split(path.sep).join('/') : utilsDir;
+    
+    expect(callUrl).toContain(encodeURIComponent(expectedPath));
+    expect(callUrl).not.toContain(encodeURIComponent(skippedPath));
   });
 
   it('should handle relative CLAUDE.md paths with projectRoot', async () => {
@@ -779,7 +808,7 @@ describe('issue #859 - skip folders with active CLAUDE.md', () => {
       ['src/components/CLAUDE.md'],
       'test-project',
       37777,
-      '/project'
+      tempDir
     );
 
     // Should NOT make API call since CLAUDE.md was accessed
@@ -796,22 +825,32 @@ describe('issue #859 - skip folders with active CLAUDE.md', () => {
     } as Response));
     global.fetch = fetchMock;
 
+    const projectRoot = tempDir;
+    const dirA = join(projectRoot, 'src', 'a');
+    const dirB = join(projectRoot, 'src', 'b');
+    const dirC = join(projectRoot, 'src', 'c');
+    mkdirSync(dirA, { recursive: true });
+    mkdirSync(dirB, { recursive: true });
+    mkdirSync(dirC, { recursive: true });
+
     // Two CLAUDE.md files in different folders, plus a regular file
     await updateFolderClaudeMdFiles(
       [
-        '/project/src/a/CLAUDE.md',
-        '/project/src/b/CLAUDE.md',
-        '/project/src/c/file.ts'
+        join(dirA, 'CLAUDE.md'),
+        join(dirB, 'CLAUDE.md'),
+        join(dirC, 'file.ts')
       ],
       'test-project',
       37777,
-      '/project'
+      projectRoot
     );
 
     // Should only process folder c, not a or b
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const callUrl = (fetchMock.mock.calls[0] as unknown[])[0] as string;
-    expect(callUrl).toContain(encodeURIComponent('/project/src/c'));
+    
+    const expectedPath = process.platform === 'win32' ? dirC.split(path.sep).join('/') : dirC;
+    expect(callUrl).toContain(encodeURIComponent(expectedPath));
   });
 
   it('should still exclude project root even when CLAUDE.md filter would allow it', async () => {

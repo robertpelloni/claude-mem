@@ -88,7 +88,7 @@ async function findTypeScriptFiles(dir: string): Promise<string[]> {
  * Check if a file should be excluded from logger requirements
  */
 function shouldExclude(filePath: string): boolean {
-  const relativePath = relative(SRC_DIR, filePath);
+  const relativePath = relative(SRC_DIR, filePath).replace(/\\/g, '/');
   return EXCLUDED_PATTERNS.some(pattern => pattern.test(relativePath));
 }
 
@@ -96,7 +96,7 @@ function shouldExclude(filePath: string): boolean {
  * Check if a file is high priority for logging
  */
 function isHighPriority(filePath: string): boolean {
-  const relativePath = relative(SRC_DIR, filePath);
+  const relativePath = relative(SRC_DIR, filePath).replace(/\\/g, '/');
 
   // UI files are never high priority
   if (isUIFile(relativePath)) {

@@ -100,9 +100,25 @@ export async function httpShutdown(port: number): Promise<boolean> {
  * This is the "expected" version that should be running
  */
 export function getInstalledPluginVersion(): string {
-  const packageJsonPath = path.join(MARKETPLACE_ROOT, 'package.json');
-  const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf-8'));
-  return packageJson.version;
+  try {
+    const packageJsonPath = path.join(MARKETPLACE_ROOT, 'package.json');
+    if (path.isAbsolute(packageJsonPath)) { // Ensure path is safe
+       try {
+         const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf-8'));
+         return packageJson.version;
+       } catch {
+         // Fallback below
+       }
+    }
+    
+    // Fallback: try reading from local project root (for dev/test)
+    const localPackageJsonPath = path.resolve('package.json');
+    const localPackageJson = JSON.parse(readFileSync(localPackageJsonPath, 'utf-8'));
+    return localPackageJson.version;
+  } catch (error) {
+    logger.warn('SYSTEM', 'Failed to determine plugin version, defaulting to 0.0.0-dev', { error: error instanceof Error ? error.message : String(error) });
+    return '0.0.0-dev';
+  }
 }
 
 /**

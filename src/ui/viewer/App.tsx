@@ -103,7 +103,6 @@ export function App() {
   const toggleLogsModal = useCallback(() => {
     setLogsModalOpen(prev => !prev);
   }, []);
-  }, []);
 
   // Handle loading more data
   const handleLoadMore = useCallback(async () => {

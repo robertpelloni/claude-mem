@@ -414,8 +414,10 @@ export async function updateFolderClaudeMdFiles(
     try {
       // Fetch timeline via existing API
       const host = getWorkerHost();
+      // Normalize path to forward slashes for URL consistency
+      const normalizedPath = folderPath.split(path.sep).join('/');
       const response = await fetch(
-        `http://${host}:${port}/api/search/by-file?filePath=${encodeURIComponent(folderPath)}&limit=${limit}&project=${encodeURIComponent(project)}&isFolder=true`
+        `http://${host}:${port}/api/search/by-file?filePath=${encodeURIComponent(normalizedPath)}&limit=${limit}&project=${encodeURIComponent(project)}&isFolder=true`
       );
 
       if (!response.ok) {

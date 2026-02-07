@@ -69,10 +69,13 @@ export function formatDate(dateInput: string | number): string {
  * Convert absolute paths to relative paths
  */
 export function toRelativePath(filePath: string, cwd: string): string {
+  let relativePath = filePath;
   if (path.isAbsolute(filePath)) {
-    return path.relative(cwd, filePath);
+    relativePath = path.relative(cwd, filePath);
   }
-  return filePath;
+  
+  // Normalize to forward slashes for consistency across platforms (UI, Markdown)
+  return relativePath.split(path.sep).join('/');
 }
 
 /**
