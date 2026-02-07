@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Header } from './components/Header';
 import { Feed } from './components/Feed';
 import { ContextSettingsModal } from './components/ContextSettingsModal';
+import { HelpModal } from './components/HelpModal';
 import { useSSE } from './hooks/useSSE';
 import { useSettings } from './hooks/useSettings';
 import { useStats } from './hooks/useStats';
@@ -13,6 +14,7 @@ import { mergeAndDeduplicateByProject } from './utils/data';
 export function App() {
   const [currentFilter, setCurrentFilter] = useState('');
   const [contextPreviewOpen, setContextPreviewOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
   const [paginatedObservations, setPaginatedObservations] = useState<Observation[]>([]);
   const [paginatedSummaries, setPaginatedSummaries] = useState<Summary[]>([]);
   const [paginatedPrompts, setPaginatedPrompts] = useState<UserPrompt[]>([]);
@@ -52,6 +54,27 @@ export function App() {
   const toggleContextPreview = useCallback(() => {
     setContextPreviewOpen(prev => !prev);
   }, []);
+
+  // Toggle help modal
+  const toggleHelp = useCallback(() => {
+    setHelpOpen(prev => !prev);
+  }, []);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ignore if typing in input
+      if (e.target instanceof HTMLElement && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT')) {
+        return;
+      }
+
+      if (e.key === '?') {
+        toggleHelp();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [toggleHelp]);
 
   // Handle loading more data
   const handleLoadMore = useCallback(async () => {
@@ -97,6 +120,7 @@ export function App() {
         themePreference={preference}
         onThemeChange={setThemePreference}
         onContextPreviewToggle={toggleContextPreview}
+        onHelpToggle={toggleHelp}
       />
 
       <Feed
@@ -115,6 +139,11 @@ export function App() {
         onSave={saveSettings}
         isSaving={isSaving}
         saveStatus={saveStatus}
+      />
+
+      <HelpModal
+        isOpen={helpOpen}
+        onClose={toggleHelp}
       />
     </>
   );
