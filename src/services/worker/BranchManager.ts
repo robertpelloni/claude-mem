@@ -7,11 +7,12 @@
 
 import { execSync, spawnSync } from 'child_process';
 import { existsSync, unlinkSync } from 'fs';
-import { homedir } from 'os';
 import { join } from 'path';
 import { logger } from '../../utils/logger.js';
+import { MARKETPLACE_ROOT } from '../../shared/paths.js';
 
-const INSTALLED_PLUGIN_PATH = join(homedir(), '.claude', 'plugins', 'marketplaces', 'thedotmack');
+// Alias for code clarity - this is the installed plugin path
+const INSTALLED_PLUGIN_PATH = MARKETPLACE_ROOT;
 
 /**
  * Validate branch name to prevent command injection
@@ -28,9 +29,9 @@ function isValidBranchName(branchName: string): boolean {
   return validBranchRegex.test(branchName) && !branchName.includes('..');
 }
 
-// Timeout constants
-const GIT_COMMAND_TIMEOUT_MS = 30_000;
-const NPM_INSTALL_TIMEOUT_MS = 120_000;
+// Timeout constants (increased for slow systems)
+const GIT_COMMAND_TIMEOUT_MS = 300_000;
+const NPM_INSTALL_TIMEOUT_MS = 600_000;
 const DEFAULT_SHELL_TIMEOUT_MS = 60_000;
 
 export interface BranchInfo {
@@ -204,8 +205,9 @@ export async function switchBranch(targetBranch: string): Promise<SwitchResult> 
     logger.debug('BRANCH', 'Checking out branch', { branch: targetBranch });
     try {
       execGit(['checkout', targetBranch]);
-    } catch {
+    } catch (error) {
       // Branch might not exist locally, try tracking remote
+      logger.debug('BRANCH', 'Branch not local, tracking remote', { branch: targetBranch, error: error instanceof Error ? error.message : String(error) });
       execGit(['checkout', '-b', targetBranch, `origin/${targetBranch}`]);
     }
 
@@ -239,8 +241,9 @@ export async function switchBranch(targetBranch: string): Promise<SwitchResult> 
       if (info.branch && isValidBranchName(info.branch)) {
         execGit(['checkout', info.branch]);
       }
-    } catch {
-      // Recovery failed, user needs manual intervention
+    } catch (recoveryError) {
+      // [POSSIBLY RELEVANT]: Recovery checkout failed, user needs manual intervention - already logging main error above
+      logger.error('BRANCH', 'Recovery checkout also failed', { originalBranch: info.branch }, recoveryError as Error);
     }
 
     return {

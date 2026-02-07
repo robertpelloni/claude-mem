@@ -20,6 +20,18 @@ export function useSettings() {
           CLAUDE_MEM_WORKER_PORT: data.CLAUDE_MEM_WORKER_PORT || DEFAULT_SETTINGS.CLAUDE_MEM_WORKER_PORT,
           CLAUDE_MEM_WORKER_HOST: data.CLAUDE_MEM_WORKER_HOST || DEFAULT_SETTINGS.CLAUDE_MEM_WORKER_HOST,
 
+          // AI Provider Configuration
+          CLAUDE_MEM_PROVIDER: data.CLAUDE_MEM_PROVIDER || DEFAULT_SETTINGS.CLAUDE_MEM_PROVIDER,
+          CLAUDE_MEM_GEMINI_API_KEY: data.CLAUDE_MEM_GEMINI_API_KEY || DEFAULT_SETTINGS.CLAUDE_MEM_GEMINI_API_KEY,
+          CLAUDE_MEM_GEMINI_MODEL: data.CLAUDE_MEM_GEMINI_MODEL || DEFAULT_SETTINGS.CLAUDE_MEM_GEMINI_MODEL,
+          CLAUDE_MEM_GEMINI_RATE_LIMITING_ENABLED: data.CLAUDE_MEM_GEMINI_RATE_LIMITING_ENABLED || DEFAULT_SETTINGS.CLAUDE_MEM_GEMINI_RATE_LIMITING_ENABLED,
+
+          // OpenRouter Configuration
+          CLAUDE_MEM_OPENROUTER_API_KEY: data.CLAUDE_MEM_OPENROUTER_API_KEY || DEFAULT_SETTINGS.CLAUDE_MEM_OPENROUTER_API_KEY,
+          CLAUDE_MEM_OPENROUTER_MODEL: data.CLAUDE_MEM_OPENROUTER_MODEL || DEFAULT_SETTINGS.CLAUDE_MEM_OPENROUTER_MODEL,
+          CLAUDE_MEM_OPENROUTER_SITE_URL: data.CLAUDE_MEM_OPENROUTER_SITE_URL || DEFAULT_SETTINGS.CLAUDE_MEM_OPENROUTER_SITE_URL,
+          CLAUDE_MEM_OPENROUTER_APP_NAME: data.CLAUDE_MEM_OPENROUTER_APP_NAME || DEFAULT_SETTINGS.CLAUDE_MEM_OPENROUTER_APP_NAME,
+
           // Token Economics Display
           CLAUDE_MEM_CONTEXT_SHOW_READ_TOKENS: data.CLAUDE_MEM_CONTEXT_SHOW_READ_TOKENS || DEFAULT_SETTINGS.CLAUDE_MEM_CONTEXT_SHOW_READ_TOKENS,
           CLAUDE_MEM_CONTEXT_SHOW_WORK_TOKENS: data.CLAUDE_MEM_CONTEXT_SHOW_WORK_TOKENS || DEFAULT_SETTINGS.CLAUDE_MEM_CONTEXT_SHOW_WORK_TOKENS,
@@ -49,27 +61,23 @@ export function useSettings() {
     setIsSaving(true);
     setSaveStatus('Saving...');
 
-    try {
-      const response = await fetch(API_ENDPOINTS.SETTINGS, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newSettings)
-      });
+    const response = await fetch(API_ENDPOINTS.SETTINGS, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newSettings)
+    });
 
-      const result = await response.json();
+    const result = await response.json();
 
-      if (result.success) {
-        setSettings(newSettings);
-        setSaveStatus('✓ Saved');
-        setTimeout(() => setSaveStatus(''), TIMING.SAVE_STATUS_DISPLAY_DURATION_MS);
-      } else {
-        setSaveStatus(`✗ Error: ${result.error}`);
-      }
-    } catch (error) {
-      setSaveStatus(`✗ Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    } finally {
-      setIsSaving(false);
+    if (result.success) {
+      setSettings(newSettings);
+      setSaveStatus('✓ Saved');
+      setTimeout(() => setSaveStatus(''), TIMING.SAVE_STATUS_DISPLAY_DURATION_MS);
+    } else {
+      setSaveStatus(`✗ Error: ${result.error}`);
     }
+
+    setIsSaving(false);
   };
 
   return { settings, saveSettings, isSaving, saveStatus };

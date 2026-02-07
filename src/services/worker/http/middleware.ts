@@ -24,13 +24,29 @@ export function createMiddleware(
   // JSON parsing with 50mb limit
   middlewares.push(express.json({ limit: '50mb' }));
 
-  // CORS
-  middlewares.push(cors());
+  // CORS - restrict to localhost origins only
+  middlewares.push(cors({
+    origin: (origin, callback) => {
+      // Allow: requests without Origin header (hooks, curl, CLI tools)
+      // Allow: localhost and 127.0.0.1 origins
+      if (!origin ||
+          origin.startsWith('http://localhost:') ||
+          origin.startsWith('http://127.0.0.1:')) {
+        callback(null, true);
+      } else {
+        callback(new Error('CORS not allowed'));
+      }
+    },
+    credentials: false
+  }));
 
   // HTTP request/response logging
   middlewares.push((req: Request, res: Response, next: NextFunction) => {
-    // Skip logging for static assets and health checks
-    if (req.path.startsWith('/health') || req.path === '/' || req.path.includes('.')) {
+    // Skip logging for static assets, health checks, and polling endpoints
+    const staticExtensions = ['.html', '.js', '.css', '.svg', '.png', '.jpg', '.jpeg', '.webp', '.woff', '.woff2', '.ttf', '.eot'];
+    const isStaticAsset = staticExtensions.some(ext => req.path.endsWith(ext));
+    const isPollingEndpoint = req.path === '/api/logs'; // Skip logs endpoint to avoid noise from auto-refresh
+    if (req.path.startsWith('/health') || req.path === '/' || isStaticAsset || isPollingEndpoint) {
       return next();
     }
 

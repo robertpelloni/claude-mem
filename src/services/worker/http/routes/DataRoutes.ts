@@ -2,12 +2,13 @@
  * Data Routes
  *
  * Handles data retrieval operations: observations, summaries, prompts, stats, processing status.
- * All endpoints use direct database access via domain services.
+ * All endpoints use direct database access via service layer.
  */
 
 import express, { Request, Response } from 'express';
 import path from 'path';
 import { readFileSync, statSync, existsSync } from 'fs';
+import { logger } from '../../../../utils/logger.js';
 import { homedir } from 'os';
 import { getPackageRoot } from '../../../../shared/paths.js';
 import { getWorkerPort } from '../../../../shared/worker-utils.js';
@@ -50,6 +51,12 @@ export class DataRoutes extends BaseRouteHandler {
     // Processing status endpoints
     app.get('/api/processing-status', this.handleGetProcessingStatus.bind(this));
     app.post('/api/processing', this.handleSetProcessing.bind(this));
+
+    // Pending queue management endpoints
+    app.get('/api/pending-queue', this.handleGetPendingQueue.bind(this));
+    app.post('/api/pending-queue/process', this.handleProcessPendingQueue.bind(this));
+    app.delete('/api/pending-queue/failed', this.handleClearFailedQueue.bind(this));
+    app.delete('/api/pending-queue/all', this.handleClearAllQueue.bind(this));
 
     // Import endpoint
     app.post('/api/import', this.handleImport.bind(this));
@@ -153,18 +160,18 @@ export class DataRoutes extends BaseRouteHandler {
   /**
    * Get SDK sessions by SDK session IDs
    * POST /api/sdk-sessions/batch
-   * Body: { sdkSessionIds: string[] }
+   * Body: { memorySessionIds: string[] }
    */
   private handleGetSdkSessionsByIds = this.wrapHandler((req: Request, res: Response): void => {
-    const { sdkSessionIds } = req.body;
+    const { memorySessionIds } = req.body;
 
-    if (!Array.isArray(sdkSessionIds)) {
-      this.badRequest(res, 'sdkSessionIds must be an array');
+    if (!Array.isArray(memorySessionIds)) {
+      this.badRequest(res, 'memorySessionIds must be an array');
       return;
     }
 
     const store = this.dbManager.getSessionStore();
-    const sessions = store.getSdkSessionsBySessionIds(sdkSessionIds);
+    const sessions = store.getSdkSessionsBySessionIds(memorySessionIds);
     res.json(sessions);
   });
 
@@ -276,7 +283,7 @@ export class DataRoutes extends BaseRouteHandler {
     const queueDepth = this.sessionManager.getTotalQueueDepth();
     const activeSessions = this.sessionManager.getActiveSessionCount();
 
-    res.json({ status: 'ok', isProcessing });
+    res.json({ status: 'ok', isProcessing, queueDepth, activeSessions });
   });
 
   /**
@@ -362,6 +369,98 @@ export class DataRoutes extends BaseRouteHandler {
     res.json({
       success: true,
       stats
+    });
+  });
+
+  /**
+   * Get pending queue contents
+   * GET /api/pending-queue
+   * Returns all pending, processing, and failed messages with optional recently processed
+   */
+  private handleGetPendingQueue = this.wrapHandler((req: Request, res: Response): void => {
+    const { PendingMessageStore } = require('../../../sqlite/PendingMessageStore.js');
+    const pendingStore = new PendingMessageStore(this.dbManager.getSessionStore().db, 3);
+
+    // Get queue contents (pending, processing, failed)
+    const queueMessages = pendingStore.getQueueMessages();
+
+    // Get recently processed (last 30 min, up to 20)
+    const recentlyProcessed = pendingStore.getRecentlyProcessed(20, 30);
+
+    // Get stuck message count (processing > 5 min)
+    const stuckCount = pendingStore.getStuckCount(5 * 60 * 1000);
+
+    // Get sessions with pending work
+    const sessionsWithPending = pendingStore.getSessionsWithPendingMessages();
+
+    res.json({
+      queue: {
+        messages: queueMessages,
+        totalPending: queueMessages.filter((m: { status: string }) => m.status === 'pending').length,
+        totalProcessing: queueMessages.filter((m: { status: string }) => m.status === 'processing').length,
+        totalFailed: queueMessages.filter((m: { status: string }) => m.status === 'failed').length,
+        stuckCount
+      },
+      recentlyProcessed,
+      sessionsWithPendingWork: sessionsWithPending
+    });
+  });
+
+  /**
+   * Process pending queue
+   * POST /api/pending-queue/process
+   * Body: { sessionLimit?: number } - defaults to 10
+   * Starts SDK agents for sessions with pending messages
+   */
+  private handleProcessPendingQueue = this.wrapHandler(async (req: Request, res: Response): Promise<void> => {
+    const sessionLimit = Math.min(
+      Math.max(parseInt(req.body.sessionLimit, 10) || 10, 1),
+      100 // Max 100 sessions at once
+    );
+
+    const result = await this.workerService.processPendingQueues(sessionLimit);
+
+    res.json({
+      success: true,
+      ...result
+    });
+  });
+
+  /**
+   * Clear all failed messages from the queue
+   * DELETE /api/pending-queue/failed
+   * Returns the number of messages cleared
+   */
+  private handleClearFailedQueue = this.wrapHandler((req: Request, res: Response): void => {
+    const { PendingMessageStore } = require('../../../sqlite/PendingMessageStore.js');
+    const pendingStore = new PendingMessageStore(this.dbManager.getSessionStore().db, 3);
+
+    const clearedCount = pendingStore.clearFailed();
+
+    logger.info('QUEUE', 'Cleared failed queue messages', { clearedCount });
+
+    res.json({
+      success: true,
+      clearedCount
+    });
+  });
+
+  /**
+   * Clear all messages from the queue (pending, processing, and failed)
+   * DELETE /api/pending-queue/all
+   * Returns the number of messages cleared
+   */
+  private handleClearAllQueue = this.wrapHandler((req: Request, res: Response): void => {
+    const { PendingMessageStore } = require('../../../sqlite/PendingMessageStore.js');
+    const pendingStore = new PendingMessageStore(this.dbManager.getSessionStore().db, 3);
+
+    const clearedCount = pendingStore.clearAll();
+
+    logger.warn('QUEUE', 'Cleared ALL queue messages (pending, processing, failed)', { clearedCount });
+
+    res.json({
+      success: true,
+      clearedCount
     });
   });
 }

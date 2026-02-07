@@ -1,8 +1,4 @@
-/* To @claude: be vigilant about only leaving evergreen context in this file, claude-mem handles working context separately. */
-
 # Claude-Mem: AI Development Instructions
-
-## What This Project Is
 
 Claude-mem is a Claude Code plugin providing persistent memory across sessions. It captures tool usage, compresses observations using the Claude Agent SDK, and injects relevant context into future sessions.
 
@@ -14,7 +10,7 @@ Claude-mem is a Claude Code plugin providing persistent memory across sessions. 
 
 **Worker Service** (`src/services/worker-service.ts`) - Express API on port 37777, Bun-managed, handles AI processing asynchronously
 
-**Database** (`src/services/sqlite/`) - SQLite3 at `~/.claude-mem/claude-mem.db` with FTS5 full-text search
+**Database** (`src/services/sqlite/`) - SQLite3 at `~/.claude-mem/claude-mem.db`
 
 **Search Skill** (`plugin/skills/mem-search/SKILL.md`) - HTTP API for searching past work, auto-invoked when users ask about history
 
@@ -23,39 +19,19 @@ Claude-mem is a Claude Code plugin providing persistent memory across sessions. 
 **Viewer UI** (`src/ui/viewer/`) - React interface at http://localhost:37777, built to `plugin/ui/viewer.html`
 
 ## Privacy Tags
-
-**Dual-Tag System** for meta-observation control:
 - `<private>content</private>` - User-level privacy control (manual, prevents storage)
-- `<claude-mem-context>content</claude-mem-context>` - System-level tag (auto-injected observations, prevents recursive storage)
 
 **Implementation**: Tag stripping happens at hook layer (edge processing) before data reaches worker/database. See `src/utils/tag-stripping.ts` for shared utilities.
 
 ## Build Commands
 
 ```bash
-npm run build-and-sync        # Build, sync to marketplace, restart worker (most common)
-npm run build                 # Compile TypeScript only
-npm run sync-marketplace      # Copy to ~/.claude/plugins only
-npm run worker:restart        # Restart worker service only
-npm run worker:status         # Check worker status
-npm run worker:logs           # View worker logs
+npm run build-and-sync        # Build, sync to marketplace, restart worker
 ```
-
-**Viewer UI**: http://localhost:37777
 
 ## Configuration
 
 Settings are managed in `~/.claude-mem/settings.json`. The file is auto-created with defaults on first run.
-
-**Core Settings:**
-- `CLAUDE_MEM_MODEL` - Model for observations/summaries (default: claude-sonnet-4-5)
-- `CLAUDE_MEM_CONTEXT_OBSERVATIONS` - Observations injected at SessionStart
-- `CLAUDE_MEM_WORKER_PORT` - Worker service port (default: 37777)
-- `CLAUDE_MEM_WORKER_HOST` - Worker bind address (default: 127.0.0.1, use 0.0.0.0 for remote access)
-
-**System Configuration:**
-- `CLAUDE_MEM_DATA_DIR` - Data directory location (default: ~/.claude-mem)
-- `CLAUDE_MEM_LOG_LEVEL` - Log verbosity: DEBUG, INFO, WARN, ERROR, SILENT (default: INFO)
 
 ## File Locations
 
@@ -65,11 +41,23 @@ Settings are managed in `~/.claude-mem/settings.json`. The file is auto-created 
 - **Database**: `~/.claude-mem/claude-mem.db`
 - **Chroma**: `~/.claude-mem/chroma/`
 
+## Exit Code Strategy
+
+Claude-mem hooks use specific exit codes per Claude Code's hook contract:
+
+- **Exit 0**: Success or graceful shutdown (Windows Terminal closes tabs)
+- **Exit 1**: Non-blocking error (stderr shown to user, continues)
+- **Exit 2**: Blocking error (stderr fed to Claude for processing)
+
+**Philosophy**: Worker/hook errors exit with code 0 to prevent Windows Terminal tab accumulation. The wrapper/plugin layer handles restart logic. ERROR-level logging is maintained for diagnostics.
+
+See `private/context/claude-code/exit-codes.md` for full hook behavior matrix.
+
 ## Requirements
 
 - **Bun** (all platforms - auto-installed if missing)
 - **uv** (all platforms - auto-installed if missing, provides Python for Chroma)
-- Node.js (build tools only)
+- Node.js
 
 ## Documentation
 
@@ -97,6 +85,6 @@ Claude-mem is designed with a clean separation between open-source core function
 
 This architecture preserves the open-source nature of the project while enabling sustainable development through optional paid features.
 
-# Important
+## Important
 
 No need to edit the changelog ever, it's generated automatically.

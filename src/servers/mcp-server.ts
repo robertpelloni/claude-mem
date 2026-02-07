@@ -6,15 +6,27 @@
  * Maintains MCP protocol handling and tool schemas
  */
 
+// Version injected at build time by esbuild define
+declare const __DEFAULT_PACKAGE_VERSION__: string;
+const packageVersion = typeof __DEFAULT_PACKAGE_VERSION__ !== 'undefined' ? __DEFAULT_PACKAGE_VERSION__ : '0.0.0-dev';
+
+// Import logger first
+import { logger } from '../utils/logger.js';
+
+// CRITICAL: Redirect console to stderr BEFORE other imports
+// MCP uses stdio transport where stdout is reserved for JSON-RPC protocol messages.
+// Any logs to stdout break the protocol (Claude Desktop parses "[2025..." as JSON array).
+const _originalLog = console['log'];
+console['log'] = (...args: any[]) => {
+  logger.error('CONSOLE', 'Intercepted console output (MCP protocol protection)', undefined, { args });
+};
+
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
-import { z } from 'zod';
-import { zodToJsonSchema } from 'zod-to-json-schema';
-import { logger } from '../utils/logger.js';
 import { getWorkerPort, getWorkerHost } from '../shared/worker-utils.js';
 
 /**
@@ -29,10 +41,7 @@ const WORKER_BASE_URL = `http://${WORKER_HOST}:${WORKER_PORT}`;
  */
 const TOOL_ENDPOINT_MAP: Record<string, string> = {
   'search': '/api/search',
-  'timeline': '/api/timeline',
-  'get_recent_context': '/api/context/recent',
-  'get_context_timeline': '/api/context/timeline',
-  'help': '/api/instructions'
+  'timeline': '/api/timeline'
 };
 
 /**
@@ -68,53 +77,12 @@ async function callWorkerAPI(
 
     // Worker returns { content: [...] } format directly
     return data;
-  } catch (error: any) {
-    logger.error('SYSTEM', '← Worker API error', undefined, { endpoint, error: error.message });
+  } catch (error) {
+    logger.error('SYSTEM', '← Worker API error', { endpoint }, error as Error);
     return {
       content: [{
         type: 'text' as const,
-        text: `Error calling Worker API: ${error.message}`
-      }],
-      isError: true
-    };
-  }
-}
-
-/**
- * Call Worker HTTP API with path parameter (GET)
- */
-async function callWorkerAPIWithPath(
-  endpoint: string,
-  id: number
-): Promise<{ content: Array<{ type: 'text'; text: string }>; isError?: boolean }> {
-  logger.debug('HTTP', 'Worker API request (path)', undefined, { endpoint, id });
-
-  try {
-    const url = `${WORKER_BASE_URL}${endpoint}/${id}`;
-    const response = await fetch(url);
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Worker API error (${response.status}): ${errorText}`);
-    }
-
-    const data = await response.json();
-
-    logger.debug('HTTP', 'Worker API success (path)', undefined, { endpoint, id });
-
-    // Wrap raw data in MCP format
-    return {
-      content: [{
-        type: 'text' as const,
-        text: JSON.stringify(data, null, 2)
-      }]
-    };
-  } catch (error: any) {
-    logger.error('HTTP', 'Worker API error (path)', undefined, { endpoint, id, error: error.message });
-    return {
-      content: [{
-        type: 'text' as const,
-        text: `Error calling Worker API: ${error.message}`
+        text: `Error calling Worker API: ${error instanceof Error ? error.message : String(error)}`
       }],
       isError: true
     };
@@ -156,12 +124,12 @@ async function callWorkerAPIPost(
         text: JSON.stringify(data, null, 2)
       }]
     };
-  } catch (error: any) {
-    logger.error('HTTP', 'Worker API error (POST)', undefined, { endpoint, error: error.message });
+  } catch (error) {
+    logger.error('HTTP', 'Worker API error (POST)', { endpoint }, error as Error);
     return {
       content: [{
         type: 'text' as const,
-        text: `Error calling Worker API: ${error.message}`
+        text: `Error calling Worker API: ${error instanceof Error ? error.message : String(error)}`
       }],
       isError: true
     };
@@ -176,31 +144,59 @@ async function verifyWorkerConnection(): Promise<boolean> {
     const response = await fetch(`${WORKER_BASE_URL}/api/health`);
     return response.ok;
   } catch (error) {
+    // Expected during worker startup or if worker is down
+    logger.debug('SYSTEM', 'Worker health check failed', {}, error as Error);
     return false;
   }
 }
 
 /**
  * Tool definitions with HTTP-based handlers
- * Descriptions removed - use progressive_description tool for parameter documentation
+ * Minimal descriptions - use help() tool with operation parameter for detailed docs
  */
 const tools = [
   {
+    name: '__IMPORTANT',
+    description: `3-LAYER WORKFLOW (ALWAYS FOLLOW):
+1. search(query) → Get index with IDs (~50-100 tokens/result)
+2. timeline(anchor=ID) → Get context around interesting results
+3. get_observations([IDs]) → Fetch full details ONLY for filtered IDs
+NEVER fetch full details without filtering first. 10x token savings.`,
+    inputSchema: {
+      type: 'object',
+      properties: {}
+    },
+    handler: async () => ({
+      content: [{
+        type: 'text' as const,
+        text: `# Memory Search Workflow
+
+**3-Layer Pattern (ALWAYS follow this):**
+
+1. **Search** - Get index of results with IDs
+   \`search(query="...", limit=20, project="...")\`
+   Returns: Table with IDs, titles, dates (~50-100 tokens/result)
+
+2. **Timeline** - Get context around interesting results
+   \`timeline(anchor=<ID>, depth_before=3, depth_after=3)\`
+   Returns: Chronological context showing what was happening
+
+3. **Fetch** - Get full details ONLY for relevant IDs
+   \`get_observations(ids=[...])\`  # ALWAYS batch for 2+ items
+   Returns: Complete details (~500-1000 tokens/result)
+
+**Why:** 10x token savings. Never fetch full details without filtering first.`
+      }]
+    })
+  },
+  {
     name: 'search',
-    description: 'Search memory',
-    inputSchema: z.object({
-      query: z.string().optional(),
-      type: z.enum(['observations', 'sessions', 'prompts']).optional(),
-      obs_type: z.string().optional(),
-      concepts: z.string().optional(),
-      files: z.string().optional(),
-      project: z.string().optional(),
-      dateStart: z.union([z.string(), z.number()]).optional(),
-      dateEnd: z.union([z.string(), z.number()]).optional(),
-      limit: z.number().min(1).max(100).default(20),
-      offset: z.number().min(0).default(0),
-      orderBy: z.enum(['relevance', 'date_desc', 'date_asc']).default('date_desc')
-    }),
+    description: 'Step 1: Search memory. Returns index with IDs. Params: query, limit, project, type, obs_type, dateStart, dateEnd, offset, orderBy',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+      additionalProperties: true
+    },
     handler: async (args: any) => {
       const endpoint = TOOL_ENDPOINT_MAP['search'];
       return await callWorkerAPI(endpoint, args);
@@ -208,108 +204,59 @@ const tools = [
   },
   {
     name: 'timeline',
-    description: 'Timeline context',
-    inputSchema: z.object({
-      query: z.string().optional(),
-      anchor: z.number().optional(),
-      depth_before: z.number().min(0).max(100).default(10),
-      depth_after: z.number().min(0).max(100).default(10),
-      type: z.string().optional(),
-      concepts: z.string().optional(),
-      files: z.string().optional(),
-      project: z.string().optional()
-    }),
+    description: 'Step 2: Get context around results. Params: anchor (observation ID) OR query (finds anchor automatically), depth_before, depth_after, project',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+      additionalProperties: true
+    },
     handler: async (args: any) => {
       const endpoint = TOOL_ENDPOINT_MAP['timeline'];
       return await callWorkerAPI(endpoint, args);
     }
   },
   {
-    name: 'get_recent_context',
-    description: 'Recent context',
-    inputSchema: z.object({
-      limit: z.number().min(1).max(100).default(30),
-      type: z.string().optional(),
-      concepts: z.string().optional(),
-      files: z.string().optional(),
-      project: z.string().optional(),
-      dateStart: z.union([z.string(), z.number()]).optional(),
-      dateEnd: z.union([z.string(), z.number()]).optional()
-    }),
-    handler: async (args: any) => {
-      const endpoint = TOOL_ENDPOINT_MAP['get_recent_context'];
-      return await callWorkerAPI(endpoint, args);
-    }
-  },
-  {
-    name: 'get_context_timeline',
-    description: 'Timeline around ID',
-    inputSchema: z.object({
-      anchor: z.number(),
-      depth_before: z.number().min(0).max(100).default(10),
-      depth_after: z.number().min(0).max(100).default(10),
-      type: z.string().optional(),
-      concepts: z.string().optional(),
-      files: z.string().optional(),
-      project: z.string().optional()
-    }),
-    handler: async (args: any) => {
-      const endpoint = TOOL_ENDPOINT_MAP['get_context_timeline'];
-      return await callWorkerAPI(endpoint, args);
-    }
-  },
-  {
-    name: 'help',
-    description: 'Usage help',
-    inputSchema: z.object({
-      topic: z.enum(['workflow', 'search_params', 'examples', 'all']).default('all')
-    }),
-    handler: async (args: any) => {
-      const endpoint = TOOL_ENDPOINT_MAP['help'];
-      return await callWorkerAPI(endpoint, args);
-    }
-  },
-  {
-    name: 'get_observation',
-    description: 'Fetch by ID',
-    inputSchema: z.object({
-      id: z.number()
-    }),
-    handler: async (args: any) => {
-      return await callWorkerAPIWithPath('/api/observation', args.id);
-    }
-  },
-  {
     name: 'get_observations',
-    description: 'Batch fetch',
-    inputSchema: z.object({
-      ids: z.array(z.number()),
-      orderBy: z.enum(['date_desc', 'date_asc']).optional(),
-      limit: z.number().optional(),
-      project: z.string().optional()
-    }),
+    description: 'Step 3: Fetch full details for filtered IDs. Params: ids (array of observation IDs, required), orderBy, limit, project',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ids: {
+          type: 'array',
+          items: { type: 'number' },
+          description: 'Array of observation IDs to fetch (required)'
+        }
+      },
+      required: ['ids'],
+      additionalProperties: true
+    },
     handler: async (args: any) => {
       return await callWorkerAPIPost('/api/observations/batch', args);
     }
   },
   {
-    name: 'get_session',
-    description: 'Session by ID',
-    inputSchema: z.object({
-      id: z.number()
-    }),
+    name: 'save_memory',
+    description: 'Save a manual memory/observation for semantic search. Use this to remember important information.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        text: {
+          type: 'string',
+          description: 'Content to remember (required)'
+        },
+        title: {
+          type: 'string',
+          description: 'Short title (auto-generated from text if omitted)'
+        },
+        project: {
+          type: 'string',
+          description: 'Project name (uses "claude-mem" if omitted)'
+        }
+      },
+      required: ['text']
+    },
     handler: async (args: any) => {
-      return await callWorkerAPIWithPath('/api/session', args.id);
-    }
-  },
-  {
-    name: 'get_prompt',
-    description: 'Prompt by ID',
-    inputSchema: z.object({
-      id: z.number()
-    }),
-    handler: async (args: any) => {
-      return await callWorkerAPIWithPath('/api/prompt', args.id);
+      return await callWorkerAPIPost('/api/memory/save', args);
     }
   }
 ];
@@ -317,12 +264,12 @@ const tools = [
 // Create the MCP server
 const server = new Server(
   {
-    name: 'mem-search-server',
-    version: '1.0.0',
+    name: 'mcp-search-server',
+    version: packageVersion,
   },
   {
     capabilities: {
-      tools: {},
+      tools: {},  // Exposes tools capability (handled by ListToolsRequestSchema and CallToolRequestSchema)
     },
   }
 );
@@ -333,7 +280,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
     tools: tools.map(tool => ({
       name: tool.name,
       description: tool.description,
-      inputSchema: zodToJsonSchema(tool.inputSchema) as Record<string, unknown>
+      inputSchema: tool.inputSchema
     }))
   };
 });
@@ -348,11 +295,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
   try {
     return await tool.handler(request.params.arguments || {});
-  } catch (error: any) {
+  } catch (error) {
+    logger.error('SYSTEM', 'Tool execution failed', { tool: request.params.name }, error as Error);
     return {
       content: [{
         type: 'text' as const,
-        text: `Tool execution failed: ${error.message}`
+        text: `Tool execution failed: ${error instanceof Error ? error.message : String(error)}`
       }],
       isError: true
     };
@@ -380,9 +328,9 @@ async function main() {
   setTimeout(async () => {
     const workerAvailable = await verifyWorkerConnection();
     if (!workerAvailable) {
-      logger.warn('SYSTEM', 'Worker not available', undefined, { workerUrl: WORKER_BASE_URL });
-      logger.warn('SYSTEM', 'Tools will fail until Worker is started');
-      logger.warn('SYSTEM', 'Start Worker with: npm run worker:restart');
+      logger.error('SYSTEM', 'Worker not available', undefined, { workerUrl: WORKER_BASE_URL });
+      logger.error('SYSTEM', 'Tools will fail until Worker is started');
+      logger.error('SYSTEM', 'Start Worker with: npm run worker:restart');
     } else {
       logger.info('SYSTEM', 'Worker available', undefined, { workerUrl: WORKER_BASE_URL });
     }
@@ -391,5 +339,7 @@ async function main() {
 
 main().catch((error) => {
   logger.error('SYSTEM', 'Fatal error', undefined, error);
-  process.exit(1);
+  // Exit gracefully: Windows Terminal won't keep tab open on exit 0
+  // The wrapper/plugin will handle restart logic if needed
+  process.exit(0);
 });

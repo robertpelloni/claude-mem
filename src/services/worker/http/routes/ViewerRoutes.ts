@@ -8,6 +8,7 @@
 import express, { Request, Response } from 'express';
 import path from 'path';
 import { readFileSync, existsSync } from 'fs';
+import { logger } from '../../../../utils/logger.js';
 import { getPackageRoot } from '../../../../shared/paths.js';
 import { SSEBroadcaster } from '../../SSEBroadcaster.js';
 import { DatabaseManager } from '../../DatabaseManager.js';
@@ -24,6 +25,10 @@ export class ViewerRoutes extends BaseRouteHandler {
   }
 
   setupRoutes(app: express.Application): void {
+    // Serve static UI assets (JS, CSS, fonts, etc.)
+    const packageRoot = getPackageRoot();
+    app.use(express.static(path.join(packageRoot, 'ui')));
+
     app.get('/health', this.handleHealth.bind(this));
     app.get('/', this.handleViewerUI.bind(this));
     app.get('/stream', this.handleSSEStream.bind(this));

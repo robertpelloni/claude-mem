@@ -5,7 +5,7 @@ description: Search claude-mem's persistent cross-session memory database. Use w
 
 # Memory Search
 
-Search past work across all sessions. Simple workflow: search → get IDs → fetch details by ID.
+Search past work across all sessions. Simple workflow: search -> filter -> fetch.
 
 ## When to Use
 
@@ -15,143 +15,101 @@ Use when users ask about PREVIOUS sessions (not current conversation):
 - "How did we solve X last time?"
 - "What happened last week?"
 
-## The Workflow
+## 3-Layer Workflow (ALWAYS Follow)
 
-**ALWAYS follow this exact flow:**
+**NEVER fetch full details without filtering first. 10x token savings.**
 
-1. **Search** - Get an index of results with IDs
-2. **Timeline** - Get context around top results to understand what was happening
-3. **Review** - Look at titles/dates/context, pick relevant IDs
-4. **Fetch** - Get full details ONLY for those IDs
-
-### Step 1: Search Everything
+### Step 1: Search - Get Index with IDs
 
 Use the `search` MCP tool:
-
-**Required parameters:**
-
-- `query` - Search term
-- `limit: 20` - You can request large indexes as necessary
-- `project` - Project name (required)
-
-**Example:**
 
 ```
 search(query="authentication", limit=20, project="my-project")
 ```
 
-**Returns:**
+**Returns:** Table with IDs, timestamps, types, titles (~50-100 tokens/result)
 
 ```
-| ID | Time | T | Title | Read | Work |
-|----|------|---|-------|------|------|
-| #11131 | 3:48 PM | 🟣 | Added JWT authentication | ~75 | 🛠️ 450 |
-| #10942 | 2:15 PM | 🔴 | Fixed auth token expiration | ~50 | 🛠️ 200 |
+| ID | Time | T | Title | Read |
+|----|------|---|-------|------|
+| #11131 | 3:48 PM | 🟣 | Added JWT authentication | ~75 |
+| #10942 | 2:15 PM | 🔴 | Fixed auth token expiration | ~50 |
 ```
 
-### Step 2: Get Timeline Context
+**Parameters:**
 
-You MUST understand "what was happening" around a result.
+- `query` (string) - Search term
+- `limit` (number) - Max results, default 20, max 100
+- `project` (string) - Project name filter
+- `type` (string, optional) - "observations", "sessions", or "prompts"
+- `obs_type` (string, optional) - Comma-separated: bugfix, feature, decision, discovery, change
+- `dateStart` (string, optional) - YYYY-MM-DD or epoch ms
+- `dateEnd` (string, optional) - YYYY-MM-DD or epoch ms
+- `offset` (number, optional) - Skip N results
+- `orderBy` (string, optional) - "date_desc" (default), "date_asc", "relevance"
+
+### Step 2: Timeline - Get Context Around Interesting Results
 
 Use the `timeline` MCP tool:
-
-**Example with observation ID:**
 
 ```
 timeline(anchor=11131, depth_before=3, depth_after=3, project="my-project")
 ```
 
-**Example with query (finds anchor automatically):**
+Or find anchor automatically from query:
 
 ```
 timeline(query="authentication", depth_before=3, depth_after=3, project="my-project")
 ```
 
-**Returns exactly `depth_before + 1 + depth_after` items** - observations, sessions, and prompts interleaved chronologically around the anchor.
+**Returns:** `depth_before + 1 + depth_after` items in chronological order with observations, sessions, and prompts interleaved around the anchor.
 
-**When to use:**
+**Parameters:**
 
-- User asks "what was happening when..."
-- Need to understand sequence of events
-- Want broader context around a specific observation
+- `anchor` (number, optional) - Observation ID to center around
+- `query` (string, optional) - Find anchor automatically if anchor not provided
+- `depth_before` (number, optional) - Items before anchor, default 5, max 20
+- `depth_after` (number, optional) - Items after anchor, default 5, max 20
+- `project` (string) - Project name filter
 
-### Step 3: Pick IDs
+### Step 3: Fetch - Get Full Details ONLY for Filtered IDs
 
-Review the index results (and timeline if used). Identify which IDs are actually relevant. Discard the rest.
+Review titles from Step 1 and context from Step 2. Pick relevant IDs. Discard the rest.
 
-### Step 4: Fetch by ID
-
-For each relevant ID, fetch full details using MCP tools:
-
-**Fetch multiple observations (ALWAYS use for 2+ IDs):**
+Use the `get_observations` MCP tool:
 
 ```
-get_observations(ids=[11131, 10942, 10855])
+get_observations(ids=[11131, 10942])
 ```
 
-**With ordering and limit:**
+**ALWAYS use `get_observations` for 2+ observations - single request vs N requests.**
+
+**Parameters:**
+
+- `ids` (array of numbers, required) - Observation IDs to fetch
+- `orderBy` (string, optional) - "date_desc" (default), "date_asc"
+- `limit` (number, optional) - Max observations to return
+- `project` (string, optional) - Project name filter
+
+**Returns:** Complete observation objects with title, subtitle, narrative, facts, concepts, files (~500-1000 tokens each)
+
+## Saving Memories
+
+Use the `save_memory` MCP tool to store manual observations:
 
 ```
-get_observations(
-  ids=[11131, 10942, 10855],
-  orderBy="date_desc",
-  limit=10,
-  project="my-project"
-)
+save_memory(text="Important discovery about the auth system", title="Auth Architecture", project="my-project")
 ```
 
-**Fetch single observation (only when fetching exactly 1):**
+**Parameters:**
 
-```
-get_observation(id=11131)
-```
-
-**Fetch session:**
-
-```
-get_session(id=2005)  # Just the number from S2005
-```
-
-**Fetch prompt:**
-
-```
-get_prompt(id=5421)
-```
-
-**ID formats:**
-
-- Observations: Just the number (11131)
-- Sessions: Just the number (2005) from "S2005"
-- Prompts: Just the number (5421)
-
-**Batch optimization:**
-
-- **ALWAYS use `get_observations` for 2+ observations**
-- 10-100x more efficient than individual fetches
-- Single HTTP request vs N requests
-- Returns all results in one response
-- Supports ordering and filtering
-
-## Search Parameters
-
-**Basic:**
-
-- `query` - What to search for (required)
-- `limit` - How many results (default 20)
-- `project` - Filter by project name (required)
-
-**Filters (optional):**
-
-- `type` - Filter to "observations", "sessions", or "prompts"
-- `dateStart` - Start date (YYYY-MM-DD or epoch timestamp)
-- `dateEnd` - End date (YYYY-MM-DD or epoch timestamp)
-- `obs_type` - Filter observations by type (comma-separated): bugfix, feature, decision, discovery, change
+- `text` (string, required) - Content to remember
+- `title` (string, optional) - Short title, auto-generated if omitted
+- `project` (string, optional) - Project name, defaults to "claude-mem"
 
 ## Examples
 
 **Find recent bug fixes:**
-
-Use the `search` MCP tool with filters:
 
 ```
 search(query="bug", type="observations", obs_type="bugfix", limit=20, project="my-project")
@@ -159,56 +117,25 @@ search(query="bug", type="observations", obs_type="bugfix", limit=20, project="m
 
 **Find what happened last week:**
 
-Use date filters:
-
 ```
 search(type="observations", dateStart="2025-11-11", limit=20, project="my-project")
 ```
 
-**Search everything:**
-
-Simple query search:
+**Understand context around a discovery:**
 
 ```
-search(query="database migration", limit=20, project="my-project")
+timeline(anchor=11131, depth_before=5, depth_after=5, project="my-project")
 ```
 
-**Get detailed instructions:**
-
-Use the `help` tool to load full instructions on-demand:
+**Batch fetch details:**
 
 ```
-help(topic="workflow")  # Get 4-step workflow
-help(topic="search_params")  # Get parameters reference
-help(topic="examples")  # Get usage examples
-help(topic="all")  # Get complete guide
+get_observations(ids=[11131, 10942, 10855], orderBy="date_desc")
 ```
 
 ## Why This Workflow?
 
-**Token efficiency:**
-
-- **Search results:** ~50-100 tokens per result (table index)
+- **Search index:** ~50-100 tokens per result
 - **Full observation:** ~500-1000 tokens each
-- **10x savings** - only fetch full when you know it's relevant
-
-**Batch fetching:**
-
-- **Individual fetches:** 10 HTTP requests, ~5-10s latency
-- **Batch fetch:** 1 HTTP request, ~0.5-1s latency
-- **10-100x faster** for multi-observation queries
-
-**Clarity:**
-
-- See everything first (table index)
-- Get timeline context around interesting results
-- Pick what matters based on context
-- Fetch details only for what you need (batch when possible)
-
----
-
-**Remember:**
-
-- ALWAYS get timeline context to understand what was happening
-- ALWAYS use `get_observations` when fetching 2+ observations
-- The workflow is optimized: search → timeline → batch fetch = 10-100x faster
+- **Batch fetch:** 1 HTTP request vs N individual requests
+- **10x token savings** by filtering before fetching

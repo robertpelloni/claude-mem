@@ -3,7 +3,9 @@
  * Provides readable, traceable logging with correlation IDs and data flow tracking
  */
 
-import { SettingsDefaultsManager } from '../shared/SettingsDefaultsManager.js';
+import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'fs';
+import { join } from 'path';
+import { homedir } from 'os';
 
 export enum LogLevel {
   DEBUG = 0,
@@ -13,11 +15,11 @@ export enum LogLevel {
   SILENT = 4
 }
 
-export type Component = 'HOOK' | 'WORKER' | 'SDK' | 'PARSER' | 'DB' | 'SYSTEM' | 'HTTP' | 'SESSION' | 'CHROMA';
+export type Component = 'HOOK' | 'WORKER' | 'SDK' | 'PARSER' | 'DB' | 'SYSTEM' | 'HTTP' | 'SESSION' | 'CHROMA' | 'FOLDER_INDEX' | 'CLAUDE_MD';
 
 interface LogContext {
   sessionId?: number;
-  sdkSessionId?: string;
+  memorySessionId?: string;
   correlationId?: string;
   [key: string]: any;
 }
@@ -33,14 +35,21 @@ export interface LogEntry {
 
 type LogListener = (entry: LogEntry) => void;
 
+// NOTE: This default must match DEFAULT_DATA_DIR in src/shared/SettingsDefaultsManager.ts
+// Inlined here to avoid circular dependency with SettingsDefaultsManager
+const DEFAULT_DATA_DIR = join(homedir(), '.claude-mem');
+
 class Logger {
   private level: LogLevel | null = null;
   private useColor: boolean;
   private listeners: LogListener[] = [];
+  private logFilePath: string | null = null;
+  private logFileInitialized: boolean = false;
 
   constructor() {
     // Disable colors when output is not a TTY (e.g., PM2 logs)
     this.useColor = process.stdout.isTTY ?? false;
+    // Don't initialize log file in constructor - do it lazily to avoid circular dependency
   }
 
   /**
@@ -58,12 +67,53 @@ class Logger {
   }
 
   /**
-   * Lazy-load log level from settings (breaks circular dependency with SettingsDefaultsManager)
+   * Initialize log file path and ensure directory exists (lazy initialization)
+   */
+  private ensureLogFileInitialized(): void {
+    if (this.logFileInitialized) return;
+    this.logFileInitialized = true;
+
+    try {
+      // Use default data directory to avoid circular dependency with SettingsDefaultsManager
+      // The log directory is always based on the default, not user settings
+      const logsDir = join(DEFAULT_DATA_DIR, 'logs');
+
+      // Ensure logs directory exists
+      if (!existsSync(logsDir)) {
+        mkdirSync(logsDir, { recursive: true });
+      }
+
+      // Create log file path with date
+      const date = new Date().toISOString().split('T')[0];
+      this.logFilePath = join(logsDir, `claude-mem-${date}.log`);
+    } catch (error) {
+      // If log file initialization fails, just log to console
+      console.error('[LOGGER] Failed to initialize log file:', error);
+      this.logFilePath = null;
+    }
+  }
+
+  /**
+   * Lazy-load log level from settings file
+   * Uses direct file reading to avoid circular dependency with SettingsDefaultsManager
    */
   private getLevel(): LogLevel {
     if (this.level === null) {
-      const envLevel = SettingsDefaultsManager.get('CLAUDE_MEM_LOG_LEVEL').toUpperCase();
-      this.level = LogLevel[envLevel as keyof typeof LogLevel] ?? LogLevel.INFO;
+      try {
+        // Read settings file directly to avoid circular dependency
+        const settingsPath = join(DEFAULT_DATA_DIR, 'settings.json');
+        if (existsSync(settingsPath)) {
+          const settingsData = readFileSync(settingsPath, 'utf-8');
+          const settings = JSON.parse(settingsData);
+          const envLevel = (settings.CLAUDE_MEM_LOG_LEVEL || 'INFO').toUpperCase();
+          this.level = LogLevel[envLevel as keyof typeof LogLevel] ?? LogLevel.INFO;
+        } else {
+          this.level = LogLevel.INFO;
+        }
+      } catch (error) {
+        // Fallback to INFO if settings can't be loaded
+        this.level = LogLevel.INFO;
+      }
     }
     return this.level;
   }
@@ -124,37 +174,72 @@ class Logger {
   formatTool(toolName: string, toolInput?: any): string {
     if (!toolInput) return toolName;
 
-    try {
-      const input = typeof toolInput === 'string' ? JSON.parse(toolInput) : toolInput;
-
-      // Special formatting for common tools
-      if (toolName === 'Bash' && input.command) {
-        const cmd = input.command.length > 50
-          ? input.command.substring(0, 50) + '...'
-          : input.command;
-        return `${toolName}(${cmd})`;
+    let input = toolInput;
+    if (typeof toolInput === 'string') {
+      try {
+        input = JSON.parse(toolInput);
+      } catch {
+        // Input is a raw string (e.g., Bash command), use as-is
+        input = toolInput;
       }
-
-      if (toolName === 'Read' && input.file_path) {
-        const path = input.file_path.split('/').pop() || input.file_path;
-        return `${toolName}(${path})`;
-      }
-
-      if (toolName === 'Edit' && input.file_path) {
-        const path = input.file_path.split('/').pop() || input.file_path;
-        return `${toolName}(${path})`;
-      }
-
-      if (toolName === 'Write' && input.file_path) {
-        const path = input.file_path.split('/').pop() || input.file_path;
-        return `${toolName}(${path})`;
-      }
-
-      // Default: just show tool name
-      return toolName;
-    } catch {
-      return toolName;
     }
+
+    // Bash: show full command
+    if (toolName === 'Bash' && input.command) {
+      return `${toolName}(${input.command})`;
+    }
+
+    // File operations: show full path
+    if (input.file_path) {
+      return `${toolName}(${input.file_path})`;
+    }
+
+    // NotebookEdit: show full notebook path
+    if (input.notebook_path) {
+      return `${toolName}(${input.notebook_path})`;
+    }
+
+    // Glob: show full pattern
+    if (toolName === 'Glob' && input.pattern) {
+      return `${toolName}(${input.pattern})`;
+    }
+
+    // Grep: show full pattern
+    if (toolName === 'Grep' && input.pattern) {
+      return `${toolName}(${input.pattern})`;
+    }
+
+    // WebFetch/WebSearch: show full URL or query
+    if (input.url) {
+      return `${toolName}(${input.url})`;
+    }
+
+    if (input.query) {
+      return `${toolName}(${input.query})`;
+    }
+
+    // Task: show subagent_type or full description
+    if (toolName === 'Task') {
+      if (input.subagent_type) {
+        return `${toolName}(${input.subagent_type})`;
+      }
+      if (input.description) {
+        return `${toolName}(${input.description})`;
+      }
+    }
+
+    // Skill: show skill name
+    if (toolName === 'Skill' && input.skill) {
+      return `${toolName}(${input.skill})`;
+    }
+
+    // LSP: show operation type
+    if (toolName === 'LSP' && input.operation) {
+      return `${toolName}(${input.operation})`;
+    }
+
+    // Default: just show tool name
+    return toolName;
   }
 
   /**
@@ -183,6 +268,9 @@ class Logger {
   ): void {
     if (level < this.getLevel()) return;
 
+    // Lazy initialize log file on first use
+    this.ensureLogFileInitialized();
+
     const timestamp = this.formatTimestamp(new Date());
     const levelStr = LogLevel[level].padEnd(5);
     const componentStr = component.padEnd(6);
@@ -198,7 +286,12 @@ class Logger {
     // Build data part
     let dataStr = '';
     if (data !== undefined && data !== null) {
-      if (this.getLevel() === LogLevel.DEBUG && typeof data === 'object') {
+      // Handle Error objects specially - they don't JSON.stringify properly
+      if (data instanceof Error) {
+        dataStr = this.getLevel() === LogLevel.DEBUG
+          ? `\n${data.message}\n${data.stack}`
+          : ` ${data.message}`;
+      } else if (this.getLevel() === LogLevel.DEBUG && typeof data === 'object') {
         // In debug mode, show full JSON for objects
         dataStr = '\n' + JSON.stringify(data, null, 2);
       } else {
@@ -209,7 +302,7 @@ class Logger {
     // Build additional context
     let contextStr = '';
     if (context) {
-      const { sessionId, sdkSessionId, correlationId, ...rest } = context;
+      const { sessionId, memorySessionId, correlationId, ...rest } = context;
       if (Object.keys(rest).length > 0) {
         const pairs = Object.entries(rest).map(([k, v]) => `${k}=${v}`);
         contextStr = ` {${pairs.join(', ')}}`;
@@ -218,11 +311,18 @@ class Logger {
 
     const logLine = `[${timestamp}] [${levelStr}] [${componentStr}] ${correlationStr}${message}${contextStr}${dataStr}`;
 
-    // Output to appropriate stream
-    if (level === LogLevel.ERROR) {
-      console.error(logLine);
+    // Output to log file ONLY (worker runs in background, console is useless)
+    if (this.logFilePath) {
+      try {
+        appendFileSync(this.logFilePath, logLine + '\n', 'utf8');
+      } catch (error) {
+        // Logger can't log its own failures - use stderr as last resort
+        // This is expected during disk full / permission errors
+        process.stderr.write(`[LOGGER] Failed to write to log file: ${error}\n`);
+      }
     } else {
-      console.log(logLine);
+      // If no log file available, write to stderr as fallback
+      process.stderr.write(logLine + '\n');
     }
 
     // Notify listeners

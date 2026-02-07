@@ -13,6 +13,8 @@ import { DatabaseManager } from './DatabaseManager.js';
 import { logger } from '../../utils/logger.js';
 import type { ActiveSession, PendingMessage, PendingMessageWithId, ObservationData } from '../worker-types.js';
 import { PendingMessageStore } from '../sqlite/PendingMessageStore.js';
+import { SessionQueueProcessor } from '../queue/SessionQueueProcessor.js';
+import { getProcessBySession, ensureProcessExit } from './ProcessRegistry.js';
 
 export class SessionManager {
   private dbManager: DatabaseManager;
@@ -47,9 +49,21 @@ export class SessionManager {
    * Initialize a new session or return existing one
    */
   initializeSession(sessionDbId: number, currentUserPrompt?: string, promptNumber?: number): ActiveSession {
+    logger.debug('SESSION', 'initializeSession called', {
+      sessionDbId,
+      promptNumber,
+      has_currentUserPrompt: !!currentUserPrompt
+    });
+
     // Check if already active
     let session = this.sessions.get(sessionDbId);
     if (session) {
+      logger.debug('SESSION', 'Returning cached session', {
+        sessionDbId,
+        contentSessionId: session.contentSessionId,
+        lastPromptNumber: session.lastPromptNumber
+      });
+
       // Refresh project from database in case it was updated by new-hook
       // This fixes the bug where sessions created with empty project get updated
       // in the database but the in-memory session still has the stale empty value
@@ -86,6 +100,21 @@ export class SessionManager {
     // Fetch from database
     const dbSession = this.dbManager.getSessionById(sessionDbId);
 
+    logger.debug('SESSION', 'Fetched session from database', {
+      sessionDbId,
+      content_session_id: dbSession.content_session_id,
+      memory_session_id: dbSession.memory_session_id
+    });
+
+    // Log warning if we're discarding a stale memory_session_id (Issue #817)
+    if (dbSession.memory_session_id) {
+      logger.warn('SESSION', `Discarding stale memory_session_id from previous worker instance (Issue #817)`, {
+        sessionDbId,
+        staleMemorySessionId: dbSession.memory_session_id,
+        reason: 'SDK context lost on worker restart - will capture new ID'
+      });
+    }
+
     // Use currentUserPrompt if provided, otherwise fall back to database (first prompt)
     const userPrompt = currentUserPrompt || dbSession.user_prompt;
 
@@ -104,21 +133,38 @@ export class SessionManager {
     }
 
     // Create active session
+    // CRITICAL: Do NOT load memorySessionId from database here (Issue #817)
+    // When creating a new in-memory session, any database memory_session_id is STALE
+    // because the SDK context was lost when the worker restarted. The SDK agent will
+    // capture a new memorySessionId on the first response and persist it.
+    // Loading stale memory_session_id causes "No conversation found" crashes on resume.
     session = {
       sessionDbId,
-      claudeSessionId: dbSession.claude_session_id,
-      sdkSessionId: null,
+      contentSessionId: dbSession.content_session_id,
+      memorySessionId: null,  // Always start fresh - SDK will capture new ID
       project: dbSession.project,
       userPrompt,
       pendingMessages: [],
       abortController: new AbortController(),
       generatorPromise: null,
-      lastPromptNumber: promptNumber || this.dbManager.getSessionStore().getPromptCounter(sessionDbId),
+      lastPromptNumber: promptNumber || this.dbManager.getSessionStore().getPromptNumberFromUserPrompts(dbSession.content_session_id),
       startTime: Date.now(),
       cumulativeInputTokens: 0,
       cumulativeOutputTokens: 0,
-      pendingProcessingIds: new Set()
+      earliestPendingTimestamp: null,
+      conversationHistory: [],  // Initialize empty - will be populated by agents
+      currentProvider: null,  // Will be set when generator starts
+      consecutiveRestarts: 0,  // Track consecutive restart attempts to prevent infinite loops
+      processingMessageIds: []  // CLAIM-CONFIRM: Track message IDs for confirmProcessed()
     };
+
+    logger.debug('SESSION', 'Creating new session object (memorySessionId cleared to prevent stale resume)', {
+      sessionDbId,
+      contentSessionId: dbSession.content_session_id,
+      dbMemorySessionId: dbSession.memory_session_id || '(none in DB)',
+      memorySessionId: '(cleared - will capture fresh from SDK)',
+      lastPromptNumber: promptNumber || this.dbManager.getSessionStore().getPromptNumberFromUserPrompts(dbSession.content_session_id)
+    });
 
     this.sessions.set(sessionDbId, session);
 
@@ -129,7 +175,7 @@ export class SessionManager {
     logger.info('SESSION', 'Session initialized', {
       sessionId: sessionDbId,
       project: session.project,
-      claudeSessionId: session.claudeSessionId,
+      contentSessionId: session.contentSessionId,
       queueDepth: 0,
       hasGenerator: false
     });
@@ -158,8 +204,6 @@ export class SessionManager {
       session = this.initializeSession(sessionDbId);
     }
 
-    const beforeDepth = session.pendingMessages.length;
-
     // CRITICAL: Persist to database FIRST
     const message: PendingMessage = {
       type: 'observation',
@@ -171,11 +215,11 @@ export class SessionManager {
     };
 
     try {
-      const messageId = this.getPendingStore().enqueue(sessionDbId, session.claudeSessionId, message);
-      logger.debug('SESSION', `Observation persisted to DB`, {
-        sessionId: sessionDbId,
-        messageId,
-        tool: data.tool_name
+      const messageId = this.getPendingStore().enqueue(sessionDbId, session.contentSessionId, message);
+      const queueDepth = this.getPendingStore().getPendingCount(sessionDbId);
+      const toolSummary = logger.formatTool(data.tool_name, data.tool_input);
+      logger.info('QUEUE', `ENQUEUED | sessionDbId=${sessionDbId} | messageId=${messageId} | type=observation | tool=${toolSummary} | depth=${queueDepth}`, {
+        sessionId: sessionDbId
       });
     } catch (error) {
       logger.error('SESSION', 'Failed to persist observation to DB', {
@@ -185,23 +229,9 @@ export class SessionManager {
       throw error; // Don't continue if we can't persist
     }
 
-    // Add to in-memory queue (for backward compatibility with existing iterator)
-    session.pendingMessages.push(message);
-
-    const afterDepth = session.pendingMessages.length;
-
     // Notify generator immediately (zero latency)
     const emitter = this.sessionQueues.get(sessionDbId);
     emitter?.emit('message');
-
-    // Format tool name for logging
-    const toolSummary = logger.formatTool(data.tool_name, data.tool_input);
-
-    logger.info('SESSION', `Observation queued (${beforeDepth}→${afterDepth})`, {
-      sessionId: sessionDbId,
-      tool: toolSummary,
-      hasGenerator: !!session.generatorPromise
-    });
   }
 
   /**
@@ -211,27 +241,24 @@ export class SessionManager {
    * CRITICAL: Persists to database FIRST before adding to in-memory queue.
    * This ensures summarize requests survive worker crashes.
    */
-  queueSummarize(sessionDbId: number, lastUserMessage: string, lastAssistantMessage?: string): void {
+  queueSummarize(sessionDbId: number, lastAssistantMessage?: string): void {
     // Auto-initialize from database if needed (handles worker restarts)
     let session = this.sessions.get(sessionDbId);
     if (!session) {
       session = this.initializeSession(sessionDbId);
     }
 
-    const beforeDepth = session.pendingMessages.length;
-
     // CRITICAL: Persist to database FIRST
     const message: PendingMessage = {
       type: 'summarize',
-      last_user_message: lastUserMessage,
       last_assistant_message: lastAssistantMessage
     };
 
     try {
-      const messageId = this.getPendingStore().enqueue(sessionDbId, session.claudeSessionId, message);
-      logger.debug('SESSION', `Summarize persisted to DB`, {
-        sessionId: sessionDbId,
-        messageId
+      const messageId = this.getPendingStore().enqueue(sessionDbId, session.contentSessionId, message);
+      const queueDepth = this.getPendingStore().getPendingCount(sessionDbId);
+      logger.info('QUEUE', `ENQUEUED | sessionDbId=${sessionDbId} | messageId=${messageId} | type=summarize | depth=${queueDepth}`, {
+        sessionId: sessionDbId
       });
     } catch (error) {
       logger.error('SESSION', 'Failed to persist summarize to DB', {
@@ -240,22 +267,13 @@ export class SessionManager {
       throw error; // Don't continue if we can't persist
     }
 
-    // Add to in-memory queue (for backward compatibility with existing iterator)
-    session.pendingMessages.push(message);
-
-    const afterDepth = session.pendingMessages.length;
-
     const emitter = this.sessionQueues.get(sessionDbId);
     emitter?.emit('message');
-
-    logger.info('SESSION', `Summarize queued (${beforeDepth}→${afterDepth})`, {
-      sessionId: sessionDbId,
-      hasGenerator: !!session.generatorPromise
-    });
   }
 
   /**
    * Delete a session (abort SDK agent and cleanup)
+   * Verifies subprocess exit to prevent zombie process accumulation (Issue #737)
    */
   async deleteSession(sessionDbId: number): Promise<void> {
     const session = this.sessions.get(sessionDbId);
@@ -265,15 +283,27 @@ export class SessionManager {
 
     const sessionDuration = Date.now() - session.startTime;
 
-    // Abort the SDK agent
+    // 1. Abort the SDK agent
     session.abortController.abort();
 
-    // Wait for generator to finish
+    // 2. Wait for generator to finish
     if (session.generatorPromise) {
-      await session.generatorPromise.catch(() => {});
+      await session.generatorPromise.catch(() => {
+        logger.debug('SYSTEM', 'Generator already failed, cleaning up', { sessionId: session.sessionDbId });
+      });
     }
 
-    // Cleanup
+    // 3. Verify subprocess exit with 5s timeout (Issue #737 fix)
+    const tracked = getProcessBySession(sessionDbId);
+    if (tracked && !tracked.process.killed && tracked.process.exitCode === null) {
+      logger.debug('SESSION', `Waiting for subprocess PID ${tracked.pid} to exit`, {
+        sessionId: sessionDbId,
+        pid: tracked.pid
+      });
+      await ensureProcessExit(tracked, 5000);
+    }
+
+    // 4. Cleanup
     this.sessions.delete(sessionDbId);
     this.sessionQueues.delete(sessionDbId);
 
@@ -284,6 +314,28 @@ export class SessionManager {
     });
 
     // Trigger callback to broadcast status update (spinner may need to stop)
+    if (this.onSessionDeletedCallback) {
+      this.onSessionDeletedCallback();
+    }
+  }
+
+  /**
+   * Remove session from in-memory maps and notify without awaiting generator.
+   * Used when SDK resume fails and we give up (no fallback): avoids deadlock
+   * from deleteSession() awaiting the same generator promise we're inside.
+   */
+  removeSessionImmediate(sessionDbId: number): void {
+    const session = this.sessions.get(sessionDbId);
+    if (!session) return;
+
+    this.sessions.delete(sessionDbId);
+    this.sessionQueues.delete(sessionDbId);
+
+    logger.info('SESSION', 'Session removed (orphaned after SDK termination)', {
+      sessionId: sessionDbId,
+      project: session.project
+    });
+
     if (this.onSessionDeletedCallback) {
       this.onSessionDeletedCallback();
     }
@@ -301,9 +353,7 @@ export class SessionManager {
    * Check if any session has pending messages (for spinner tracking)
    */
   hasPendingMessages(): boolean {
-    return Array.from(this.sessions.values()).some(
-      session => session.pendingMessages.length > 0
-    );
+    return this.getPendingStore().hasAnyPendingWork();
   }
 
   /**
@@ -318,8 +368,9 @@ export class SessionManager {
    */
   getTotalQueueDepth(): number {
     let total = 0;
+    // We can iterate over active sessions to get their pending count
     for (const session of this.sessions.values()) {
-      total += session.pendingMessages.length;
+      total += this.getPendingStore().getPendingCount(session.sessionDbId);
     }
     return total;
   }
@@ -329,16 +380,8 @@ export class SessionManager {
    * Counts both pending messages and items actively being processed by SDK agents
    */
   getTotalActiveWork(): number {
-    let total = 0;
-    for (const session of this.sessions.values()) {
-      // Count queued messages
-      total += session.pendingMessages.length;
-      // Count currently processing item (1 per active generator)
-      if (session.generatorPromise !== null) {
-        total += 1;
-      }
-    }
-    return total;
+    // getPendingCount includes 'processing' status, so this IS the total active work
+    return this.getTotalQueueDepth();
   }
 
   /**
@@ -346,17 +389,8 @@ export class SessionManager {
    * Used for activity indicator to prevent spinner from stopping while SDK is processing
    */
   isAnySessionProcessing(): boolean {
-    for (const session of this.sessions.values()) {
-      // Has queued messages waiting to be processed
-      if (session.pendingMessages.length > 0) {
-        return true;
-      }
-      // Has active SDK generator running (processing dequeued messages)
-      if (session.generatorPromise !== null) {
-        return true;
-      }
-    }
-    return false;
+    // hasAnyPendingWork checks for 'pending' OR 'processing'
+    return this.getPendingStore().hasAnyPendingWork();
   }
 
   /**
@@ -379,93 +413,28 @@ export class SessionManager {
       throw new Error(`No emitter for session ${sessionDbId}`);
     }
 
-    // Linger timeout: how long to wait for new messages before exiting
-    // This keeps the agent alive between messages, reducing "No active agent" windows
-    const LINGER_TIMEOUT_MS = 5000; // 5 seconds
+    const processor = new SessionQueueProcessor(this.getPendingStore(), emitter);
 
-    while (!session.abortController.signal.aborted) {
-      // Check for pending messages in persistent store
-      const persistentMessage = this.getPendingStore().peekPending(sessionDbId);
-
-      if (!persistentMessage) {
-        // Wait for new messages with timeout
-        const gotMessage = await new Promise<boolean>(resolve => {
-          let resolved = false;
-
-          const messageHandler = () => {
-            if (!resolved) {
-              resolved = true;
-              clearTimeout(timeoutId);
-              resolve(true);
-            }
-          };
-
-          const timeoutHandler = () => {
-            if (!resolved) {
-              resolved = true;
-              emitter.off('message', messageHandler);
-              resolve(false);
-            }
-          };
-
-          const timeoutId = setTimeout(timeoutHandler, LINGER_TIMEOUT_MS);
-
-          emitter.once('message', messageHandler);
-
-          // Also listen for abort
-          session.abortController.signal.addEventListener('abort', () => {
-            if (!resolved) {
-              resolved = true;
-              clearTimeout(timeoutId);
-              emitter.off('message', messageHandler);
-              resolve(false);
-            }
-          }, { once: true });
-        });
-
-        // Re-check for messages after waking up (handles race condition)
-        const recheckMessage = this.getPendingStore().peekPending(sessionDbId);
-        if (recheckMessage) {
-          // Got a message, continue processing
-          continue;
-        }
-
-        if (!gotMessage) {
-          // Timeout or abort - exit the loop
-          logger.info('SESSION', `Generator exiting after linger timeout`, { sessionId: sessionDbId });
-          return;
-        }
-
-        continue;
+    // Use the robust iterator - messages are deleted on claim (no tracking needed)
+    // CRITICAL: Pass onIdleTimeout callback that triggers abort to kill the subprocess
+    // Without this, the iterator returns but the Claude subprocess stays alive as a zombie
+    for await (const message of processor.createIterator({
+      sessionDbId,
+      signal: session.abortController.signal,
+      onIdleTimeout: () => {
+        logger.info('SESSION', 'Triggering abort due to idle timeout to kill subprocess', { sessionDbId });
+        session.abortController.abort();
       }
-
-      // Mark as processing BEFORE yielding (status: pending -> processing)
-      this.getPendingStore().markProcessing(persistentMessage.id);
-
-      // Track this message ID for completion marking
-      session.pendingProcessingIds.add(persistentMessage.id);
-
-      // Convert to PendingMessageWithId and yield
-      // Include original timestamp for accurate observation timestamps (survives stuck processing)
-      const message: PendingMessageWithId = {
-        _persistentId: persistentMessage.id,
-        _originalTimestamp: persistentMessage.created_at_epoch,
-        ...this.getPendingStore().toPendingMessage(persistentMessage)
-      };
-
-      // Also add to in-memory queue for backward compatibility (status tracking)
-      session.pendingMessages.push(message);
+    })) {
+      // Track earliest timestamp for accurate observation timestamps
+      // This ensures backlog messages get their original timestamps, not current time
+      if (session.earliestPendingTimestamp === null) {
+        session.earliestPendingTimestamp = message._originalTimestamp;
+      } else {
+        session.earliestPendingTimestamp = Math.min(session.earliestPendingTimestamp, message._originalTimestamp);
+      }
 
       yield message;
-
-      // Remove from in-memory queue after yielding
-      session.pendingMessages.shift();
-
-      // If we just yielded a summary, that's the end of this batch - stop the iterator
-      if (message.type === 'summarize') {
-        logger.info('SESSION', `Summary yielded - ending generator`, { sessionId: sessionDbId });
-        return;
-      }
     }
   }
 

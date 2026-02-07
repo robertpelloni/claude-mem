@@ -3,7 +3,9 @@
  * Extracted from mcp-server.ts to follow worker service organization pattern
  */
 
-import { ObservationSearchResult, SessionSummarySearchResult, UserPromptSearchResult } from '../sqlite/types.js';
+import type { ObservationSearchResult, SessionSummarySearchResult, UserPromptSearchResult } from '../sqlite/types.js';
+import { ModeManager } from '../domain/ModeManager.js';
+import { logger } from '../../utils/logger.js';
 
 /**
  * Timeline item for unified chronological display
@@ -210,15 +212,7 @@ export class TimelineService {
    * Get icon for observation type
    */
   private getTypeIcon(type: string): string {
-    switch (type) {
-      case 'bugfix': return '🔴';
-      case 'feature': return '🟣';
-      case 'refactor': return '🔄';
-      case 'change': return '✅';
-      case 'discovery': return '🔵';
-      case 'decision': return '🧠';
-      default: return '•';
-    }
+    return ModeManager.getInstance().getTypeIcon(type);
   }
 
   /**
