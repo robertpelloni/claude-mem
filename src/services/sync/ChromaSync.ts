@@ -840,6 +840,60 @@ export class ChromaSync {
   }
 
   /**
+   * Get Chroma sync status
+   */
+  async getStatus(): Promise<{
+    connected: boolean;
+    collectionName: string;
+    vectorDbDir: string;
+    itemCount?: number;
+    error?: string;
+  }> {
+    try {
+      if (!this.connected || !this.client) {
+        return {
+          connected: false,
+          collectionName: this.collectionName,
+          vectorDbDir: this.VECTOR_DB_DIR
+        };
+      }
+
+      // Try to get collection info to verify connection and get count
+      const result = await this.client.callTool({
+        name: 'chroma_get_collection_info',
+        arguments: {
+          collection_name: this.collectionName
+        }
+      });
+
+      // Parse result to get count if available
+      let itemCount = 0;
+      try {
+        const data = JSON.parse(result.content[0].text);
+        if (data && typeof data.count === 'number') {
+          itemCount = data.count;
+        }
+      } catch (e) {
+        // Ignore parse error
+      }
+
+      return {
+        connected: true,
+        collectionName: this.collectionName,
+        vectorDbDir: this.VECTOR_DB_DIR,
+        itemCount
+      };
+    } catch (error) {
+      return {
+        connected: false,
+        collectionName: this.collectionName,
+        vectorDbDir: this.VECTOR_DB_DIR,
+        error: error instanceof Error ? error.message : String(error)
+      };
+    }
+  }
+
+  /**
    * Close the Chroma client connection and cleanup subprocess
    */
   async close(): Promise<void> {

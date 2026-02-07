@@ -141,6 +141,13 @@ export class SettingsRoutes extends BaseRouteHandler {
       settings = JSON.parse(settingsData);
     }
 
+    // Capture old values for restart check
+    const oldDataDir = settings.CLAUDE_MEM_DATA_DIR;
+    const oldPort = settings.CLAUDE_MEM_WORKER_PORT;
+    const oldHost = settings.CLAUDE_MEM_WORKER_HOST;
+    const oldLogLevel = settings.CLAUDE_MEM_LOG_LEVEL;
+    const oldPythonVersion = settings.CLAUDE_MEM_PYTHON_VERSION;
+
     // Update all settings from request body
     const settingKeys = [
       'CLAUDE_MEM_MODEL',
@@ -181,8 +188,24 @@ export class SettingsRoutes extends BaseRouteHandler {
     // Clear port cache to force re-reading from updated settings
     clearPortCache();
 
-    logger.info('WORKER', 'Settings updated');
-    res.json({ success: true, message: 'Settings updated successfully' });
+    // Check if restart is needed
+    const restartNeeded =
+      (req.body.CLAUDE_MEM_DATA_DIR && req.body.CLAUDE_MEM_DATA_DIR !== oldDataDir) ||
+      (req.body.CLAUDE_MEM_WORKER_PORT && req.body.CLAUDE_MEM_WORKER_PORT !== oldPort) ||
+      (req.body.CLAUDE_MEM_WORKER_HOST && req.body.CLAUDE_MEM_WORKER_HOST !== oldHost) ||
+      (req.body.CLAUDE_MEM_LOG_LEVEL && req.body.CLAUDE_MEM_LOG_LEVEL !== oldLogLevel) ||
+      (req.body.CLAUDE_MEM_PYTHON_VERSION && req.body.CLAUDE_MEM_PYTHON_VERSION !== oldPythonVersion);
+
+    if (restartNeeded) {
+      logger.info('WORKER', 'Critical settings changed, restarting worker');
+      setTimeout(() => {
+        process.exit(0);
+      }, 1000);
+      res.json({ success: true, message: 'Settings updated, worker restarting...' });
+    } else {
+      logger.info('WORKER', 'Settings updated');
+      res.json({ success: true, message: 'Settings updated successfully' });
+    }
   });
 
   /**
