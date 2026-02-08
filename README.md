@@ -27,16 +27,6 @@
   </a>
 </p>
 
-<p align="center">
-  <a href="https://trendshift.io/repositories/15496" target="_blank">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/thedotmack/claude-mem/main/docs/public/trendshift-badge-dark.svg">
-      <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/thedotmack/claude-mem/main/docs/public/trendshift-badge.svg">
-      <img src="https://raw.githubusercontent.com/thedotmack/claude-mem/main/docs/public/trendshift-badge.svg" alt="thedotmack/claude-mem | Trendshift" width="250" height="55"/>
-    </picture>
-  </a>
-</p>
-
 <br>
 
 <p align="center">
@@ -79,60 +69,13 @@ Restart Claude Code. Context from previous sessions will automatically appear in
 
 - 🧠 **Persistent Memory** - Context survives across sessions
 - 📊 **Progressive Disclosure** - Layered memory retrieval with token cost visibility
-- 🔍 **Skill-Based Search** - Query your project history with mem-search skill
-- 🖥️ **Web Viewer UI** - Real-time memory stream, search, and system status at http://localhost:37777
-- 💻 **Claude Desktop Skill** - Search memory from Claude Desktop conversations
-- ♊ **Gemini CLI Extension** - Connect Google Gemini to your persistent memory via MCP
+- 🔍 **Skill-Based Search** - Query your project history with mem-search skill (~2,250 token savings)
+- 🖥️ **Web Viewer UI** - Real-time memory stream at http://localhost:37777
 - 🔒 **Privacy Control** - Use `<private>` tags to exclude sensitive content from storage
-- ⚙️ **Configuration Dashboard** - Full system control via UI including Endless Mode toggle
+- ⚙️ **Context Configuration** - Fine-grained control over what context gets injected
 - 🤖 **Automatic Operation** - No manual intervention required
-- 🔗 **Citations** - Reference past observations with IDs (access via http://localhost:37777/api/observation/{id} or view all in the web viewer at http://localhost:37777)
+- 🔗 **Citations** - Reference past decisions with `claude-mem://` URIs
 - 🧪 **Beta Channel** - Try experimental features like Endless Mode via version switching
-
----
-
-## 🚀 Endless Mode (Experimental)
-
-**NEW**: Experimental feature for indefinite sessions through real-time transcript compression.
-
-Endless Mode compresses tool outputs on-the-fly to enable longer session lengths without hitting context limits.
-
-**Quick Start:**
-```bash
-# Clone and checkout beta branch
-git clone https://github.com/thedotmack/claude-mem.git
-cd claude-mem
-git checkout feature/endless-mode-beta-release
-npm install && npm run build && npm run sync-marketplace
-
-# Enable in settings
-echo '{"env":{"CLAUDE_MEM_ENDLESS_MODE":true}}' > ~/.claude-mem/settings.json
-pm2 restart claude-mem-worker
-
-# Monitor savings
-npm run endless-mode:metrics
-
-# Check backup status
-npm run endless-mode:backup-info
-
-# Restore transcript if needed
-npm run endless-mode:restore <transcript-path>
-```
-
-**Features:**
-- ✅ Real-time transcript compression
-- ✅ Rolling backup of original tool outputs (configurable size limit)
-- ✅ Restore capability - disable Endless Mode and recover original transcripts
-- ✅ Graceful fallback on errors/timeouts
-- ✅ Real-time metrics tracking
-- ✅ Default OFF for safety
-
-**Documentation:**
-- 📖 **[Setup Guide](docs/endless-mode-setup-guide.md)** - Complete installation & configuration
-- ⚡ **[Quick Start](docs/endless-mode-quickstart.md)** - 5-minute setup
-- 📊 **[Technical Details](docs/endless-mode-status.md)** - Architecture & implementation
-
-**Status**: Experimental - Testing in progress, use with caution. Feedback welcome!
 
 ---
 
@@ -143,7 +86,7 @@ npm run endless-mode:restore <transcript-path>
 💻 **Local Preview**: Run Mintlify docs locally:
 
 ```bash
-cd docs/public
+cd docs
 npx mintlify dev
 ```
 
@@ -165,7 +108,7 @@ npx mintlify dev
 - **[Architecture Evolution](https://docs.claude-mem.ai/architecture-evolution)** - The journey from v3 to v5
 - **[Hooks Architecture](https://docs.claude-mem.ai/hooks-architecture)** - How Claude-Mem uses lifecycle hooks
 - **[Hooks Reference](https://docs.claude-mem.ai/architecture/hooks)** - 7 hook scripts explained
-- **[Worker Service](https://docs.claude-mem.ai/architecture/worker-service)** - HTTP API & Bun management
+- **[Worker Service](https://docs.claude-mem.ai/architecture/worker-service)** - HTTP API & Bun process management
 - **[Database](https://docs.claude-mem.ai/architecture/database)** - SQLite schema & FTS5 search
 - **[Search Architecture](https://docs.claude-mem.ai/architecture/search-architecture)** - Hybrid search with Chroma vector database
 
@@ -207,9 +150,8 @@ npx mintlify dev
 2. **Smart Install** - Cached dependency checker (pre-hook script, not a lifecycle hook)
 3. **Worker Service** - HTTP API on port 37777 with web viewer UI and 10 search endpoints, managed by Bun
 4. **SQLite Database** - Stores sessions, observations, summaries with FTS5 full-text search
-5. **mem-search Skill** - Natural language queries with progressive disclosure
+5. **mem-search Skill** - Natural language queries with progressive disclosure (~2,250 token savings vs MCP)
 6. **Chroma Vector Database** - Hybrid semantic + keyword search for intelligent context retrieval
-7. **Gemini CLI Extension** - MCP server for Gemini integration
 
 See [Architecture Overview](https://docs.claude-mem.ai/architecture/overview) for details.
 
@@ -222,6 +164,7 @@ Claude-Mem provides intelligent search through the mem-search skill that auto-in
 **How It Works:**
 - Just ask naturally: *"What did we do last session?"* or *"Did we fix this bug before?"*
 - Claude automatically invokes the mem-search skill to find relevant context
+- ~2,250 token savings per session start vs MCP approach
 
 **Available Search Operations:**
 
@@ -252,8 +195,6 @@ See [Search Tools Guide](https://docs.claude-mem.ai/usage/search-tools) for deta
 
 ## Beta Features & Endless Mode
 
-> **Note**: Endless Mode is an **experimental feature in the beta branch only**. It is not included in the stable release you install via the marketplace. You must manually switch to the beta channel to try it, and it comes with significant caveats (see below).
-
 Claude-Mem offers a **beta channel** with experimental features. Switch between stable and beta versions directly from the web viewer UI.
 
 ### How to Try Beta
@@ -278,29 +219,19 @@ Working Memory (Context):     Compressed observations (~500 tokens each)
 Archive Memory (Disk):        Full tool outputs preserved for recall
 ```
 
-**Projected Results** (based on theoretical modeling, not production measurements):
-- Significant token reduction in context window
-- More tool uses before context exhaustion
+**Expected Results**:
+- ~95% token reduction in context window
+- ~20x more tool uses before context exhaustion
 - Linear O(N) scaling instead of quadratic O(N²)
 - Full transcripts preserved for perfect recall
 
-**Important Caveats**:
-- **Not in stable release** - You must switch to beta branch to use this feature
-- **Still in development** - May have bugs, breaking changes, or incomplete functionality
-- **Slower than standard mode** - Blocking observation generation adds latency to each tool use
-- **Theoretical projections** - The efficiency claims above are based on simulations, not real-world production data
+**Caveats**: Adds latency (60-90s per tool for observation generation), still experimental.
 
 See [Beta Features Documentation](https://docs.claude-mem.ai/beta-features) for details.
 
 ---
 
 ## What's New
-
-**v7.4.0 - Enhanced UI Dashboard:**
-- **Configuration Dashboard**: Manage settings, integrations, and version switching directly from the Web Viewer
-- **Integrations Status**: Monitor Chroma Vector DB and OpenCode plugin connectivity
-- **Endless Mode Toggle**: Switch between Stable and Beta channels with one click
-- **Help & Shortcuts**: New in-app documentation and keyboard shortcuts
 
 **v6.4.9 - Context Configuration Settings:**
 - 11 new settings for fine-grained control over context injection
@@ -327,71 +258,12 @@ See [CHANGELOG.md](CHANGELOG.md) for complete version history.
 
 ---
 
-## ⚡ Endless Mode (Experimental)
-
-**Problem**: Claude Code's context window fills up after many tool uses, preventing indefinite sessions.
-
-**Solution**: Endless Mode compresses tool outputs in real-time by replacing full responses with AI-compressed observations directly in the transcript file.
-
-### How It Works
-
-1. **Tool executes** (Read, Bash, Grep, etc.)
-2. **save-hook blocks** waiting for observation creation (90s max)
-3. **SDK Agent compresses** output into structured observation
-4. **Transcript transforms** - full output replaced with compressed markdown
-5. **Claude resumes** with compressed context instead of full output
-
-### Enable Endless Mode
-
-Create or edit `~/.claude-mem/settings.json`:
-
-```json
-{
-  "model": "claude-sonnet-4-5",
-  "workerPort": 37777,
-  "enableMemoryStorage": true,
-  "enableContextInjection": true,
-  "contextDepth": 7,
-  "env": {
-    "CLAUDE_MEM_ENDLESS_MODE": true
-  }
-}
-```
-
-Restart Claude Code. Tool outputs will now be compressed automatically.
-
-### Features
-
-- ✅ **Automatic compression** - No manual intervention
-- ✅ **Graceful fallback** - Timeouts preserve full output
-- ✅ **Selective processing** - Skips meta-tools (SlashCommand, Skill, etc.)
-- ✅ **Atomic operations** - No transcript corruption
-- ✅ **Real-time metrics** - Compression stats in worker logs
-
-### Monitoring
-
-```bash
-# Check worker logs for compression stats
-pm2 logs claude-mem-worker
-
-# View Endless Mode diagnostics
-tail -f ~/.claude-mem/silent.log
-
-# Verify compressed observations in transcript
-cat ~/.claude/sessions/<session-id>/transcript.jsonl | grep "Compressed by Endless Mode"
-```
-
-**Status**: Implementation complete, ready for testing. See [Endless Mode Documentation](docs/endless-mode-status.md) for technical details.
-
----
-
 ## System Requirements
 
-- **Node.js**: 18.0.0 or higher
+- **Bun**: 1.0 or higher (auto-installed on first run if missing)
+- **Node.js**: 18.0.0 or higher (for build tools)
 - **Claude Code**: Latest version with plugin support
-- **Bun**: JavaScript runtime and process manager (auto-installed if missing)
-- **uv**: Python package manager for vector search (auto-installed if missing)
-- **SQLite 3**: For persistent storage (bundled)
+- **SQLite 3**: For persistent storage (via bun:sqlite - zero native dependencies)
 
 ---
 
@@ -434,15 +306,14 @@ cat ~/.claude/sessions/<session-id>/transcript.jsonl | grep "Compressed by Endle
 
 ## Configuration
 
-Settings are managed via the **Web Viewer Dashboard** (click Settings gear icon) or in `~/.claude-mem/settings.json`.
+Settings are managed in `~/.claude-mem/settings.json`. The file is auto-created with defaults on first run.
 
 **Available Settings:**
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `CLAUDE_MEM_MODEL` | `claude-sonnet-4-5` | AI model for observations |
+| `CLAUDE_MEM_MODEL` | `claude-haiku-4-5` | AI model for observations |
 | `CLAUDE_MEM_WORKER_PORT` | `37777` | Worker service port |
-| `CLAUDE_MEM_WORKER_HOST` | `127.0.0.1` | Worker bind address (use `0.0.0.0` for remote access) |
 | `CLAUDE_MEM_DATA_DIR` | `~/.claude-mem` | Data directory location |
 | `CLAUDE_MEM_LOG_LEVEL` | `INFO` | Log verbosity (DEBUG, INFO, WARN, ERROR, SILENT) |
 | `CLAUDE_MEM_PYTHON_VERSION` | `3.13` | Python version for chroma-mcp |
@@ -466,7 +337,7 @@ curl http://localhost:37777/api/settings
 
 ```json
 {
-  "CLAUDE_MEM_MODEL": "claude-sonnet-4-5",
+  "CLAUDE_MEM_MODEL": "claude-haiku-4-5",
   "CLAUDE_MEM_WORKER_PORT": "37777",
   "CLAUDE_MEM_CONTEXT_OBSERVATIONS": "50"
 }
@@ -513,41 +384,6 @@ If you're experiencing issues, describe the problem to Claude and the troublesho
 - Search not working → Check FTS5 tables exist
 
 See [Troubleshooting Guide](https://docs.claude-mem.ai/troubleshooting) for complete solutions.
-
-### Windows Known Issues
-
-**Console Window Visibility**: On Windows, a console window may briefly appear when the worker service starts. This is a cosmetic issue that we're working to resolve. We've prioritized stability by removing a workaround that was causing libuv crashes. The window does not affect functionality and will be addressed in a future release when the MCP SDK provides proper window hiding support.
-
----
-
-## Bug Reports
-
-**Automated Bug Report Generator** - Create comprehensive bug reports with one command:
-
-```bash
-# From the plugin directory
-cd ~/.claude/plugins/marketplaces/thedotmack
-npm run bug-report
-```
-
-The bug report tool will:
-- 🌎 **Auto-translate** - Write in ANY language, automatically translates to English
-- 📊 **Collect diagnostics** - Gathers versions, platform info, worker status, logs, and configuration
-- 📝 **Interactive prompts** - Guides you through describing the issue with multiline support
-- 🤖 **AI formatting** - Uses Claude Agent SDK to generate professional GitHub issues
-- 🔒 **Privacy-safe** - Auto-sanitizes paths, optional `--no-logs` flag
-- 🌐 **Auto-submit** - Opens GitHub with pre-filled title and body
-
-**Plugin Directory Paths:**
-- **macOS/Linux**: `~/.claude/plugins/marketplaces/thedotmack`
-- **Windows**: `%USERPROFILE%\.claude\plugins\marketplaces\thedotmack`
-
-**Options:**
-```bash
-npm run bug-report --no-logs    # Skip logs for privacy
-npm run bug-report --verbose    # Show all diagnostics
-npm run bug-report --help       # Show help
-```
 
 ---
 
