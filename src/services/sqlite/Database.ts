@@ -1,11 +1,6 @@
-import { Database } from 'bun:sqlite';
+import { Database } from 'better-sqlite3';
 import { DATA_DIR, DB_PATH, ensureDir } from '../../shared/paths.js';
-import { logger } from '../../utils/logger.js';
-import { MigrationRunner } from './migrations/runner.js';
-
-// SQLite configuration constants
-const SQLITE_MMAP_SIZE_BYTES = 256 * 1024 * 1024; // 256MB
-const SQLITE_CACHE_SIZE_PAGES = 10_000;
+import { silentDebug } from '../../utils/silent-debug.js';
 
 export interface Migration {
   version: number;
@@ -16,52 +11,7 @@ export interface Migration {
 let dbInstance: Database | null = null;
 
 /**
- * ClaudeMemDatabase - New entry point for the sqlite module
- *
- * Replaces SessionStore as the database coordinator.
- * Sets up bun:sqlite with optimized settings and runs all migrations.
- *
- * Usage:
- *   const db = new ClaudeMemDatabase();  // uses default DB_PATH
- *   const db = new ClaudeMemDatabase('/path/to/db.sqlite');
- *   const db = new ClaudeMemDatabase(':memory:');  // for tests
- */
-export class ClaudeMemDatabase {
-  public db: Database;
-
-  constructor(dbPath: string = DB_PATH) {
-    // Ensure data directory exists (skip for in-memory databases)
-    if (dbPath !== ':memory:') {
-      ensureDir(DATA_DIR);
-    }
-
-    // Create database connection
-    this.db = new Database(dbPath, { create: true, readwrite: true });
-
-    // Apply optimized SQLite settings
-    this.db.run('PRAGMA journal_mode = WAL');
-    this.db.run('PRAGMA synchronous = NORMAL');
-    this.db.run('PRAGMA foreign_keys = ON');
-    this.db.run('PRAGMA temp_store = memory');
-    this.db.run(`PRAGMA mmap_size = ${SQLITE_MMAP_SIZE_BYTES}`);
-    this.db.run(`PRAGMA cache_size = ${SQLITE_CACHE_SIZE_PAGES}`);
-
-    // Run all migrations
-    const migrationRunner = new MigrationRunner(this.db);
-    migrationRunner.runAllMigrations();
-  }
-
-  /**
-   * Close the database connection
-   */
-  close(): void {
-    this.db.close();
-  }
-}
-
-/**
  * SQLite Database singleton with migration support and optimized settings
- * @deprecated Use ClaudeMemDatabase instead for new code
  */
 export class DatabaseManager {
   private static instance: DatabaseManager;
@@ -102,8 +52,8 @@ export class DatabaseManager {
     this.db.run('PRAGMA synchronous = NORMAL');
     this.db.run('PRAGMA foreign_keys = ON');
     this.db.run('PRAGMA temp_store = memory');
-    this.db.run(`PRAGMA mmap_size = ${SQLITE_MMAP_SIZE_BYTES}`);
-    this.db.run(`PRAGMA cache_size = ${SQLITE_CACHE_SIZE_PAGES}`);
+    this.db.run('PRAGMA mmap_size = 268435456'); // 256MB
+    this.db.run('PRAGMA cache_size = 10000');
 
     // Initialize schema_versions table
     this.initializeSchemaVersions();
@@ -173,7 +123,7 @@ export class DatabaseManager {
 
     for (const migration of this.migrations) {
       if (migration.version > maxApplied) {
-        logger.info('DB', `Applying migration ${migration.version}`);
+        console.log(`Applying migration ${migration.version}...`);
 
         const transaction = this.db.transaction(() => {
           migration.up(this.db!);
@@ -183,7 +133,7 @@ export class DatabaseManager {
         });
 
         transaction();
-        logger.info('DB', `Migration ${migration.version} applied successfully`);
+        console.log(`Migration ${migration.version} applied successfully`);
       }
     }
   }
@@ -197,7 +147,7 @@ export class DatabaseManager {
     const query = this.db.query('SELECT MAX(version) as version FROM schema_versions');
     const result = query.get() as { version: number } | undefined;
 
-    return result?.version || 0;
+    return result?.version || silentDebug('Database.getCurrentVersion: version is null', {}, 0);
   }
 }
 
@@ -219,17 +169,4 @@ export async function initializeDatabase(): Promise<Database> {
   return await manager.initialize();
 }
 
-// Re-export bun:sqlite Database type
 export { Database };
-
-// Re-export MigrationRunner for external use
-export { MigrationRunner } from './migrations/runner.js';
-
-// Re-export all module functions for convenient imports
-export * from './Sessions.js';
-export * from './Observations.js';
-export * from './Summaries.js';
-export * from './Prompts.js';
-export * from './Timeline.js';
-export * from './Import.js';
-export * from './transactions.js';

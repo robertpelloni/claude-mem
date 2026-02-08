@@ -8,56 +8,36 @@ import type { Response } from 'express';
 // Active Session Types
 // ============================================================================
 
-/**
- * Provider-agnostic conversation message for shared history
- * Used to maintain context across Claude↔Gemini provider switches
- */
-export interface ConversationMessage {
-  role: 'user' | 'assistant';
-  content: string;
-}
-
 export interface ActiveSession {
   sessionDbId: number;
-  contentSessionId: string;      // User's Claude Code session being observed
-  memorySessionId: string | null; // Memory agent's session ID for resume
+  claudeSessionId: string;
+  sdkSessionId: string | null;
   project: string;
   userPrompt: string;
-  pendingMessages: PendingMessage[];  // Deprecated: now using persistent store, kept for compatibility
+  pendingMessages: PendingMessage[];
   abortController: AbortController;
   generatorPromise: Promise<void> | null;
   lastPromptNumber: number;
   startTime: number;
   cumulativeInputTokens: number;   // Track input tokens for discovery cost
   cumulativeOutputTokens: number;  // Track output tokens for discovery cost
-  earliestPendingTimestamp: number | null;  // Original timestamp of earliest pending message (for accurate observation timestamps)
-  conversationHistory: ConversationMessage[];  // Shared conversation history for provider switching
-  currentProvider: 'claude' | 'gemini' | 'openrouter' | null;  // Track which provider is currently running
-  consecutiveRestarts: number;  // Track consecutive restart attempts to prevent infinite loops
-  forceInit?: boolean;  // Force fresh SDK session (skip resume)
-  // CLAIM-CONFIRM FIX: Track IDs of messages currently being processed
-  // These IDs will be confirmed (deleted) after successful storage
-  processingMessageIds: number[];
+  currentToolUseId: string | null; // Endless Mode: currently processing tool_use_id
+  pendingObservationResolvers: Map<string, (observation: any) => void>; // Endless Mode: wait for observations
+  lastObservationToolUseId: string | null; // Rolling replacement: tool_use_id of most recent observation
+  toolUsesInCurrentCycle: string[]; // Rolling replacement: tool_use_ids since last observation
 }
 
 export interface PendingMessage {
-  type: 'observation' | 'summarize';
+  type: 'observation' | 'summarize' | 'continuation';
   tool_name?: string;
   tool_input?: any;
   tool_response?: any;
   prompt_number?: number;
   cwd?: string;
+  tool_use_id?: string; // Endless Mode: link observation to transcript tool use
+  last_user_message?: string;
   last_assistant_message?: string;
-}
-
-/**
- * PendingMessage with database ID for completion tracking.
- * The _persistentId is used to mark the message as processed after SDK success.
- * The _originalTimestamp is the epoch when the message was first queued (for accurate observation timestamps).
- */
-export interface PendingMessageWithId extends PendingMessage {
-  _persistentId: number;
-  _originalTimestamp: number;
+  user_prompt?: string; // For continuation messages
 }
 
 export interface ObservationData {
@@ -66,6 +46,7 @@ export interface ObservationData {
   tool_response: any;
   prompt_number: number;
   cwd?: string;
+  tool_use_id?: string; // Endless Mode: link observation to transcript tool use
 }
 
 // ============================================================================
@@ -113,7 +94,7 @@ export interface ViewerSettings {
 
 export interface Observation {
   id: number;
-  memory_session_id: string;  // Renamed from sdk_session_id
+  sdk_session_id: string;
   project: string;
   type: string;
   title: string;
@@ -131,7 +112,7 @@ export interface Observation {
 
 export interface Summary {
   id: number;
-  session_id: string; // content_session_id (from JOIN)
+  session_id: string; // claude_session_id (from JOIN)
   project: string;
   request: string | null;
   investigated: string | null;
@@ -145,7 +126,7 @@ export interface Summary {
 
 export interface UserPrompt {
   id: number;
-  content_session_id: string;  // Renamed from claude_session_id
+  claude_session_id: string;
   project: string; // From JOIN with sdk_sessions
   prompt_number: number;
   prompt_text: string;
@@ -155,10 +136,10 @@ export interface UserPrompt {
 
 export interface DBSession {
   id: number;
-  content_session_id: string;    // Renamed from claude_session_id
+  claude_session_id: string;
   project: string;
   user_prompt: string;
-  memory_session_id: string | null;  // Renamed from sdk_session_id
+  sdk_session_id: string | null;
   status: 'active' | 'completed' | 'failed';
   started_at: string;
   started_at_epoch: number;
@@ -180,6 +161,7 @@ export interface ParsedObservation {
   text: string;
   concepts: string[];
   files: string[];
+  tool_use_id?: string | null; // Endless Mode: link observation to transcript tool use
 }
 
 export interface ParsedSummary {

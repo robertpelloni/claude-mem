@@ -1,9 +1,4 @@
----
-title: "Architecture Evolution"
-description: "How claude-mem evolved from v3 to v5+"
----
-
-# Architecture Evolution
+# Architecture Evolution: The Journey from v3 to v5
 
 ## The Problem We Solved
 
@@ -51,15 +46,22 @@ const ThemeProvider = ({ children }) => {
 
 **Why It Matters**: Users working in different lighting conditions can now customize the viewer for comfort.
 
-### v5.1.1: Worker Startup Fix (November 2025) - Now Deprecated
+### v5.1.1: PM2 Windows Fix (November 2025)
 
-**Note**: This section describes a historical PM2-based approach that has been replaced with Bun in later versions.
+**The Problem**: PM2 startup failed on Windows with ENOENT error
 
-**The Problem**: Worker startup failed on Windows with ENOENT error when using PM2
+**Root Cause**:
+```typescript
+// ❌ Failed on Windows - PM2 not in PATH
+execSync('pm2 start ecosystem.config.cjs');
+```
 
-**Historical Solution**: Used full path to PM2 binary instead of relying on PATH
-
-**Current Approach**: The project now uses Bun for process management, which provides better cross-platform compatibility and eliminates these PATH-related issues.
+**The Fix**:
+```typescript
+// ✅ Use full path to PM2 binary
+const PM2_PATH = join(PLUGIN_ROOT, 'node_modules', '.bin', 'pm2');
+execSync(`"${PM2_PATH}" start "${ECOSYSTEM_CONFIG}"`);
+```
 
 **Impact**: Cross-platform compatibility restored, Windows users can now use claude-mem without issues.
 
@@ -156,7 +158,7 @@ if (currentVersion !== installedVersion) {
 **Cached Check Logic**:
 1. Does `node_modules` exist?
 2. Does `.install-version` match `package.json` version?
-3. Is `better-sqlite3` present? (Legacy: now uses bun:sqlite which requires no installation)
+3. Is `better-sqlite3` present?
 
 **Impact**:
 - SessionStart hook: 2-5 seconds → 10ms (99.5% faster)
@@ -201,7 +203,7 @@ async function ensureWorkerHealthy() {
 **Key Fixes**:
 - Fixed race conditions in observation queue processing
 - Improved error handling in SDK worker
-- Better cleanup of stale worker processes
+- Better cleanup of stale PM2 processes
 - Enhanced logging for debugging
 
 ### v5.0.0: Hybrid Search Architecture (October 2025)
@@ -245,164 +247,6 @@ search_observations({
 - Added Python dependency (optional)
 - Increased installation complexity
 - Better search relevance
-
----
-
-## MCP Architecture Simplification (December 2025)
-
-### The Problem: Complex MCP Implementation
-
-**Before:**
-```
-9+ MCP tools registered at session start:
-- search_observations
-- find_by_type
-- find_by_file
-- find_by_concept
-- get_recent_context
-- get_observation
-- get_session
-- get_prompt
-- help
-
-Problems:
-- Overlapping operations (search_observations vs find_by_type)
-- Complex parameter schemas (~2,500 tokens in tool definitions)
-- No built-in workflow guidance
-- High cognitive load for Claude (which tool to use?)
-- Code size: ~2,718 lines in mcp-server.ts
-```
-
-**The Insight:** Progressive disclosure should be built into tool design itself, not something Claude has to remember.
-
-### The Solution: 3-Layer Workflow
-
-**After:**
-```
-4 MCP tools following 3-layer workflow:
-
-1. __IMPORTANT - Workflow documentation (always visible)
-   "3-LAYER WORKFLOW (ALWAYS FOLLOW):
-    1. search(query) → Get index with IDs
-    2. timeline(anchor=ID) → Get context
-    3. get_observations([IDs]) → Fetch details
-    NEVER fetch full details without filtering first."
-
-2. search - Layer 1: Get index with IDs (~50-100 tokens/result)
-3. timeline - Layer 2: Get chronological context
-4. get_observations - Layer 3: Fetch full details (~500-1,000 tokens/result)
-
-Benefits:
-- Progressive disclosure enforced by tool structure
-- No overlapping operations
-- Simple schemas (additionalProperties: true)
-- Clear workflow pattern
-- Code size: ~312 lines in mcp-server.ts (88% reduction)
-- ~10x token savings
-```
-
-### Migration: Skill-Based Search Removed
-
-**Previously:** Used skill-based search
-- mem-search skill invoked via natural language
-- HTTP API called directly via curl
-- Progressive disclosure through skill loading
-- 17 skill documentation files
-
-**Now:** Removed skill-based approach
-- MCP-only architecture
-- Native MCP protocol (better Claude integration)
-- Works with both Claude Desktop and Claude Code
-- Simpler to maintain (no skill files)
-- All 19 mem-search skill files removed (~2,744 lines)
-
-### Key Architectural Changes
-
-**MCP Server Refactor:**
-
-Before:
-```typescript
-// Complex parameter schemas
-{
-  name: "search_observations",
-  inputSchema: {
-    type: "object",
-    properties: {
-      query: { type: "string", description: "..." },
-      type: { type: "array", items: { enum: [...] } },
-      format: { enum: ["index", "full"] },
-      limit: { type: "number", minimum: 1, maximum: 100 },
-      // ... many more parameters
-    }
-  }
-}
-```
-
-After:
-```typescript
-// Simple schemas with workflow guidance
-{
-  name: "search",
-  description: "Step 1: Search memory. Returns index with IDs.",
-  inputSchema: {
-    type: "object",
-    properties: {},
-    additionalProperties: true  // Accept any parameters
-  }
-}
-```
-
-**Workflow Enforcement:**
-
-Before: Claude had to remember progressive disclosure pattern
-
-After: Tool structure makes it impossible to skip steps
-- Can't get details without IDs from search
-- Can't search without seeing __IMPORTANT reminder
-- Timeline provides middle ground (context without full details)
-
-### Impact
-
-**Token Efficiency:**
-```
-Traditional: Fetch 20 observations upfront
-→ 10,000-20,000 tokens
-→ Only 2 observations relevant (90% waste)
-
-3-Layer Workflow:
-→ search (20 results): ~1,000-2,000 tokens
-→ Review index, identify 3 relevant IDs
-→ get_observations (3 IDs): ~1,500-3,000 tokens
-→ Total: 2,500-5,000 tokens (50-75% savings)
-```
-
-**Code Simplicity:**
-- MCP server: 2,718 lines → 312 lines (88% reduction)
-- Removed: 19 skill files (~2,744 lines)
-- Net reduction: ~5,150 lines of code removed
-
-**User Experience:**
-- Same natural language interaction
-- Better token efficiency
-- Clearer architecture
-- Works identically on Claude Desktop and Claude Code
-
-### Design Philosophy
-
-**Progressive Disclosure Through Structure:**
-
-The 3-layer workflow embodies progressive disclosure at the architectural level:
-
-1. **Layer 1 (Index)** - "What exists?" - Cheap survey of options
-2. **Layer 2 (Timeline)** - "What was happening?" - Context around specific points
-3. **Layer 3 (Details)** - "Tell me everything" - Full details only when justified
-
-Each layer provides a decision point where Claude can:
-- Stop if irrelevant
-- Get more context if uncertain
-- Dive deep if confident
-
-This makes it structurally difficult to waste tokens.
 
 ---
 
@@ -676,7 +520,7 @@ const response = query({
 
     **Key change from v3:**
     - ✅ Stores raw prompts for search
-    - ✅ Auto-starts worker service
+    - ✅ Auto-starts PM2 worker
   </Tab>
 
   <Tab title="PostToolUse">
@@ -1218,7 +1062,7 @@ The result is a memory system that's both powerful and invisible. Users never no
 - [Progressive Disclosure](progressive-disclosure) - The philosophy behind v4
 - [Hooks Architecture](hooks-architecture) - How hooks power the system
 - [Context Engineering](context-engineering) - Foundational principles
-- [Worker Service](/architecture/worker-service) - Real-time visualization (v5.1.0+)
+- [Viewer UI](introduction#key-features) - Real-time visualization (v5.1.0+)
 
 ---
 

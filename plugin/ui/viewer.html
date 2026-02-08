@@ -311,7 +311,7 @@
 
     .full-height-flex-layout {
       display: flex;
-      height: 100%;
+      height: 100vh;
       position: relative;
     }
 
@@ -813,7 +813,6 @@
     }
 
     .feed-content {
-      max-width: 650px;
     }
 
     .card {
@@ -1471,10 +1470,15 @@
     /* Utility: Container */
     .container {
       width: 100%;
-      max-width: 600px;
+      max-width: 42rem;
       margin: 0 auto;
     }
 
+    /* Large screen - center content with max-width */
+    @media (min-width: 769px) {
+      .feed-content {
+      }
+    }
 
     /* Tablet Responsive Styles - 481px to 768px */
     @media (max-width: 768px) and (min-width: 481px) {
@@ -1622,7 +1626,6 @@
       .feed {
         padding: 16px 12px;
       }
-
 
       /* Card adjustments */
       .card {
