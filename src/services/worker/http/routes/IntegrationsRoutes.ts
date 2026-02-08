@@ -1,7 +1,6 @@
 import express, { Request, Response } from 'express';
 import { BaseRouteHandler } from '../BaseRouteHandler.js';
 import { DatabaseManager } from '../../DatabaseManager.js';
-import { logger } from '../../../../utils/logger.js';
 
 export class IntegrationsRoutes extends BaseRouteHandler {
   constructor(private dbManager: DatabaseManager) {
@@ -22,7 +21,6 @@ export class IntegrationsRoutes extends BaseRouteHandler {
         // Add other integrations here if needed
       });
     } catch (error) {
-      logger.debug('WORKER', 'Failed to get integrations status (likely initializing)', {}, error as Error);
       // If ChromaSync is not initialized yet (e.g. startup), return a safe fallback
       res.json({
         chroma: {

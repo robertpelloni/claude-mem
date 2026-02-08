@@ -13,7 +13,8 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { ParsedObservation, ParsedSummary } from '../../sdk/parser.js';
 import { SessionStore } from '../sqlite/SessionStore.js';
 import { logger } from '../../utils/logger.js';
-import { silentDebug } from '../../utils/silent-debug.js';
+import { SettingsDefaultsManager } from '../../shared/SettingsDefaultsManager.js';
+import { USER_SETTINGS_PATH } from '../../shared/paths.js';
 import path from 'path';
 import os from 'os';
 
@@ -71,14 +72,16 @@ interface StoredUserPrompt {
 
 export class ChromaSync {
   private client: Client | null = null;
+  private transport: StdioClientTransport | null = null;
   private connected: boolean = false;
+  private project: string;
   private collectionName: string;
   private readonly VECTOR_DB_DIR: string;
   private readonly BATCH_SIZE = 100;
 
-  constructor() {
-    // Use single collection for all projects, filtered by metadata
-    this.collectionName = 'cm__all';
+  constructor(project: string) {
+    this.project = project;
+    this.collectionName = `cm__${project}`;
     this.VECTOR_DB_DIR = path.join(os.homedir(), '.claude-mem', 'vector-db');
   }
 
@@ -91,13 +94,16 @@ export class ChromaSync {
       return;
     }
 
-    logger.info('CHROMA_SYNC', 'Connecting to Chroma MCP server...');
+    logger.info('CHROMA_SYNC', 'Connecting to Chroma MCP server...', { project: this.project });
 
     try {
       // Use Python 3.13 by default to avoid onnxruntime compatibility issues with Python 3.14+
       // See: https://github.com/thedotmack/claude-mem/issues/170 (Python 3.14 incompatibility)
-      const pythonVersion = process.env.CLAUDE_MEM_PYTHON_VERSION || '3.13';
-      const transport = new StdioClientTransport({
+      const settings = SettingsDefaultsManager.loadFromFile(USER_SETTINGS_PATH);
+      const pythonVersion = settings.CLAUDE_MEM_PYTHON_VERSION;
+      const isWindows = process.platform === 'win32';
+
+      const transportOptions: any = {
         command: 'uvx',
         args: [
           '--python', pythonVersion,
@@ -106,7 +112,16 @@ export class ChromaSync {
           '--data-dir', this.VECTOR_DB_DIR
         ],
         stderr: 'ignore'
-      });
+      };
+
+      // CRITICAL: On Windows, try to hide console window to prevent PowerShell popups
+      // Note: windowsHide may not be supported by MCP SDK's StdioClientTransport
+      if (isWindows) {
+        transportOptions.windowsHide = true;
+        logger.debug('CHROMA_SYNC', 'Windows detected, attempting to hide console window', { project: this.project });
+      }
+
+      this.transport = new StdioClientTransport(transportOptions);
 
       this.client = new Client({
         name: 'claude-mem-chroma-sync',
@@ -115,12 +130,12 @@ export class ChromaSync {
         capabilities: {}
       });
 
-      await this.client.connect(transport);
+      await this.client.connect(this.transport);
       this.connected = true;
 
-      logger.info('CHROMA_SYNC', 'Connected to Chroma MCP server');
+      logger.info('CHROMA_SYNC', 'Connected to Chroma MCP server', { project: this.project });
     } catch (error) {
-      logger.error('CHROMA_SYNC', 'Failed to connect to Chroma MCP server', {}, error as Error);
+      logger.error('CHROMA_SYNC', 'Failed to connect to Chroma MCP server', { project: this.project }, error as Error);
       throw new Error(`Chroma connection failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
@@ -133,7 +148,10 @@ export class ChromaSync {
     await this.ensureConnection();
 
     if (!this.client) {
-      throw new Error('Chroma client not initialized');
+      throw new Error(
+        'Chroma client not initialized. Call ensureConnection() before using client methods.' +
+        ` Project: ${this.project}`
+      );
     }
 
     try {
@@ -186,8 +204,8 @@ export class ChromaSync {
       sdk_session_id: obs.sdk_session_id,
       project: obs.project,
       created_at_epoch: obs.created_at_epoch,
-      type: obs.type || silentDebug('ChromaSync.formatObservationDocs: obs.type is null', { obsId: obs.id }, 'discovery'),
-      title: obs.title || silentDebug('ChromaSync.formatObservationDocs: obs.title is null', { obsId: obs.id }, 'Untitled')
+      type: obs.type || 'discovery',
+      title: obs.title || 'Untitled'
     };
 
     // Add optional metadata fields
@@ -247,7 +265,7 @@ export class ChromaSync {
       sdk_session_id: summary.sdk_session_id,
       project: summary.project,
       created_at_epoch: summary.created_at_epoch,
-      prompt_number: summary.prompt_number || silentDebug('ChromaSync.formatSummaryDocs: summary.prompt_number is null', { summaryId: summary.id }, 0)
+      prompt_number: summary.prompt_number || 0
     };
 
     // Each field becomes a separate document
@@ -314,7 +332,10 @@ export class ChromaSync {
     await this.ensureCollection();
 
     if (!this.client) {
-      throw new Error('Chroma client not initialized');
+      throw new Error(
+        'Chroma client not initialized. Call ensureConnection() before using client methods.' +
+        ` Project: ${this.project}`
+      );
     }
 
     try {
@@ -491,7 +512,10 @@ export class ChromaSync {
     await this.ensureConnection();
 
     if (!this.client) {
-      throw new Error('Chroma client not initialized');
+      throw new Error(
+        'Chroma client not initialized. Call ensureConnection() before using client methods.' +
+        ` Project: ${this.project}`
+      );
     }
 
     const observationIds = new Set<number>();
@@ -501,7 +525,7 @@ export class ChromaSync {
     let offset = 0;
     const limit = 1000; // Large batches, metadata only = fast
 
-    logger.info('CHROMA_SYNC', 'Fetching existing Chroma document IDs for all projects...');
+    logger.info('CHROMA_SYNC', 'Fetching existing Chroma document IDs...', { project: this.project });
 
     while (true) {
       try {
@@ -511,7 +535,7 @@ export class ChromaSync {
             collection_name: this.collectionName,
             limit,
             offset,
-            // No project filter - fetch all documents across all projects
+            where: { project: this.project }, // Filter by project
             include: ['metadatas']
           }
         });
@@ -522,7 +546,7 @@ export class ChromaSync {
         }
 
         const parsed = JSON.parse(data.text);
-        const metadatas = parsed.metadatas || silentDebug('ChromaSync.getExistingChromaIds: parsed.metadatas is null', { project: this.project }, []);
+        const metadatas = parsed.metadatas || [];
 
         if (metadatas.length === 0) {
           break; // No more documents
@@ -544,16 +568,18 @@ export class ChromaSync {
         offset += limit;
 
         logger.debug('CHROMA_SYNC', 'Fetched batch of existing IDs', {
+          project: this.project,
           offset,
           batchSize: metadatas.length
         });
       } catch (error) {
-        logger.error('CHROMA_SYNC', 'Failed to fetch existing IDs', {}, error as Error);
+        logger.error('CHROMA_SYNC', 'Failed to fetch existing IDs', { project: this.project }, error as Error);
         throw error;
       }
     }
 
-    logger.info('CHROMA_SYNC', 'Existing IDs fetched for all projects', {
+    logger.info('CHROMA_SYNC', 'Existing IDs fetched', {
+      project: this.project,
       observations: observationIds.size,
       summaries: summaryIds.size,
       prompts: promptIds.size
@@ -565,11 +591,10 @@ export class ChromaSync {
   /**
    * Backfill: Sync all observations missing from Chroma
    * Reads from SQLite and syncs in batches
-   * Syncs ALL projects, not just one
    * Throws error if backfill fails
    */
   async ensureBackfilled(): Promise<void> {
-    logger.info('CHROMA_SYNC', 'Starting smart backfill for all projects');
+    logger.info('CHROMA_SYNC', 'Starting smart backfill', { project: this.project });
 
     await this.ensureCollection();
 
@@ -582,21 +607,22 @@ export class ChromaSync {
       // Build exclusion list for observations
       const existingObsIds = Array.from(existing.observations);
       const obsExclusionClause = existingObsIds.length > 0
-        ? `WHERE id NOT IN (${existingObsIds.join(',')})`
+        ? `AND id NOT IN (${existingObsIds.join(',')})`
         : '';
 
-      // Get only observations missing from Chroma (ALL projects)
+      // Get only observations missing from Chroma
       const observations = db.db.prepare(`
         SELECT * FROM observations
-        ${obsExclusionClause}
+        WHERE project = ? ${obsExclusionClause}
         ORDER BY id ASC
-      `).all() as StoredObservation[];
+      `).all(this.project) as StoredObservation[];
 
       const totalObsCount = db.db.prepare(`
-        SELECT COUNT(*) as count FROM observations
-      `).get() as { count: number };
+        SELECT COUNT(*) as count FROM observations WHERE project = ?
+      `).get(this.project) as { count: number };
 
       logger.info('CHROMA_SYNC', 'Backfilling observations', {
+        project: this.project,
         missing: observations.length,
         existing: existing.observations.size,
         total: totalObsCount.count
@@ -613,7 +639,8 @@ export class ChromaSync {
         const batch = allDocs.slice(i, i + this.BATCH_SIZE);
         await this.addDocuments(batch);
 
-        logger.info('CHROMA_SYNC', 'Backfill progress (observations)', {
+        logger.info('CHROMA_SYNC', 'Backfill progress', {
+          project: this.project,
           progress: `${Math.min(i + this.BATCH_SIZE, allDocs.length)}/${allDocs.length}`
         });
       }
@@ -621,21 +648,22 @@ export class ChromaSync {
       // Build exclusion list for summaries
       const existingSummaryIds = Array.from(existing.summaries);
       const summaryExclusionClause = existingSummaryIds.length > 0
-        ? `WHERE id NOT IN (${existingSummaryIds.join(',')})`
+        ? `AND id NOT IN (${existingSummaryIds.join(',')})`
         : '';
 
-      // Get only summaries missing from Chroma (ALL projects)
+      // Get only summaries missing from Chroma
       const summaries = db.db.prepare(`
         SELECT * FROM session_summaries
-        ${summaryExclusionClause}
+        WHERE project = ? ${summaryExclusionClause}
         ORDER BY id ASC
-      `).all() as StoredSummary[];
+      `).all(this.project) as StoredSummary[];
 
       const totalSummaryCount = db.db.prepare(`
-        SELECT COUNT(*) as count FROM session_summaries
-      `).get() as { count: number };
+        SELECT COUNT(*) as count FROM session_summaries WHERE project = ?
+      `).get(this.project) as { count: number };
 
       logger.info('CHROMA_SYNC', 'Backfilling summaries', {
+        project: this.project,
         missing: summaries.length,
         existing: existing.summaries.size,
         total: totalSummaryCount.count
@@ -652,7 +680,8 @@ export class ChromaSync {
         const batch = summaryDocs.slice(i, i + this.BATCH_SIZE);
         await this.addDocuments(batch);
 
-        logger.info('CHROMA_SYNC', 'Backfill progress (summaries)', {
+        logger.info('CHROMA_SYNC', 'Backfill progress', {
+          project: this.project,
           progress: `${Math.min(i + this.BATCH_SIZE, summaryDocs.length)}/${summaryDocs.length}`
         });
       }
@@ -663,7 +692,7 @@ export class ChromaSync {
         ? `AND up.id NOT IN (${existingPromptIds.join(',')})`
         : '';
 
-      // Get only user prompts missing from Chroma (ALL projects)
+      // Get only user prompts missing from Chroma
       const prompts = db.db.prepare(`
         SELECT
           up.*,
@@ -671,17 +700,19 @@ export class ChromaSync {
           s.sdk_session_id
         FROM user_prompts up
         JOIN sdk_sessions s ON up.claude_session_id = s.claude_session_id
-        ${promptExclusionClause ? `WHERE ${promptExclusionClause.substring(4)}` : ''}
+        WHERE s.project = ? ${promptExclusionClause}
         ORDER BY up.id ASC
-      `).all() as StoredUserPrompt[];
+      `).all(this.project) as StoredUserPrompt[];
 
       const totalPromptCount = db.db.prepare(`
         SELECT COUNT(*) as count
         FROM user_prompts up
         JOIN sdk_sessions s ON up.claude_session_id = s.claude_session_id
-      `).get() as { count: number };
+        WHERE s.project = ?
+      `).get(this.project) as { count: number };
 
       logger.info('CHROMA_SYNC', 'Backfilling user prompts', {
+        project: this.project,
         missing: prompts.length,
         existing: existing.prompts.size,
         total: totalPromptCount.count
@@ -698,12 +729,14 @@ export class ChromaSync {
         const batch = promptDocs.slice(i, i + this.BATCH_SIZE);
         await this.addDocuments(batch);
 
-        logger.info('CHROMA_SYNC', 'Backfill progress (prompts)', {
+        logger.info('CHROMA_SYNC', 'Backfill progress', {
+          project: this.project,
           progress: `${Math.min(i + this.BATCH_SIZE, promptDocs.length)}/${promptDocs.length}`
         });
       }
 
-      logger.info('CHROMA_SYNC', 'Smart backfill complete for all projects', {
+      logger.info('CHROMA_SYNC', 'Smart backfill complete', {
+        project: this.project,
         synced: {
           observationDocs: allDocs.length,
           summaryDocs: summaryDocs.length,
@@ -717,7 +750,7 @@ export class ChromaSync {
       });
 
     } catch (error) {
-      logger.error('CHROMA_SYNC', 'Backfill failed', {}, error as Error);
+      logger.error('CHROMA_SYNC', 'Backfill failed', { project: this.project }, error as Error);
       throw new Error(`Backfill failed: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
       db.close();
@@ -736,7 +769,10 @@ export class ChromaSync {
     await this.ensureConnection();
 
     if (!this.client) {
-      throw new Error('Chroma client not initialized');
+      throw new Error(
+        'Chroma client not initialized. Call ensureConnection() before using client methods.' +
+        ` Project: ${this.project}`
+      );
     }
 
     const whereStringified = whereFilter ? JSON.stringify(whereFilter) : undefined;
@@ -754,7 +790,13 @@ export class ChromaSync {
       arguments: arguments_obj
     });
 
-    const resultText = result.content[0]?.text || '';
+    const resultText = logger.happyPathError(
+      'CHROMA',
+      'Missing text in MCP chroma_query_documents result',
+      { project: this.project },
+      { query_text: query },
+      result.content[0]?.text || ''
+    );
 
     // Parse JSON response
     let parsed: any;
@@ -798,14 +840,92 @@ export class ChromaSync {
   }
 
   /**
-   * Close the Chroma client connection
+   * Get Chroma sync status
+   */
+  async getStatus(): Promise<{
+    connected: boolean;
+    collectionName: string;
+    vectorDbDir: string;
+    itemCount?: number;
+    error?: string;
+  }> {
+    try {
+      if (!this.connected || !this.client) {
+        return {
+          connected: false,
+          collectionName: this.collectionName,
+          vectorDbDir: this.VECTOR_DB_DIR
+        };
+      }
+
+      // Try to get collection info to verify connection and get count
+      const result = await this.client.callTool({
+        name: 'chroma_get_collection_info',
+        arguments: {
+          collection_name: this.collectionName
+        }
+      });
+
+      // Parse result to get count if available
+      let itemCount = 0;
+      try {
+        const data = JSON.parse(result.content[0].text);
+        if (data && typeof data.count === 'number') {
+          itemCount = data.count;
+        }
+      } catch (e) {
+        // Ignore parse error
+      }
+
+      return {
+        connected: true,
+        collectionName: this.collectionName,
+        vectorDbDir: this.VECTOR_DB_DIR,
+        itemCount
+      };
+    } catch (error) {
+      return {
+        connected: false,
+        collectionName: this.collectionName,
+        vectorDbDir: this.VECTOR_DB_DIR,
+        error: error instanceof Error ? error.message : String(error)
+      };
+    }
+  }
+
+  /**
+   * Close the Chroma client connection and cleanup subprocess
    */
   async close(): Promise<void> {
-    if (this.client && this.connected) {
-      await this.client.close();
+    if (!this.connected && !this.client && !this.transport) {
+      return;
+    }
+
+    try {
+      // Close client first
+      if (this.client) {
+        try {
+          await this.client.close();
+        } catch (error) {
+          logger.warn('CHROMA_SYNC', 'Error closing Chroma client', { project: this.project }, error as Error);
+        }
+      }
+
+      // Explicitly close transport to kill subprocess
+      if (this.transport) {
+        try {
+          await this.transport.close();
+        } catch (error) {
+          logger.warn('CHROMA_SYNC', 'Error closing transport', { project: this.project }, error as Error);
+        }
+      }
+
+      logger.info('CHROMA_SYNC', 'Chroma client and subprocess closed', { project: this.project });
+    } finally {
+      // Always reset state, even if errors occurred
       this.connected = false;
       this.client = null;
-      logger.info('CHROMA_SYNC', 'Chroma client closed');
+      this.transport = null;
     }
   }
 }

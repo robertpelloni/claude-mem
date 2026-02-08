@@ -1,6 +1,6 @@
 export interface Observation {
   id: number;
-  memory_session_id: string;
+  sdk_session_id: string;
   project: string;
   type: string;
   title: string | null;
@@ -30,20 +30,11 @@ export interface Summary {
 
 export interface UserPrompt {
   id: number;
-  content_session_id: string;
+  claude_session_id: string;
   project: string;
   prompt_number: number;
   prompt_text: string;
   created_at_epoch: number;
-}
-
-export interface LogEntry {
-  timestamp: string;
-  level: string;
-  component: string;
-  message: string;
-  context?: any;
-  data?: any;
 }
 
 export type FeedItem =
@@ -52,7 +43,7 @@ export type FeedItem =
   | (UserPrompt & { itemType: 'prompt' });
 
 export interface StreamEvent {
-  type: 'initial_load' | 'new_observation' | 'new_summary' | 'new_prompt' | 'processing_status' | 'log';
+  type: 'initial_load' | 'new_observation' | 'new_summary' | 'new_prompt' | 'processing_status';
   observations?: Observation[];
   summaries?: Summary[];
   prompts?: UserPrompt[];
@@ -61,7 +52,6 @@ export interface StreamEvent {
   summary?: Summary;
   prompt?: UserPrompt;
   isProcessing?: boolean;
-  log?: LogEntry;
 }
 
 export interface Settings {
@@ -74,16 +64,6 @@ export interface Settings {
   CLAUDE_MEM_DATA_DIR?: string;
   CLAUDE_MEM_LOG_LEVEL?: string;
   CLAUDE_MEM_PYTHON_VERSION?: string;
-
-  // AI Provider Configuration
-  CLAUDE_MEM_PROVIDER?: string;  // 'claude' | 'gemini' | 'openrouter'
-  CLAUDE_MEM_GEMINI_API_KEY?: string;
-  CLAUDE_MEM_GEMINI_MODEL?: string;  // 'gemini-2.5-flash-lite' | 'gemini-2.5-flash' | 'gemini-3-flash-preview'
-  CLAUDE_MEM_GEMINI_RATE_LIMITING_ENABLED?: string;  // 'true' | 'false'
-  CLAUDE_MEM_OPENROUTER_API_KEY?: string;
-  CLAUDE_MEM_OPENROUTER_MODEL?: string;
-  CLAUDE_MEM_OPENROUTER_SITE_URL?: string;
-  CLAUDE_MEM_OPENROUTER_APP_NAME?: string;
 
   // Token Economics Display
   CLAUDE_MEM_CONTEXT_SHOW_READ_TOKENS?: string;

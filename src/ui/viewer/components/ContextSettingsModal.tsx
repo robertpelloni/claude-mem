@@ -2,6 +2,8 @@ import React, { useState, useCallback, useEffect } from 'react';
 import type { Settings } from '../types';
 import { TerminalPreview } from './TerminalPreview';
 import { useContextPreview } from '../hooks/useContextPreview';
+import { IntegrationsStatus } from './IntegrationsStatus';
+import { VersionSwitcher } from './VersionSwitcher';
 
 interface ContextSettingsModalProps {
   isOpen: boolean;
@@ -489,7 +491,7 @@ export function ContextSettingsModal({
             {/* Section 4: Advanced */}
             <CollapsibleSection
               title="Advanced"
-              description="Model selection and integrations"
+              description="Model selection and context features"
               defaultOpen={false}
             >
               <FormField
@@ -505,19 +507,6 @@ export function ContextSettingsModal({
                   <option value="sonnet">sonnet (balanced)</option>
                   <option value="opus">opus (highest quality)</option>
                 </select>
-              </FormField>
-
-              <FormField
-                label="Worker Port"
-                tooltip="Port for the background worker service"
-              >
-                <input
-                  type="number"
-                  min="1024"
-                  max="65535"
-                  value={formState.CLAUDE_MEM_WORKER_PORT || '37777'}
-                  onChange={(e) => updateSetting('CLAUDE_MEM_WORKER_PORT', e.target.value)}
-                />
               </FormField>
 
               <div className="toggle-group" style={{ marginTop: '12px' }}>
@@ -544,6 +533,76 @@ export function ContextSettingsModal({
                   onChange={() => toggleBoolean('CLAUDE_MEM_CONTEXT_SHOW_LAST_MESSAGE')}
                 />
               </div>
+            </CollapsibleSection>
+
+            {/* Section 5: System Configuration */}
+            <CollapsibleSection
+              title="System"
+              description="Core configuration (requires restart)"
+              defaultOpen={false}
+            >
+              <FormField
+                label="Log Level"
+                tooltip="Verbosity of worker logs"
+              >
+                <select
+                  value={formState.CLAUDE_MEM_LOG_LEVEL || 'INFO'}
+                  onChange={(e) => updateSetting('CLAUDE_MEM_LOG_LEVEL', e.target.value)}
+                >
+                  <option value="DEBUG">DEBUG</option>
+                  <option value="INFO">INFO</option>
+                  <option value="WARN">WARN</option>
+                  <option value="ERROR">ERROR</option>
+                  <option value="SILENT">SILENT</option>
+                </select>
+              </FormField>
+
+              <FormField
+                label="Worker Port"
+                tooltip="Port for the background worker service"
+              >
+                <input
+                  type="number"
+                  min="1024"
+                  max="65535"
+                  value={formState.CLAUDE_MEM_WORKER_PORT || '37777'}
+                  onChange={(e) => updateSetting('CLAUDE_MEM_WORKER_PORT', e.target.value)}
+                />
+              </FormField>
+
+              <FormField
+                label="Data Directory"
+                tooltip="Path to store database and logs"
+              >
+                <input
+                  type="text"
+                  value={formState.CLAUDE_MEM_DATA_DIR || ''}
+                  onChange={(e) => updateSetting('CLAUDE_MEM_DATA_DIR', e.target.value)}
+                />
+              </FormField>
+
+              <FormField
+                label="Python Version"
+                tooltip="Python version for Chroma integration (e.g. 3.13)"
+              >
+                <input
+                  type="text"
+                  value={formState.CLAUDE_MEM_PYTHON_VERSION || '3.13'}
+                  placeholder="3.13"
+                  onChange={(e) => updateSetting('CLAUDE_MEM_PYTHON_VERSION', e.target.value)}
+                />
+              </FormField>
+            </CollapsibleSection>
+
+            {/* Section 6: Integrations & Updates */}
+            <CollapsibleSection
+              title="Integrations & Updates"
+              description="Manage external systems and versions"
+              defaultOpen={false}
+            >
+              <VersionSwitcher />
+              <div style={{ height: '20px' }} />
+              <IntegrationsStatus />
             </CollapsibleSection>
           </div>
         </div>

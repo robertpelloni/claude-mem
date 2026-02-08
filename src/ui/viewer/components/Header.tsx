@@ -2,6 +2,7 @@ import React from 'react';
 import { ThemeToggle } from './ThemeToggle';
 import { ThemePreference } from '../hooks/useTheme';
 import { GitHubStarsButton } from './GitHubStarsButton';
+import { SearchInput } from './SearchInput';
 
 interface HeaderProps {
   isConnected: boolean;
@@ -13,6 +14,9 @@ interface HeaderProps {
   themePreference: ThemePreference;
   onThemeChange: (theme: ThemePreference) => void;
   onContextPreviewToggle: () => void;
+  onHelpToggle: () => void;
+  onSearch: (query: string) => void;
+  isSearching: boolean;
 }
 
 export function Header({
@@ -24,8 +28,20 @@ export function Header({
   queueDepth,
   themePreference,
   onThemeChange,
-  onContextPreviewToggle
+  onContextPreviewToggle,
+  onHelpToggle,
+  onSearch,
+  isSearching
 }: HeaderProps) {
+  const { info } = useBranchInfo();
+  const isEndlessMode = info?.isBeta || false;
+
+  // Resolve effective theme for Product Hunt badge
+  const isDark = themePreference === 'dark' ||
+    (themePreference === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+  const phBadgeTheme = isDark ? 'dark' : 'light';
+  const phBadgeUrl = `https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1045833&theme=${phBadgeTheme}`;
+
   return (
     <div className="header">
       <h1>
@@ -38,8 +54,38 @@ export function Header({
           )}
         </div>
         <span className="logo-text">claude-mem</span>
+        {isEndlessMode && (
+          <span style={{
+            fontSize: '10px',
+            background: 'var(--color-accent-primary)',
+            color: 'white',
+            padding: '2px 6px',
+            borderRadius: '4px',
+            marginLeft: '8px',
+            fontWeight: 600,
+            textTransform: 'uppercase',
+            letterSpacing: '0.5px'
+          }}>
+            Endless Mode
+          </span>
+        )}
       </h1>
       <div className="status">
+        <SearchInput onSearch={onSearch} isLoading={isSearching} />
+        <a
+          href="https://www.producthunt.com/products/claude-mem?embed=true&utm_source=badge-featured&utm_medium=badge&utm_source=badge-claude-mem"
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{ display: 'flex', alignItems: 'center' }}
+        >
+          <img
+            src={phBadgeUrl}
+            alt="Claude-Mem on Product Hunt"
+            style={{ width: '180px', height: '40px' }}
+            width="180"
+            height="40"
+          />
+        </a>
         <GitHubStarsButton username="thedotmack" repo="claude-mem" />
         <a
           href="https://discord.gg/J4wttp9vDu"
@@ -65,6 +111,17 @@ export function Header({
           preference={themePreference}
           onThemeChange={onThemeChange}
         />
+        <button
+          className="settings-btn"
+          onClick={onHelpToggle}
+          title="Help & Shortcuts (?)"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="10"></circle>
+            <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
+            <line x1="12" y1="17" x2="12.01" y2="17"></line>
+          </svg>
+        </button>
         <button
           className="settings-btn"
           onClick={onContextPreviewToggle}
