@@ -5,8 +5,6 @@
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
@@ -17,88 +15,12 @@ import { basename } from 'path';
 import { SessionSearch } from '../services/sqlite/SessionSearch.js';
 import { SessionStore } from '../services/sqlite/SessionStore.js';
 import { ObservationSearchResult, SessionSummarySearchResult, UserPromptSearchResult } from '../services/sqlite/types.js';
-import { VECTOR_DB_DIR } from '../shared/paths.js';
+import { ChromaOrchestrator } from '../services/chroma/ChromaOrchestrator.js';
 
 // Initialize search instances
 let search: SessionSearch;
 let store: SessionStore;
-let chromaClient: Client | null = null;
-// Single collection for all projects, filtered by project metadata
-const COLLECTION_NAME = 'cm__all';
-
-try {
-  search = new SessionSearch();
-  store = new SessionStore();
-} catch (error: any) {
-  console.error('[search-server] Failed to initialize search:', error.message);
-  process.exit(1);
-}
-
-/**
- * Query Chroma vector database via MCP
- */
-async function queryChroma(
-  query: string,
-  limit: number,
-  whereFilter?: Record<string, any>
-): Promise<{ ids: number[]; distances: number[]; metadatas: any[] }> {
-  if (!chromaClient) {
-    throw new Error('Chroma client not initialized');
-  }
-
-  const result = await chromaClient.callTool({
-    name: 'chroma_query_documents',
-    arguments: {
-      collection_name: COLLECTION_NAME,
-      query_texts: [query],
-      n_results: limit,
-      include: ['documents', 'metadatas', 'distances'],
-      where: whereFilter
-    }
-  });
-
-  const resultText = result.content[0]?.text || '';
-
-  // Parse JSON response
-  let parsed: any;
-  try {
-    parsed = JSON.parse(resultText);
-  } catch (error) {
-    console.error('[search-server] Failed to parse Chroma response as JSON:', error);
-    return { ids: [], distances: [], metadatas: [] };
-  }
-
-  // Extract unique IDs from document IDs
-  const ids: number[] = [];
-  const docIds = parsed.ids?.[0] || [];
-  for (const docId of docIds) {
-    // Extract sqlite_id from document ID (supports three formats):
-    // - obs_{id}_narrative, obs_{id}_fact_0, etc (observations)
-    // - summary_{id}_request, summary_{id}_learned, etc (session summaries)
-    // - prompt_{id} (user prompts)
-    const obsMatch = docId.match(/obs_(\d+)_/);
-    const summaryMatch = docId.match(/summary_(\d+)_/);
-    const promptMatch = docId.match(/prompt_(\d+)/);
-
-    let sqliteId: number | null = null;
-    if (obsMatch) {
-      sqliteId = parseInt(obsMatch[1], 10);
-    } else if (summaryMatch) {
-      sqliteId = parseInt(summaryMatch[1], 10);
-    } else if (promptMatch) {
-      sqliteId = parseInt(promptMatch[1], 10);
-    }
-
-    if (sqliteId !== null && !ids.includes(sqliteId)) {
-      ids.push(sqliteId);
-    }
-  }
-
-  const distances = parsed.distances?.[0] || [];
-  const metadatas = parsed.metadatas?.[0] || [];
-
-  return { ids, distances, metadatas };
-}
+let chroma: ChromaOrchestrator;
 
 /**
  * Format search tips footer
@@ -138,7 +60,7 @@ function formatObservationIndex(obs: ObservationSearchResult, index: number): st
  * Format session summary as index entry (title, date, ID only)
  */
 function formatSessionIndex(session: SessionSummarySearchResult, index: number): string {
-  const title = session.request || `Session ${session.sdk_session_id?.substring(0, 8) || 'unknown'}`;
+  const title = session.request || `Session ${session.sdk_session_id.substring(0, 8)}`;
   const date = new Date(session.created_at_epoch).toLocaleString();
 
   return `${index + 1}. ${title}
@@ -149,7 +71,7 @@ function formatSessionIndex(session: SessionSummarySearchResult, index: number):
 /**
  * Format observation as text content with metadata
  */
-function formatObservationResult(obs: ObservationSearchResult): string {
+function formatObservationResult(obs: ObservationSearchResult, index: number): string {
   const title = obs.title || `Observation #${obs.id}`;
 
   // Build content from available fields
@@ -183,9 +105,7 @@ function formatObservationResult(obs: ObservationSearchResult): string {
       if (facts.length > 0) {
         metadata.push(`Facts: ${facts.join('; ')}`);
       }
-    } catch (error) {
-      silentDebug('Failed to parse observation facts in search-server', { obsId: obs.id, error });
-    }
+    } catch {}
   }
 
   if (obs.concepts) {
@@ -194,9 +114,7 @@ function formatObservationResult(obs: ObservationSearchResult): string {
       if (concepts.length > 0) {
         metadata.push(`Concepts: ${concepts.join(', ')}`);
       }
-    } catch (error) {
-      silentDebug('Failed to parse observation concepts in search-server', { obsId: obs.id, error });
-    }
+    } catch {}
   }
 
   if (obs.files_read || obs.files_modified) {
@@ -204,16 +122,12 @@ function formatObservationResult(obs: ObservationSearchResult): string {
     if (obs.files_read) {
       try {
         files.push(...JSON.parse(obs.files_read));
-      } catch (error) {
-        silentDebug('Failed to parse observation files_read in search-server', { obsId: obs.id, error });
-      }
+      } catch {}
     }
     if (obs.files_modified) {
       try {
         files.push(...JSON.parse(obs.files_modified));
-      } catch (error) {
-        silentDebug('Failed to parse observation files_modified in search-server', { obsId: obs.id, error });
-      }
+      } catch {}
     }
     if (files.length > 0) {
       metadata.push(`Files: ${[...new Set(files)].join(', ')}`);
@@ -237,8 +151,8 @@ function formatObservationResult(obs: ObservationSearchResult): string {
 /**
  * Format session summary as text content with metadata
  */
-function formatSessionResult(session: SessionSummarySearchResult): string {
-  const title = session.request || `Session ${session.sdk_session_id?.substring(0, 8) || 'unknown'}`;
+function formatSessionResult(session: SessionSummarySearchResult, index: number): string {
+  const title = session.request || `Session ${session.sdk_session_id.substring(0, 8)}`;
 
   // Build content from available fields
   const contentParts: string[] = [];
@@ -279,16 +193,12 @@ function formatSessionResult(session: SessionSummarySearchResult): string {
     if (session.files_read) {
       try {
         files.push(...JSON.parse(session.files_read));
-      } catch (error) {
-        silentDebug('Failed to parse session files_read in search-server', { sessionId: session.id, error });
-      }
+      } catch {}
     }
     if (session.files_edited) {
       try {
         files.push(...JSON.parse(session.files_edited));
-      } catch (error) {
-        silentDebug('Failed to parse session files_edited in search-server', { sessionId: session.id, error });
-      }
+      } catch {}
     }
     if (files.length > 0) {
       metadata.push(`Files: ${[...new Set(files)].join(', ')}`);
@@ -307,12 +217,15 @@ function formatSessionResult(session: SessionSummarySearchResult): string {
 }
 
 /**
- * Format user prompt as index entry (full text - don't truncate context!)
+ * Format user prompt as index entry (truncated text, date, ID only)
  */
 function formatUserPromptIndex(prompt: UserPromptSearchResult, index: number): string {
+  const truncated = prompt.prompt_text.length > 100
+    ? prompt.prompt_text.substring(0, 100) + '...'
+    : prompt.prompt_text;
   const date = new Date(prompt.created_at_epoch).toLocaleString();
 
-  return `${index + 1}. "${prompt.prompt_text}"
+  return `${index + 1}. "${truncated}"
    Date: ${date} | Prompt #${prompt.prompt_number}
    Source: claude-mem://user-prompt/${prompt.id}`;
 }
@@ -320,7 +233,7 @@ function formatUserPromptIndex(prompt: UserPromptSearchResult, index: number): s
 /**
  * Format user prompt as text content with metadata
  */
-function formatUserPromptResult(prompt: UserPromptSearchResult): string {
+function formatUserPromptResult(prompt: UserPromptSearchResult, index: number): string {
   const contentParts: string[] = [];
   contentParts.push(`## User Prompt #${prompt.prompt_number}`);
   contentParts.push(`*Source: claude-mem://user-prompt/${prompt.id}*`);
@@ -352,69 +265,28 @@ const filterSchema = z.object({
   }).optional().describe('Filter by date range'),
   limit: z.number().min(1).max(100).default(20).describe('Maximum number of results'),
   offset: z.number().min(0).default(0).describe('Number of results to skip'),
-  orderBy: z.enum(['relevance', 'date_desc', 'date_asc']).default('date_desc').describe('Sort order')
+  orderBy: z.enum(['relevance', 'date_desc', 'date_asc']).default('relevance').describe('Sort order')
 });
 
 // Define tool schemas
 const tools = [
   {
     name: 'search_observations',
-    description: 'Search observations using hybrid semantic + full-text search (ChromaDB primary, SQLite FTS5 fallback). IMPORTANT: Always use index format first (default) to get an overview with minimal token usage, then use format: "full" only for specific items of interest.',
+    description: 'Search observations using full-text search across titles, narratives, facts, and concepts. IMPORTANT: Always use index format first (default) to get an overview with minimal token usage, then use format: "full" only for specific items of interest.',
     inputSchema: z.object({
-      query: z.string().describe('Natural language search query (semantic ranking via ChromaDB, FTS5 fallback)'),
+      query: z.string().describe('Search query for FTS5 full-text search'),
       format: z.enum(['index', 'full']).default('index').describe('Output format: "index" for titles/dates only (default, RECOMMENDED for initial search), "full" for complete details (use only after reviewing index results)'),
       ...filterSchema.shape
     }),
     handler: async (args: any) => {
       try {
         const { query, format = 'index', ...options } = args;
-        let results: ObservationSearchResult[] = [];
 
-        // Hybrid search: Try Chroma semantic search first, fall back to FTS5
-        if (chromaClient) {
-          try {
-            console.error('[search-server] Using hybrid semantic search (Chroma + SQLite)');
+        // WORKFLOW 2: Semantic-First, Temporally-Bounded
+        // Step 1: Semantic search via Chroma (top 100)
+        const chromaResult = await chroma.queryDocuments(query, 100);
 
-            // Build where filter for ChromaDB
-            const whereFilter: Record<string, any> = {};
-            if (options.project) {
-              whereFilter.project = options.project;
-            }
-
-            // Step 1: Chroma semantic search (top 100)
-            const chromaResults = await queryChroma(query, 100, Object.keys(whereFilter).length > 0 ? whereFilter : undefined);
-            console.error(`[search-server] Chroma returned ${chromaResults.ids.length} semantic matches`);
-
-            if (chromaResults.ids.length > 0) {
-              // Step 2: Filter by recency (90 days)
-              const ninetyDaysAgo = Date.now() - (90 * 24 * 60 * 60 * 1000);
-              const recentIds = chromaResults.ids.filter((_id, idx) => {
-                const meta = chromaResults.metadatas[idx];
-                return meta && meta.created_at_epoch > ninetyDaysAgo;
-              });
-
-              console.error(`[search-server] ${recentIds.length} results within 90-day window`);
-
-              // Step 3: Hydrate from SQLite in temporal order
-              if (recentIds.length > 0) {
-                const limit = options.limit || 20;
-                results = store.getObservationsByIds(recentIds, { orderBy: 'date_desc', limit });
-                console.error(`[search-server] Hydrated ${results.length} observations from SQLite`);
-              }
-            }
-          } catch (chromaError: any) {
-            console.error('[search-server] Chroma query failed, falling back to FTS5:', chromaError.message);
-            // Fall through to FTS5 fallback
-          }
-        }
-
-        // Fall back to FTS5 if Chroma unavailable or returned no results
-        if (results.length === 0) {
-          console.error('[search-server] Using FTS5 keyword search');
-          results = search.searchObservations(query, options);
-        }
-
-        if (results.length === 0) {
+        if (chromaResult.ids[0].length === 0) {
           return {
             content: [{
               type: 'text' as const,
@@ -423,14 +295,40 @@ const tools = [
           };
         }
 
+        // Step 2: Filter by recency (last 90 days)
+        const ninetyDaysAgo = Date.now() - (90 * 24 * 60 * 60 * 1000);
+        const recentIds = chroma.extractSqliteIds(chromaResult).filter(id => {
+          const meta = chromaResult.metadatas[0].find(m => m.sqlite_id === id);
+          return meta && meta.created_at_epoch > ninetyDaysAgo;
+        });
+
+        if (recentIds.length === 0) {
+          return {
+            content: [{
+              type: 'text' as const,
+              text: `No recent observations found matching "${query}" (searched last 90 days)`
+            }]
+          };
+        }
+
+        // Step 3: Hydrate from SQLite in temporal order
+        const limit = options.limit || 20;
+        const placeholders = recentIds.map(() => '?').join(',');
+        const results = store.db.prepare(`
+          SELECT * FROM observations
+          WHERE id IN (${placeholders})
+          ORDER BY created_at_epoch DESC
+          LIMIT ?
+        `).all(...recentIds, limit) as ObservationSearchResult[];
+
         // Format based on requested format
         let combinedText: string;
         if (format === 'index') {
-          const header = `Found ${results.length} observation(s) matching "${query}":\n\n`;
+          const header = `Found ${results.length} observation(s) matching "${query}" (semantic search, last 90 days):\n\n`;
           const formattedResults = results.map((obs, i) => formatObservationIndex(obs, i));
           combinedText = header + formattedResults.join('\n\n') + formatSearchTips();
         } else {
-          const formattedResults = results.map((obs) => formatObservationResult(obs));
+          const formattedResults = results.map((obs, i) => formatObservationResult(obs, i));
           combinedText = formattedResults.join('\n\n---\n\n');
         }
 
@@ -453,9 +351,9 @@ const tools = [
   },
   {
     name: 'search_sessions',
-    description: 'Search session summaries using hybrid semantic + full-text search (ChromaDB primary, SQLite FTS5 fallback). IMPORTANT: Always use index format first (default) to get an overview with minimal token usage, then use format: "full" only for specific items of interest.',
+    description: 'Search session summaries using full-text search across requests, completions, learnings, and notes. IMPORTANT: Always use index format first (default) to get an overview with minimal token usage, then use format: "full" only for specific items of interest.',
     inputSchema: z.object({
-      query: z.string().describe('Natural language search query (semantic ranking via ChromaDB, FTS5 fallback)'),
+      query: z.string().describe('Search query for FTS5 full-text search'),
       format: z.enum(['index', 'full']).default('index').describe('Output format: "index" for titles/dates only (default, RECOMMENDED for initial search), "full" for complete details (use only after reviewing index results)'),
       project: z.string().optional().describe('Filter by project name'),
       dateRange: z.object({
@@ -464,55 +362,12 @@ const tools = [
       }).optional().describe('Filter by date range'),
       limit: z.number().min(1).max(100).default(20).describe('Maximum number of results'),
       offset: z.number().min(0).default(0).describe('Number of results to skip'),
-      orderBy: z.enum(['relevance', 'date_desc', 'date_asc']).default('date_desc').describe('Sort order')
+      orderBy: z.enum(['relevance', 'date_desc', 'date_asc']).default('relevance').describe('Sort order')
     }),
     handler: async (args: any) => {
       try {
         const { query, format = 'index', ...options } = args;
-        let results: SessionSummarySearchResult[] = [];
-
-        // Hybrid search: Try Chroma semantic search first, fall back to FTS5
-        if (chromaClient) {
-          try {
-            console.error('[search-server] Using hybrid semantic search for sessions');
-
-            // Build where filter for ChromaDB
-            const whereFilter: Record<string, any> = { doc_type: 'session_summary' };
-            if (options.project) {
-              whereFilter.project = options.project;
-            }
-
-            // Step 1: Chroma semantic search (top 100)
-            const chromaResults = await queryChroma(query, 100, whereFilter);
-            console.error(`[search-server] Chroma returned ${chromaResults.ids.length} semantic matches`);
-
-            if (chromaResults.ids.length > 0) {
-              // Step 2: Filter by recency (90 days)
-              const ninetyDaysAgo = Date.now() - (90 * 24 * 60 * 60 * 1000);
-              const recentIds = chromaResults.ids.filter((_id, idx) => {
-                const meta = chromaResults.metadatas[idx];
-                return meta && meta.created_at_epoch > ninetyDaysAgo;
-              });
-
-              console.error(`[search-server] ${recentIds.length} results within 90-day window`);
-
-              // Step 3: Hydrate from SQLite in temporal order
-              if (recentIds.length > 0) {
-                const limit = options.limit || 20;
-                results = store.getSessionSummariesByIds(recentIds, { orderBy: 'date_desc', limit });
-                console.error(`[search-server] Hydrated ${results.length} sessions from SQLite`);
-              }
-            }
-          } catch (chromaError: any) {
-            console.error('[search-server] Chroma query failed, falling back to FTS5:', chromaError.message);
-          }
-        }
-
-        // Fall back to FTS5 if Chroma unavailable or returned no results
-        if (results.length === 0) {
-          console.error('[search-server] Using FTS5 keyword search');
-          results = search.searchSessions(query, options);
-        }
+        const results = search.searchSessions(query, options);
 
         if (results.length === 0) {
           return {
@@ -530,7 +385,7 @@ const tools = [
           const formattedResults = results.map((session, i) => formatSessionIndex(session, i));
           combinedText = header + formattedResults.join('\n\n') + formatSearchTips();
         } else {
-          const formattedResults = results.map((session) => formatSessionResult(session));
+          const formattedResults = results.map((session, i) => formatSessionResult(session, i));
           combinedText = formattedResults.join('\n\n---\n\n');
         }
 
@@ -553,9 +408,9 @@ const tools = [
   },
   {
     name: 'find_by_concept',
-    description: 'Find observations tagged with a specific concept. Available concepts: "discovery", "problem-solution", "what-changed", "how-it-works", "pattern", "gotcha", "change". IMPORTANT: Always use index format first (default) to get an overview with minimal token usage, then use format: "full" only for specific items of interest.',
+    description: 'Find observations tagged with a specific concept. IMPORTANT: Always use index format first (default) to get an overview with minimal token usage, then use format: "full" only for specific items of interest.',
     inputSchema: z.object({
-      concept: z.string().describe('Concept tag to search for. Available: discovery, problem-solution, what-changed, how-it-works, pattern, gotcha, change'),
+      concept: z.string().describe('Concept tag to search for'),
       format: z.enum(['index', 'full']).default('index').describe('Output format: "index" for titles/dates only (default, RECOMMENDED for initial search), "full" for complete details (use only after reviewing index results)'),
       project: z.string().optional().describe('Filter by project name'),
       dateRange: z.object({
@@ -569,52 +424,17 @@ const tools = [
     handler: async (args: any) => {
       try {
         const { concept, format = 'index', ...filters } = args;
-        let results: ObservationSearchResult[] = [];
+        const project = filters.project || basename(process.cwd());
 
-        // Metadata-first, semantic-enhanced search
-        if (chromaClient) {
-          try {
-            console.error('[search-server] Using metadata-first + semantic ranking for concept search');
+        // WORKFLOW 3: Metadata-First, Semantic-Enhanced
+        // Step 1: Filter by concept in SQLite
+        const conceptResults = store.db.prepare(`
+          SELECT id FROM observations
+          WHERE json_extract(concepts, '$') LIKE ?
+          AND project = ?
+        `).all(`%"${concept}"%`, project) as any[];
 
-            // Step 1: SQLite metadata filter (get all IDs with this concept)
-            const metadataResults = search.findByConcept(concept, filters);
-            console.error(`[search-server] Found ${metadataResults.length} observations with concept "${concept}"`);
-
-            if (metadataResults.length > 0) {
-              // Step 2: Chroma semantic ranking (rank by relevance to concept)
-              const ids = metadataResults.map(obs => obs.id);
-              const chromaResults = await queryChroma(concept, Math.min(ids.length, 100));
-
-              // Intersect: Keep only IDs that passed metadata filter, in semantic rank order
-              const rankedIds: number[] = [];
-              for (const chromaId of chromaResults.ids) {
-                if (ids.includes(chromaId) && !rankedIds.includes(chromaId)) {
-                  rankedIds.push(chromaId);
-                }
-              }
-
-              console.error(`[search-server] Chroma ranked ${rankedIds.length} results by semantic relevance`);
-
-              // Step 3: Hydrate in semantic rank order
-              if (rankedIds.length > 0) {
-                results = store.getObservationsByIds(rankedIds, { limit: filters.limit || 20 });
-                // Restore semantic ranking order
-                results.sort((a, b) => rankedIds.indexOf(a.id) - rankedIds.indexOf(b.id));
-              }
-            }
-          } catch (chromaError: any) {
-            console.error('[search-server] Chroma ranking failed, using SQLite order:', chromaError.message);
-            // Fall through to SQLite fallback
-          }
-        }
-
-        // Fall back to SQLite-only if Chroma unavailable or failed
-        if (results.length === 0) {
-          console.error('[search-server] Using SQLite-only concept search');
-          results = search.findByConcept(concept, filters);
-        }
-
-        if (results.length === 0) {
+        if (conceptResults.length === 0) {
           return {
             content: [{
               type: 'text' as const,
@@ -623,14 +443,44 @@ const tools = [
           };
         }
 
+        // Step 2: Rank by semantic relevance via Chroma
+        const conceptIds = conceptResults.map(r => r.id);
+        const chromaResult = await chroma.queryDocuments(
+          concept,
+          conceptIds.length,
+          { sqlite_id: { $in: conceptIds } }
+        );
+
+        // Step 3: Get ranked IDs
+        const limit = filters.limit || 20;
+        const rankedIds = chroma.extractSqliteIds(chromaResult).slice(0, limit);
+
+        if (rankedIds.length === 0) {
+          return {
+            content: [{
+              type: 'text' as const,
+              text: `No observations found with concept "${concept}"`
+            }]
+          };
+        }
+
+        // Step 4: Hydrate full records in semantic rank order
+        const placeholders = rankedIds.map(() => '?').join(',');
+        const caseWhen = rankedIds.map((id, i) => `WHEN ${id} THEN ${i}`).join(' ');
+        const results = store.db.prepare(`
+          SELECT * FROM observations
+          WHERE id IN (${placeholders})
+          ORDER BY CASE id ${caseWhen} END
+        `).all(...rankedIds) as ObservationSearchResult[];
+
         // Format based on requested format
         let combinedText: string;
         if (format === 'index') {
-          const header = `Found ${results.length} observation(s) with concept "${concept}":\n\n`;
+          const header = `Found ${results.length} observation(s) with concept "${concept}" (semantic ranking):\n\n`;
           const formattedResults = results.map((obs, i) => formatObservationIndex(obs, i));
           combinedText = header + formattedResults.join('\n\n') + formatSearchTips();
         } else {
-          const formattedResults = results.map((obs) => formatObservationResult(obs));
+          const formattedResults = results.map((obs, i) => formatObservationResult(obs, i));
           combinedText = formattedResults.join('\n\n---\n\n');
         }
 
@@ -669,59 +519,58 @@ const tools = [
     handler: async (args: any) => {
       try {
         const { filePath, format = 'index', ...filters } = args;
-        let observations: ObservationSearchResult[] = [];
-        let sessions: SessionSummarySearchResult[] = [];
+        const project = filters.project || basename(process.cwd());
 
-        // Metadata-first, semantic-enhanced search for observations
-        if (chromaClient) {
-          try {
-            console.error('[search-server] Using metadata-first + semantic ranking for file search');
+        // WORKFLOW 3: Metadata-First, Semantic-Enhanced (for observations)
+        // Step 1: Filter observations by file path in SQLite
+        const fileResults = store.db.prepare(`
+          SELECT id FROM observations
+          WHERE (
+            json_extract(files_read, '$') LIKE ?
+            OR json_extract(files_modified, '$') LIKE ?
+          )
+          AND project = ?
+        `).all(`%"${filePath}"%`, `%"${filePath}"%`, project) as any[];
 
-            // Step 1: SQLite metadata filter (get all results with this file)
-            const metadataResults = search.findByFile(filePath, filters);
-            console.error(`[search-server] Found ${metadataResults.observations.length} observations, ${metadataResults.sessions.length} sessions for file "${filePath}"`);
+        let rankedObservations: ObservationSearchResult[] = [];
+        if (fileResults.length > 0) {
+          // Step 2: Rank by semantic relevance via Chroma
+          const fileIds = fileResults.map(r => r.id);
+          const chromaResult = await chroma.queryDocuments(
+            filePath,
+            fileIds.length,
+            { sqlite_id: { $in: fileIds } }
+          );
 
-            // Sessions: Keep as-is (already summarized, no semantic ranking needed)
-            sessions = metadataResults.sessions;
+          // Step 3: Get ranked IDs
+          const limit = filters.limit || 20;
+          const rankedIds = chroma.extractSqliteIds(chromaResult).slice(0, limit);
 
-            // Observations: Apply semantic ranking
-            if (metadataResults.observations.length > 0) {
-              // Step 2: Chroma semantic ranking (rank by relevance to file path)
-              const ids = metadataResults.observations.map(obs => obs.id);
-              const chromaResults = await queryChroma(filePath, Math.min(ids.length, 100));
-
-              // Intersect: Keep only IDs that passed metadata filter, in semantic rank order
-              const rankedIds: number[] = [];
-              for (const chromaId of chromaResults.ids) {
-                if (ids.includes(chromaId) && !rankedIds.includes(chromaId)) {
-                  rankedIds.push(chromaId);
-                }
-              }
-
-              console.error(`[search-server] Chroma ranked ${rankedIds.length} observations by semantic relevance`);
-
-              // Step 3: Hydrate in semantic rank order
-              if (rankedIds.length > 0) {
-                observations = store.getObservationsByIds(rankedIds, { limit: filters.limit || 20 });
-                // Restore semantic ranking order
-                observations.sort((a, b) => rankedIds.indexOf(a.id) - rankedIds.indexOf(b.id));
-              }
-            }
-          } catch (chromaError: any) {
-            console.error('[search-server] Chroma ranking failed, using SQLite order:', chromaError.message);
-            // Fall through to SQLite fallback
+          if (rankedIds.length > 0) {
+            // Step 4: Hydrate full records in semantic rank order
+            const placeholders = rankedIds.map(() => '?').join(',');
+            const caseWhen = rankedIds.map((id, i) => `WHEN ${id} THEN ${i}`).join(' ');
+            rankedObservations = store.db.prepare(`
+              SELECT * FROM observations
+              WHERE id IN (${placeholders})
+              ORDER BY CASE id ${caseWhen} END
+            `).all(...rankedIds) as ObservationSearchResult[];
           }
         }
 
-        // Fall back to SQLite-only if Chroma unavailable or failed
-        if (observations.length === 0 && sessions.length === 0) {
-          console.error('[search-server] Using SQLite-only file search');
-          const results = search.findByFile(filePath, filters);
-          observations = results.observations;
-          sessions = results.sessions;
-        }
+        // Get sessions (temporal order, no semantic ranking needed)
+        const sessions = store.db.prepare(`
+          SELECT * FROM session_summaries
+          WHERE (
+            json_extract(files_read, '$') LIKE ?
+            OR json_extract(files_edited, '$') LIKE ?
+          )
+          AND project = ?
+          ORDER BY created_at DESC
+          LIMIT ?
+        `).all(`%"${filePath}"%`, `%"${filePath}"%`, project, 10) as SessionSummarySearchResult[];
 
-        const totalResults = observations.length + sessions.length;
+        const totalResults = rankedObservations.length + sessions.length;
 
         if (totalResults === 0) {
           return {
@@ -734,17 +583,17 @@ const tools = [
 
         let combinedText: string;
         if (format === 'index') {
-          const header = `Found ${totalResults} result(s) for file "${filePath}":\n\n`;
+          const header = `Found ${totalResults} result(s) for file "${filePath}" (semantic ranking):\n\n`;
           const formattedResults: string[] = [];
 
           // Add observations
-          observations.forEach((obs, i) => {
+          rankedObservations.forEach((obs, i) => {
             formattedResults.push(formatObservationIndex(obs, i));
           });
 
           // Add sessions
           sessions.forEach((session, i) => {
-            formattedResults.push(formatSessionIndex(session, i + observations.length));
+            formattedResults.push(formatSessionIndex(session, i + rankedObservations.length));
           });
 
           combinedText = header + formattedResults.join('\n\n') + formatSearchTips();
@@ -752,13 +601,13 @@ const tools = [
           const formattedResults: string[] = [];
 
           // Add observations
-          observations.forEach((obs) => {
-            formattedResults.push(formatObservationResult(obs));
+          rankedObservations.forEach((obs, i) => {
+            formattedResults.push(formatObservationResult(obs, i));
           });
 
           // Add sessions
-          sessions.forEach((session) => {
-            formattedResults.push(formatSessionResult(session));
+          sessions.forEach((session, i) => {
+            formattedResults.push(formatSessionResult(session, i + rankedObservations.length));
           });
 
           combinedText = formattedResults.join('\n\n---\n\n');
@@ -802,53 +651,19 @@ const tools = [
     handler: async (args: any) => {
       try {
         const { type, format = 'index', ...filters } = args;
-        const typeStr = Array.isArray(type) ? type.join(', ') : type;
-        let results: ObservationSearchResult[] = [];
+        const project = filters.project || basename(process.cwd());
 
-        // Metadata-first, semantic-enhanced search
-        if (chromaClient) {
-          try {
-            console.error('[search-server] Using metadata-first + semantic ranking for type search');
+        // WORKFLOW 3: Metadata-First, Semantic-Enhanced
+        // Step 1: Filter by type in SQLite
+        const typeFilter = Array.isArray(type) ? type : [type];
+        const typeResults = store.db.prepare(`
+          SELECT id FROM observations
+          WHERE type IN (${typeFilter.map(() => '?').join(',')})
+          AND project = ?
+        `).all(...typeFilter, project) as any[];
 
-            // Step 1: SQLite metadata filter (get all IDs with this type)
-            const metadataResults = search.findByType(type, filters);
-            console.error(`[search-server] Found ${metadataResults.length} observations with type "${typeStr}"`);
-
-            if (metadataResults.length > 0) {
-              // Step 2: Chroma semantic ranking (rank by relevance to type)
-              const ids = metadataResults.map(obs => obs.id);
-              const chromaResults = await queryChroma(typeStr, Math.min(ids.length, 100));
-
-              // Intersect: Keep only IDs that passed metadata filter, in semantic rank order
-              const rankedIds: number[] = [];
-              for (const chromaId of chromaResults.ids) {
-                if (ids.includes(chromaId) && !rankedIds.includes(chromaId)) {
-                  rankedIds.push(chromaId);
-                }
-              }
-
-              console.error(`[search-server] Chroma ranked ${rankedIds.length} results by semantic relevance`);
-
-              // Step 3: Hydrate in semantic rank order
-              if (rankedIds.length > 0) {
-                results = store.getObservationsByIds(rankedIds, { limit: filters.limit || 20 });
-                // Restore semantic ranking order
-                results.sort((a, b) => rankedIds.indexOf(a.id) - rankedIds.indexOf(b.id));
-              }
-            }
-          } catch (chromaError: any) {
-            console.error('[search-server] Chroma ranking failed, using SQLite order:', chromaError.message);
-            // Fall through to SQLite fallback
-          }
-        }
-
-        // Fall back to SQLite-only if Chroma unavailable or failed
-        if (results.length === 0) {
-          console.error('[search-server] Using SQLite-only type search');
-          results = search.findByType(type, filters);
-        }
-
-        if (results.length === 0) {
+        if (typeResults.length === 0) {
+          const typeStr = Array.isArray(type) ? type.join(', ') : type;
           return {
             content: [{
               type: 'text' as const,
@@ -857,14 +672,46 @@ const tools = [
           };
         }
 
+        // Step 2: Rank by semantic relevance via Chroma
+        const typeIds = typeResults.map(r => r.id);
+        const chromaResult = await chroma.queryDocuments(
+          project,
+          typeIds.length,
+          { sqlite_id: { $in: typeIds } }
+        );
+
+        // Step 3: Get ranked IDs
+        const limit = filters.limit || 20;
+        const rankedIds = chroma.extractSqliteIds(chromaResult).slice(0, limit);
+
+        if (rankedIds.length === 0) {
+          const typeStr = Array.isArray(type) ? type.join(', ') : type;
+          return {
+            content: [{
+              type: 'text' as const,
+              text: `No observations found with type "${typeStr}"`
+            }]
+          };
+        }
+
+        // Step 4: Hydrate full records in semantic rank order
+        const placeholders = rankedIds.map(() => '?').join(',');
+        const caseWhen = rankedIds.map((id, i) => `WHEN ${id} THEN ${i}`).join(' ');
+        const results = store.db.prepare(`
+          SELECT * FROM observations
+          WHERE id IN (${placeholders})
+          ORDER BY CASE id ${caseWhen} END
+        `).all(...rankedIds) as ObservationSearchResult[];
+
         // Format based on requested format
+        const typeStr = Array.isArray(type) ? type.join(', ') : type;
         let combinedText: string;
         if (format === 'index') {
-          const header = `Found ${results.length} observation(s) with type "${typeStr}":\n\n`;
+          const header = `Found ${results.length} observation(s) with type "${typeStr}" (semantic ranking):\n\n`;
           const formattedResults = results.map((obs, i) => formatObservationIndex(obs, i));
           combinedText = header + formattedResults.join('\n\n') + formatSearchTips();
         } else {
-          const formattedResults = results.map((obs) => formatObservationResult(obs));
+          const formattedResults = results.map((obs, i) => formatObservationResult(obs, i));
           combinedText = formattedResults.join('\n\n---\n\n');
         }
 
@@ -1025,9 +872,9 @@ const tools = [
   },
   {
     name: 'search_user_prompts',
-    description: 'Search raw user prompts using hybrid semantic + full-text search (ChromaDB primary, SQLite FTS5 fallback). Use this to find what the user actually said/requested across all sessions. IMPORTANT: Always use index format first (default) to get an overview with minimal token usage, then use format: "full" only for specific items of interest.',
+    description: 'Search raw user prompts with full-text search. Use this to find what the user actually said/requested across all sessions. IMPORTANT: Always use index format first (default) to get an overview with minimal token usage, then use format: "full" only for specific items of interest.',
     inputSchema: z.object({
-      query: z.string().describe('Natural language search query (semantic ranking via ChromaDB, FTS5 fallback)'),
+      query: z.string().describe('Search query for FTS5 full-text search'),
       format: z.enum(['index', 'full']).default('index').describe('Output format: "index" for truncated prompts/dates (default, RECOMMENDED for initial search), "full" for complete prompt text (use only after reviewing index results)'),
       project: z.string().optional().describe('Filter by project name'),
       dateRange: z.object({
@@ -1036,55 +883,12 @@ const tools = [
       }).optional().describe('Filter by date range'),
       limit: z.number().min(1).max(100).default(20).describe('Maximum number of results'),
       offset: z.number().min(0).default(0).describe('Number of results to skip'),
-      orderBy: z.enum(['relevance', 'date_desc', 'date_asc']).default('date_desc').describe('Sort order')
+      orderBy: z.enum(['relevance', 'date_desc', 'date_asc']).default('relevance').describe('Sort order')
     }),
     handler: async (args: any) => {
       try {
         const { query, format = 'index', ...options } = args;
-        let results: UserPromptSearchResult[] = [];
-
-        // Hybrid search: Try Chroma semantic search first, fall back to FTS5
-        if (chromaClient) {
-          try {
-            console.error('[search-server] Using hybrid semantic search for user prompts');
-
-            // Build where filter for ChromaDB
-            const whereFilter: Record<string, any> = { doc_type: 'user_prompt' };
-            if (options.project) {
-              whereFilter.project = options.project;
-            }
-
-            // Step 1: Chroma semantic search (top 100)
-            const chromaResults = await queryChroma(query, 100, whereFilter);
-            console.error(`[search-server] Chroma returned ${chromaResults.ids.length} semantic matches`);
-
-            if (chromaResults.ids.length > 0) {
-              // Step 2: Filter by recency (90 days)
-              const ninetyDaysAgo = Date.now() - (90 * 24 * 60 * 60 * 1000);
-              const recentIds = chromaResults.ids.filter((_id, idx) => {
-                const meta = chromaResults.metadatas[idx];
-                return meta && meta.created_at_epoch > ninetyDaysAgo;
-              });
-
-              console.error(`[search-server] ${recentIds.length} results within 90-day window`);
-
-              // Step 3: Hydrate from SQLite in temporal order
-              if (recentIds.length > 0) {
-                const limit = options.limit || 20;
-                results = store.getUserPromptsByIds(recentIds, { orderBy: 'date_desc', limit });
-                console.error(`[search-server] Hydrated ${results.length} user prompts from SQLite`);
-              }
-            }
-          } catch (chromaError: any) {
-            console.error('[search-server] Chroma query failed, falling back to FTS5:', chromaError.message);
-          }
-        }
-
-        // Fall back to FTS5 if Chroma unavailable or returned no results
-        if (results.length === 0) {
-          console.error('[search-server] Using FTS5 keyword search');
-          results = search.searchUserPrompts(query, options);
-        }
+        const results = search.searchUserPrompts(query, options);
 
         if (results.length === 0) {
           return {
@@ -1102,7 +906,7 @@ const tools = [
           const formattedResults = results.map((prompt, i) => formatUserPromptIndex(prompt, i));
           combinedText = header + formattedResults.join('\n\n') + formatSearchTips();
         } else {
-          const formattedResults = results.map((prompt) => formatUserPromptResult(prompt));
+          const formattedResults = results.map((prompt, i) => formatUserPromptResult(prompt, i));
           combinedText = formattedResults.join('\n\n---\n\n');
         }
 
@@ -1117,612 +921,6 @@ const tools = [
           content: [{
             type: 'text' as const,
             text: `Search failed: ${error.message}`
-          }],
-          isError: true
-        };
-      }
-    }
-  },
-  {
-    name: 'get_context_timeline',
-    description: 'Get a unified timeline of context (observations, sessions, and prompts) around a specific point in time. All record types are interleaved chronologically. Useful for understanding "what was happening when X occurred". Returns depth_before records before anchor + anchor + depth_after records after (total: depth_before + 1 + depth_after mixed records).',
-    inputSchema: z.object({
-      anchor: z.union([
-        z.number().describe('Observation ID to center timeline around'),
-        z.string().describe('Session ID (format: S123) or ISO timestamp to center timeline around')
-      ]).describe('Anchor point: observation ID, session ID (e.g., "S123"), or ISO timestamp'),
-      depth_before: z.number().min(0).max(50).default(10).describe('Number of records to retrieve before anchor, not including anchor (default: 10)'),
-      depth_after: z.number().min(0).max(50).default(10).describe('Number of records to retrieve after anchor, not including anchor (default: 10)'),
-      project: z.string().optional().describe('Filter by project name')
-    }),
-    handler: async (args: any) => {
-      try {
-        const { anchor, depth_before = 10, depth_after = 10, project } = args;
-        let anchorEpoch: number;
-        let anchorId: string | number = anchor;
-
-        // Resolve anchor and get timeline data
-        let timeline;
-        if (typeof anchor === 'number') {
-          // Observation ID - use ID-based boundary detection
-          const obs = store.getObservationById(anchor);
-          if (!obs) {
-            return {
-              content: [{
-                type: 'text' as const,
-                text: `Observation #${anchor} not found`
-              }],
-              isError: true
-            };
-          }
-          anchorEpoch = obs.created_at_epoch;
-          timeline = store.getTimelineAroundObservation(anchor, anchorEpoch, depth_before, depth_after, project);
-        } else if (typeof anchor === 'string') {
-          // Session ID or ISO timestamp
-          if (anchor.startsWith('S') || anchor.startsWith('#S')) {
-            const sessionId = anchor.replace(/^#?S/, '');
-            const sessionNum = parseInt(sessionId, 10);
-            const sessions = store.getSessionSummariesByIds([sessionNum]);
-            if (sessions.length === 0) {
-              return {
-                content: [{
-                  type: 'text' as const,
-                  text: `Session #${sessionNum} not found`
-                }],
-                isError: true
-              };
-            }
-            anchorEpoch = sessions[0].created_at_epoch;
-            anchorId = `S${sessionNum}`;
-            timeline = store.getTimelineAroundTimestamp(anchorEpoch, depth_before, depth_after, project);
-          } else {
-            // ISO timestamp
-            const date = new Date(anchor);
-            if (isNaN(date.getTime())) {
-              return {
-                content: [{
-                  type: 'text' as const,
-                  text: `Invalid timestamp: ${anchor}`
-                }],
-                isError: true
-              };
-            }
-            anchorEpoch = date.getTime(); // Keep as milliseconds
-            timeline = store.getTimelineAroundTimestamp(anchorEpoch, depth_before, depth_after, project);
-          }
-        } else {
-          return {
-            content: [{
-              type: 'text' as const,
-              text: 'Invalid anchor: must be observation ID (number), session ID (e.g., "S123"), or ISO timestamp'
-            }],
-            isError: true
-          };
-        }
-
-        // Combine and sort all items chronologically
-        interface TimelineItem {
-          type: 'observation' | 'session' | 'prompt';
-          data: any;
-          epoch: number;
-        }
-
-        const items: TimelineItem[] = [
-          ...timeline.observations.map(obs => ({ type: 'observation' as const, data: obs, epoch: obs.created_at_epoch })),
-          ...timeline.sessions.map(sess => ({ type: 'session' as const, data: sess, epoch: sess.created_at_epoch })),
-          ...timeline.prompts.map(prompt => ({ type: 'prompt' as const, data: prompt, epoch: prompt.created_at_epoch }))
-        ];
-
-        items.sort((a, b) => a.epoch - b.epoch);
-
-        if (items.length === 0) {
-          const anchorDate = new Date(anchorEpoch).toLocaleString();
-          return {
-            content: [{
-              type: 'text' as const,
-              text: `No context found around ${anchorDate} (${depth_before} records before, ${depth_after} records after)`
-            }]
-          };
-        }
-
-        // Helper functions matching context-hook.ts
-        function formatDate(epochMs: number): string {
-          const date = new Date(epochMs);
-          return date.toLocaleString('en-US', {
-            month: 'short',
-            day: 'numeric',
-            year: 'numeric'
-          });
-        }
-
-        function formatTime(epochMs: number): string {
-          const date = new Date(epochMs);
-          return date.toLocaleString('en-US', {
-            hour: 'numeric',
-            minute: '2-digit',
-            hour12: true
-          });
-        }
-
-        function formatDateTime(epochMs: number): string {
-          const date = new Date(epochMs);
-          return date.toLocaleString('en-US', {
-            month: 'short',
-            day: 'numeric',
-            hour: 'numeric',
-            minute: '2-digit',
-            hour12: true
-          });
-        }
-
-        function estimateTokens(text: string | null): number {
-          if (!text) return 0;
-          return Math.ceil(text.length / 4);
-        }
-
-        // Format results matching context-hook.ts exactly
-        const lines: string[] = [];
-
-        // Header
-        lines.push(`# Timeline around anchor: ${anchorId}`);
-        lines.push(`**Window:** ${depth_before} records before → ${depth_after} records after | **Items:** ${items.length} (${timeline.observations.length} obs, ${timeline.sessions.length} sessions, ${timeline.prompts.length} prompts)`);
-        lines.push('');
-
-        // Legend
-        lines.push(`**Legend:** 🎯 session-request | 🔴 bugfix | 🟣 feature | 🔄 refactor | ✅ change | 🔵 discovery | 🧠 decision`);
-        lines.push('');
-
-        // Group by day
-        const dayMap = new Map<string, TimelineItem[]>();
-        for (const item of items) {
-          const day = formatDate(item.epoch);
-          if (!dayMap.has(day)) {
-            dayMap.set(day, []);
-          }
-          dayMap.get(day)!.push(item);
-        }
-
-        // Sort days chronologically
-        const sortedDays = Array.from(dayMap.entries()).sort((a, b) => {
-          const aDate = new Date(a[0]).getTime();
-          const bDate = new Date(b[0]).getTime();
-          return aDate - bDate;
-        });
-
-        // Render each day
-        for (const [day, dayItems] of sortedDays) {
-          lines.push(`### ${day}`);
-          lines.push('');
-
-          let currentFile: string | null = null;
-          let lastTime = '';
-          let tableOpen = false;
-
-          for (const item of dayItems) {
-            const isAnchor = (
-              (typeof anchorId === 'number' && item.type === 'observation' && item.data.id === anchorId) ||
-              (typeof anchorId === 'string' && anchorId.startsWith('S') && item.type === 'session' && `S${item.data.id}` === anchorId)
-            );
-
-            if (item.type === 'session') {
-              // Close any open table
-              if (tableOpen) {
-                lines.push('');
-                tableOpen = false;
-                currentFile = null;
-                lastTime = '';
-              }
-
-              // Render session
-              const sess = item.data;
-              const title = sess.request || 'Session summary';
-              const link = `claude-mem://session-summary/${sess.id}`;
-              const marker = isAnchor ? ' ← **ANCHOR**' : '';
-
-              lines.push(`**🎯 #S${sess.id}** ${title} (${formatDateTime(item.epoch)}) [→](${link})${marker}`);
-              lines.push('');
-            } else if (item.type === 'prompt') {
-              // Close any open table
-              if (tableOpen) {
-                lines.push('');
-                tableOpen = false;
-                currentFile = null;
-                lastTime = '';
-              }
-
-              // Render prompt
-              const prompt = item.data;
-              const truncated = prompt.prompt.length > 100 ? prompt.prompt.substring(0, 100) + '...' : prompt.prompt;
-
-              lines.push(`**💬 User Prompt #${prompt.prompt_number}** (${formatDateTime(item.epoch)})`);
-              lines.push(`> ${truncated}`);
-              lines.push('');
-            } else if (item.type === 'observation') {
-              // Render observation in table
-              const obs = item.data;
-              const file = 'General'; // Simplified for timeline view
-
-              // Check if we need a new file section
-              if (file !== currentFile) {
-                // Close previous table
-                if (tableOpen) {
-                  lines.push('');
-                }
-
-                // File header
-                lines.push(`**${file}**`);
-                lines.push(`| ID | Time | T | Title | Tokens |`);
-                lines.push(`|----|------|---|-------|--------|`);
-
-                currentFile = file;
-                tableOpen = true;
-                lastTime = '';
-              }
-
-              // Map observation type to emoji
-              let icon = '•';
-              switch (obs.type) {
-                case 'bugfix': icon = '🔴'; break;
-                case 'feature': icon = '🟣'; break;
-                case 'refactor': icon = '🔄'; break;
-                case 'change': icon = '✅'; break;
-                case 'discovery': icon = '🔵'; break;
-                case 'decision': icon = '🧠'; break;
-              }
-
-              const time = formatTime(item.epoch);
-              const title = obs.title || 'Untitled';
-              const tokens = estimateTokens(obs.narrative);
-
-              const showTime = time !== lastTime;
-              const timeDisplay = showTime ? time : '″';
-              lastTime = time;
-
-              const anchorMarker = isAnchor ? ' ← **ANCHOR**' : '';
-              lines.push(`| #${obs.id} | ${timeDisplay} | ${icon} | ${title}${anchorMarker} | ~${tokens} |`);
-            }
-          }
-
-          // Close final table if open
-          if (tableOpen) {
-            lines.push('');
-          }
-        }
-
-        return {
-          content: [{
-            type: 'text' as const,
-            text: lines.join('\n')
-          }]
-        };
-      } catch (error: any) {
-        return {
-          content: [{
-            type: 'text' as const,
-            text: `Timeline query failed: ${error.message}`
-          }],
-          isError: true
-        };
-      }
-    }
-  },
-  {
-    name: 'get_timeline_by_query',
-    description: 'Search for observations using natural language and get timeline context around the best match. Two modes: "auto" (default) automatically uses top result as timeline anchor; "interactive" returns top matches for you to choose from. This combines search + timeline into a single operation for faster context discovery.',
-    inputSchema: z.object({
-      query: z.string().describe('Natural language search query to find relevant observations'),
-      mode: z.enum(['auto', 'interactive']).default('auto').describe('auto: Automatically use top search result as timeline anchor. interactive: Show top N search results for manual anchor selection.'),
-      depth_before: z.number().min(0).max(50).default(10).describe('Number of timeline records before anchor (default: 10)'),
-      depth_after: z.number().min(0).max(50).default(10).describe('Number of timeline records after anchor (default: 10)'),
-      limit: z.number().min(1).max(20).default(5).describe('For interactive mode: number of top search results to display (default: 5)'),
-      project: z.string().optional().describe('Filter by project name')
-    }),
-    handler: async (args: any) => {
-      try {
-        const { query, mode = 'auto', depth_before = 10, depth_after = 10, limit = 5, project } = args;
-
-        // Step 1: Search for observations
-        let results: ObservationSearchResult[] = [];
-
-        // Use hybrid search if available
-        if (chromaClient) {
-          try {
-            console.error('[search-server] Using hybrid semantic search for timeline query');
-            
-            // Build where filter for ChromaDB
-            const whereFilter: Record<string, any> = {};
-            if (project) {
-              whereFilter.project = project;
-            }
-            
-            const chromaResults = await queryChroma(query, 100, Object.keys(whereFilter).length > 0 ? whereFilter : undefined);
-            console.error(`[search-server] Chroma returned ${chromaResults.ids.length} semantic matches`);
-
-            if (chromaResults.ids.length > 0) {
-              // Filter by recency (90 days)
-              const ninetyDaysAgo = Date.now() - (90 * 24 * 60 * 60 * 1000);
-              const recentIds = chromaResults.ids.filter((_id, idx) => {
-                const meta = chromaResults.metadatas[idx];
-                return meta && meta.created_at_epoch > ninetyDaysAgo;
-              });
-
-              console.error(`[search-server] ${recentIds.length} results within 90-day window`);
-
-              if (recentIds.length > 0) {
-                results = store.getObservationsByIds(recentIds, { orderBy: 'date_desc', limit: mode === 'auto' ? 1 : limit });
-                console.error(`[search-server] Hydrated ${results.length} observations from SQLite`);
-              }
-            }
-          } catch (chromaError: any) {
-            console.error('[search-server] Chroma query failed, falling back to FTS5:', chromaError.message);
-          }
-        }
-
-        // Fall back to FTS5
-        if (results.length === 0) {
-          console.error('[search-server] Using FTS5 keyword search');
-          results = search.searchObservations(query, {
-            orderBy: 'relevance',
-            limit: mode === 'auto' ? 1 : limit,
-            project
-          });
-        }
-
-        if (results.length === 0) {
-          return {
-            content: [{
-              type: 'text' as const,
-              text: `No observations found matching "${query}". Try a different search query.`
-            }]
-          };
-        }
-
-        // Step 2: Handle based on mode
-        if (mode === 'interactive') {
-          // Return formatted index of top results for LLM to choose from
-          const lines: string[] = [];
-          lines.push(`# Timeline Anchor Search Results`);
-          lines.push('');
-          lines.push(`Found ${results.length} observation(s) matching "${query}"`);
-          lines.push('');
-          lines.push(`To get timeline context around any of these observations, use the \`get_context_timeline\` tool with the observation ID as the anchor.`);
-          lines.push('');
-          lines.push(`**Top ${results.length} matches:**`);
-          lines.push('');
-
-          for (let i = 0; i < results.length; i++) {
-            const obs = results[i];
-            const title = obs.title || `Observation #${obs.id}`;
-            const date = new Date(obs.created_at_epoch).toLocaleString();
-            const type = obs.type ? `[${obs.type}]` : '';
-
-            lines.push(`${i + 1}. **${type} ${title}**`);
-            lines.push(`   - ID: ${obs.id}`);
-            lines.push(`   - Date: ${date}`);
-            if (obs.subtitle) {
-              lines.push(`   - ${obs.subtitle}`);
-            }
-            lines.push(`   - Source: claude-mem://observation/${obs.id}`);
-            lines.push('');
-          }
-
-          return {
-            content: [{
-              type: 'text' as const,
-              text: lines.join('\n')
-            }]
-          };
-        } else {
-          // Auto mode: Use top result as timeline anchor
-          const topResult = results[0];
-          console.error(`[search-server] Auto mode: Using observation #${topResult.id} as timeline anchor`);
-
-          // Get timeline around this observation
-          const timeline = store.getTimelineAroundObservation(
-            topResult.id,
-            topResult.created_at_epoch,
-            depth_before,
-            depth_after,
-            project
-          );
-
-          // Combine and sort all items chronologically (same logic as get_context_timeline)
-          interface TimelineItem {
-            type: 'observation' | 'session' | 'prompt';
-            data: any;
-            epoch: number;
-          }
-
-          const items: TimelineItem[] = [
-            ...timeline.observations.map(obs => ({ type: 'observation' as const, data: obs, epoch: obs.created_at_epoch })),
-            ...timeline.sessions.map(sess => ({ type: 'session' as const, data: sess, epoch: sess.created_at_epoch })),
-            ...timeline.prompts.map(prompt => ({ type: 'prompt' as const, data: prompt, epoch: prompt.created_at_epoch }))
-          ];
-
-          items.sort((a, b) => a.epoch - b.epoch);
-
-          if (items.length === 0) {
-            return {
-              content: [{
-                type: 'text' as const,
-                text: `Found observation #${topResult.id} matching "${query}", but no timeline context available (${depth_before} records before, ${depth_after} records after).`
-              }]
-            };
-          }
-
-          // Helper functions (reused from get_context_timeline)
-          function formatDate(epochMs: number): string {
-            const date = new Date(epochMs);
-            return date.toLocaleString('en-US', {
-              month: 'short',
-              day: 'numeric',
-              year: 'numeric'
-            });
-          }
-
-          function formatTime(epochMs: number): string {
-            const date = new Date(epochMs);
-            return date.toLocaleString('en-US', {
-              hour: 'numeric',
-              minute: '2-digit',
-              hour12: true
-            });
-          }
-
-          function formatDateTime(epochMs: number): string {
-            const date = new Date(epochMs);
-            return date.toLocaleString('en-US', {
-              month: 'short',
-              day: 'numeric',
-              hour: 'numeric',
-              minute: '2-digit',
-              hour12: true
-            });
-          }
-
-          function estimateTokens(text: string | null): number {
-            if (!text) return 0;
-            return Math.ceil(text.length / 4);
-          }
-
-          // Format timeline (reused from get_context_timeline)
-          const lines: string[] = [];
-
-          // Header
-          lines.push(`# Timeline for query: "${query}"`);
-          lines.push(`**Anchor:** Observation #${topResult.id} - ${topResult.title || 'Untitled'}`);
-          lines.push(`**Window:** ${depth_before} records before → ${depth_after} records after | **Items:** ${items.length} (${timeline.observations.length} obs, ${timeline.sessions.length} sessions, ${timeline.prompts.length} prompts)`);
-          lines.push('');
-
-          // Legend
-          lines.push(`**Legend:** 🎯 session-request | 🔴 bugfix | 🟣 feature | 🔄 refactor | ✅ change | 🔵 discovery | 🧠 decision`);
-          lines.push('');
-
-          // Group by day
-          const dayMap = new Map<string, TimelineItem[]>();
-          for (const item of items) {
-            const day = formatDate(item.epoch);
-            if (!dayMap.has(day)) {
-              dayMap.set(day, []);
-            }
-            dayMap.get(day)!.push(item);
-          }
-
-          // Sort days chronologically
-          const sortedDays = Array.from(dayMap.entries()).sort((a, b) => {
-            const aDate = new Date(a[0]).getTime();
-            const bDate = new Date(b[0]).getTime();
-            return aDate - bDate;
-          });
-
-          // Render each day
-          for (const [day, dayItems] of sortedDays) {
-            lines.push(`### ${day}`);
-            lines.push('');
-
-            let currentFile: string | null = null;
-            let lastTime = '';
-            let tableOpen = false;
-
-            for (const item of dayItems) {
-              const isAnchor = (item.type === 'observation' && item.data.id === topResult.id);
-
-              if (item.type === 'session') {
-                // Close any open table
-                if (tableOpen) {
-                  lines.push('');
-                  tableOpen = false;
-                  currentFile = null;
-                  lastTime = '';
-                }
-
-                // Render session
-                const sess = item.data;
-                const title = sess.request || 'Session summary';
-                const link = `claude-mem://session-summary/${sess.id}`;
-
-                lines.push(`**🎯 #S${sess.id}** ${title} (${formatDateTime(item.epoch)}) [→](${link})`);
-                lines.push('');
-              } else if (item.type === 'prompt') {
-                // Close any open table
-                if (tableOpen) {
-                  lines.push('');
-                  tableOpen = false;
-                  currentFile = null;
-                  lastTime = '';
-                }
-
-                // Render prompt
-                const prompt = item.data;
-                const truncated = prompt.prompt.length > 100 ? prompt.prompt.substring(0, 100) + '...' : prompt.prompt;
-
-                lines.push(`**💬 User Prompt #${prompt.prompt_number}** (${formatDateTime(item.epoch)})`);
-                lines.push(`> ${truncated}`);
-                lines.push('');
-              } else if (item.type === 'observation') {
-                // Render observation in table
-                const obs = item.data;
-                const file = 'General'; // Simplified for timeline view
-
-                // Check if we need a new file section
-                if (file !== currentFile) {
-                  // Close previous table
-                  if (tableOpen) {
-                    lines.push('');
-                  }
-
-                  // File header
-                  lines.push(`**${file}**`);
-                  lines.push(`| ID | Time | T | Title | Tokens |`);
-                  lines.push(`|----|------|---|-------|--------|`);
-
-                  currentFile = file;
-                  tableOpen = true;
-                  lastTime = '';
-                }
-
-                // Map observation type to emoji
-                let icon = '•';
-                switch (obs.type) {
-                  case 'bugfix': icon = '🔴'; break;
-                  case 'feature': icon = '🟣'; break;
-                  case 'refactor': icon = '🔄'; break;
-                  case 'change': icon = '✅'; break;
-                  case 'discovery': icon = '🔵'; break;
-                  case 'decision': icon = '🧠'; break;
-                }
-
-                const time = formatTime(item.epoch);
-                const title = obs.title || 'Untitled';
-                const tokens = estimateTokens(obs.narrative);
-
-                const showTime = time !== lastTime;
-                const timeDisplay = showTime ? time : '″';
-                lastTime = time;
-
-                const anchorMarker = isAnchor ? ' ← **ANCHOR**' : '';
-                lines.push(`| #${obs.id} | ${timeDisplay} | ${icon} | ${title}${anchorMarker} | ~${tokens} |`);
-              }
-            }
-
-            // Close final table if open
-            if (tableOpen) {
-              lines.push('');
-            }
-          }
-
-          return {
-            content: [{
-              type: 'text' as const,
-              text: lines.join('\n')
-            }]
-          };
-        }
-      } catch (error: any) {
-        return {
-          content: [{
-            type: 'text' as const,
-            text: `Timeline query failed: ${error.message}`
           }],
           isError: true
         };
@@ -1778,80 +976,29 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   }
 });
 
-// Cleanup function to properly terminate all child processes
-async function cleanup() {
-  console.error('[search-server] Shutting down...');
-  
-  // Close Chroma client (terminates uvx/python processes)
-  if (chromaClient) {
-    try {
-      await chromaClient.close();
-      console.error('[search-server] Chroma client closed');
-    } catch (error: any) {
-      console.error('[search-server] Error closing Chroma client:', error.message);
-    }
-  }
-  
-  // Close database connections
-  if (search) {
-    try {
-      search.close();
-      console.error('[search-server] SessionSearch closed');
-    } catch (error: any) {
-      console.error('[search-server] Error closing SessionSearch:', error.message);
-    }
-  }
-  
-  if (store) {
-    try {
-      store.close();
-      console.error('[search-server] SessionStore closed');
-    } catch (error: any) {
-      console.error('[search-server] Error closing SessionStore:', error.message);
-    }
-  }
-  
-  console.error('[search-server] Shutdown complete');
-  process.exit(0);
-}
-
-// Register cleanup handlers for graceful shutdown
-process.on('SIGTERM', cleanup);
-process.on('SIGINT', cleanup);
-
 // Start the server
 async function main() {
-  // Start the MCP server FIRST (critical - must start before blocking operations)
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
-  console.error('[search-server] Claude-mem search server started');
+  try {
+    // Initialize SQLite services
+    search = new SessionSearch();
+    store = new SessionStore();
+    console.error('[search-server] SQLite services initialized');
 
-  // Initialize Chroma client in background (non-blocking)
-  setTimeout(async () => {
-    try {
-      console.error('[search-server] Initializing Chroma client...');
-      const chromaTransport = new StdioClientTransport({
-        command: 'uvx',
-        args: ['chroma-mcp', '--client-type', 'persistent', '--data-dir', VECTOR_DB_DIR],
-        stderr: 'ignore'
-      });
+    // Initialize Chroma MCP client
+    chroma = new ChromaOrchestrator();
+    await chroma.connect();
+    console.error('[search-server] Chroma MCP client connected');
 
-      const client = new Client({
-        name: 'claude-mem-search-chroma-client',
-        version: '1.0.0'
-      }, {
-        capabilities: {}
-      });
-
-      await client.connect(chromaTransport);
-      chromaClient = client;
-      console.error('[search-server] Chroma client connected successfully');
-    } catch (error: any) {
-      console.error('[search-server] Failed to initialize Chroma client:', error.message);
-      console.error('[search-server] Falling back to FTS5-only search');
-      chromaClient = null;
-    }
-  }, 0);
+    // Start MCP server
+    const transport = new StdioServerTransport();
+    await server.connect(transport);
+    console.error('[search-server] Claude-mem search server started');
+  } catch (error: any) {
+    console.error('[search-server] Failed to initialize:', error.message);
+    console.error('[search-server] Error stack:', error.stack);
+    console.error('[search-server] Full error:', JSON.stringify(error, null, 2));
+    process.exit(1);
+  }
 }
 
 main().catch((error) => {

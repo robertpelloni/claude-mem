@@ -3,8 +3,6 @@ import { homedir } from 'os';
 import { existsSync, mkdirSync } from 'fs';
 import { execSync } from 'child_process';
 import { fileURLToPath } from 'url';
-import { SettingsDefaultsManager } from './SettingsDefaultsManager.js';
-import { logger } from '../utils/logger.js';
 
 // Get __dirname that works in both ESM (hooks) and CJS (worker) contexts
 function getDirname(): string {
@@ -24,26 +22,17 @@ const _dirname = getDirname();
  */
 
 // Base directories
-export const DATA_DIR = SettingsDefaultsManager.get('CLAUDE_MEM_DATA_DIR');
-// Note: CLAUDE_CONFIG_DIR is a Claude Code setting, not claude-mem, so leave as env var
+export const DATA_DIR = process.env.CLAUDE_MEM_DATA_DIR || join(homedir(), '.claude-mem');
 export const CLAUDE_CONFIG_DIR = process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude');
-
-// Plugin installation directory - respects CLAUDE_CONFIG_DIR for users with custom Claude locations
-export const MARKETPLACE_ROOT = join(CLAUDE_CONFIG_DIR, 'plugins', 'marketplaces', 'thedotmack');
 
 // Data subdirectories
 export const ARCHIVES_DIR = join(DATA_DIR, 'archives');
 export const LOGS_DIR = join(DATA_DIR, 'logs');
 export const TRASH_DIR = join(DATA_DIR, 'trash');
 export const BACKUPS_DIR = join(DATA_DIR, 'backups');
-export const MODES_DIR = join(DATA_DIR, 'modes');
+export const VECTOR_DB_DIR = join(DATA_DIR, 'vector-db');
 export const USER_SETTINGS_PATH = join(DATA_DIR, 'settings.json');
 export const DB_PATH = join(DATA_DIR, 'claude-mem.db');
-export const VECTOR_DB_DIR = join(DATA_DIR, 'vector-db');
-
-// Observer sessions directory - used as cwd for SDK queries
-// Sessions here won't appear in user's `claude --resume` for their actual projects
-export const OBSERVER_SESSIONS_DIR = join(DATA_DIR, 'observer-sessions');
 
 // Claude integration paths
 export const CLAUDE_SETTINGS_PATH = join(CLAUDE_CONFIG_DIR, 'settings.json');
@@ -80,14 +69,7 @@ export function ensureAllDataDirs(): void {
   ensureDir(LOGS_DIR);
   ensureDir(TRASH_DIR);
   ensureDir(BACKUPS_DIR);
-  ensureDir(MODES_DIR);
-}
-
-/**
- * Ensure modes directory exists
- */
-export function ensureModesDir(): void {
-  ensureDir(MODES_DIR);
+  ensureDir(VECTOR_DB_DIR);
 }
 
 /**
@@ -106,14 +88,10 @@ export function getCurrentProjectName(): string {
     const gitRoot = execSync('git rev-parse --show-toplevel', {
       cwd: process.cwd(),
       encoding: 'utf8',
-      stdio: ['pipe', 'pipe', 'ignore'],
-      windowsHide: true
+      stdio: ['pipe', 'pipe', 'ignore']
     }).trim();
     return basename(gitRoot);
-  } catch (error) {
-    logger.debug('SYSTEM', 'Git root detection failed, using cwd basename', {
-      cwd: process.cwd()
-    }, error as Error);
+  } catch {
     return basename(process.cwd());
   }
 }
@@ -122,10 +100,10 @@ export function getCurrentProjectName(): string {
  * Find package root directory
  *
  * Works because bundled hooks are in plugin/scripts/,
- * so package root is always one level up (the plugin directory)
+ * so package root is always two levels up
  */
 export function getPackageRoot(): string {
-  return join(_dirname, '..');
+  return join(_dirname, '..', '..');
 }
 
 /**
@@ -133,12 +111,17 @@ export function getPackageRoot(): string {
  */
 export function getPackageCommandsDir(): string {
   const packageRoot = getPackageRoot();
-  return join(packageRoot, 'commands');
+  const commandsDir = join(packageRoot, 'commands');
+
+  if (!existsSync(join(commandsDir, 'save.md'))) {
+    throw new Error('Package commands directory missing required files');
+  }
+
+  return commandsDir;
 }
 
 /**
- * Create a timestamped backup filename in BACKUPS_DIR
- * Converts /path/to/file.ext -> ~/.claude-mem/backups/file.ext.backup.YYYY-MM-DD_HH-mm-ss
+ * Create a timestamped backup filename
  */
 export function createBackupFilename(originalPath: string): string {
   const timestamp = new Date()
@@ -147,6 +130,5 @@ export function createBackupFilename(originalPath: string): string {
     .replace('T', '_')
     .slice(0, 19);
 
-  const filename = basename(originalPath);
-  return join(BACKUPS_DIR, `${filename}.backup.${timestamp}`);
+  return `${originalPath}.backup.${timestamp}`;
 }
