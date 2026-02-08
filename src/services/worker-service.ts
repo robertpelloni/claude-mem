@@ -14,13 +14,11 @@ import express, { Request, Response } from 'express';
 import cors from 'cors';
 import http from 'http';
 import path from 'path';
-import { readFileSync, writeFileSync, statSync, existsSync, renameSync } from 'fs';
+import { readFileSync, writeFileSync, statSync, existsSync } from 'fs';
 import { homedir } from 'os';
 import { getPackageRoot } from '../shared/paths.js';
 import { getWorkerPort } from '../shared/worker-utils.js';
 import { logger } from '../utils/logger.js';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 
 // Import composed services
 import { DatabaseManager } from './worker/DatabaseManager.js';
@@ -34,7 +32,6 @@ export class WorkerService {
   private app: express.Application;
   private server: http.Server | null = null;
   private startTime: number = Date.now();
-  private mcpClient: Client;
 
   // Composed services
   private dbManager: DatabaseManager;
@@ -43,6 +40,9 @@ export class WorkerService {
   private sdkAgent: SDKAgent;
   private paginationHelper: PaginationHelper;
   private settingsManager: SettingsManager;
+
+  // Processing status tracking for viewer UI spinner
+  private isProcessing: boolean = false;
 
   constructor() {
     this.app = express();
@@ -55,16 +55,6 @@ export class WorkerService {
     this.paginationHelper = new PaginationHelper(this.dbManager);
     this.settingsManager = new SettingsManager(this.dbManager);
 
-    // Set callback for when sessions are deleted (to update activity indicator)
-    this.sessionManager.setOnSessionDeleted(() => {
-      this.broadcastProcessingStatus();
-    });
-
-    this.mcpClient = new Client({
-      name: 'worker-search-proxy',
-      version: '1.0.0'
-    }, { capabilities: {} });
-
     this.setupMiddleware();
     this.setupRoutes();
   }
@@ -76,62 +66,10 @@ export class WorkerService {
     this.app.use(express.json({ limit: '50mb' }));
     this.app.use(cors());
 
-    // HTTP request/response logging middleware
-    this.app.use((req, res, next) => {
-      // Skip logging for static assets and health checks
-      if (req.path.startsWith('/health') || req.path === '/' || req.path.includes('.')) {
-        return next();
-      }
-
-      const start = Date.now();
-      const requestId = `${req.method}-${Date.now()}`;
-
-      // Log incoming request with body summary
-      const bodySummary = this.summarizeRequestBody(req.method, req.path, req.body);
-      logger.info('HTTP', `→ ${req.method} ${req.path}`, { requestId }, bodySummary);
-
-      // Capture response
-      const originalSend = res.send.bind(res);
-      res.send = function(body: any) {
-        const duration = Date.now() - start;
-        logger.info('HTTP', `← ${res.statusCode} ${req.path}`, { requestId, duration: `${duration}ms` });
-        return originalSend(body);
-      };
-
-      next();
-    });
-
     // Serve static files for web UI (viewer-bundle.js, logos, fonts, etc.)
     const packageRoot = getPackageRoot();
     const uiDir = path.join(packageRoot, 'plugin', 'ui');
     this.app.use(express.static(uiDir));
-  }
-
-  /**
-   * Summarize request body for logging
-   */
-  private summarizeRequestBody(method: string, path: string, body: any): string {
-    if (!body || Object.keys(body).length === 0) return '';
-
-    // Session init
-    if (path.includes('/init')) {
-      return '';
-    }
-
-    // Observations
-    if (path.includes('/observations')) {
-      const toolName = body.tool_name || '?';
-      const toolInput = body.tool_input;
-      const toolSummary = logger.formatTool(toolName, toolInput);
-      return `tool=${toolSummary}`;
-    }
-
-    // Summarize request
-    if (path.includes('/summarize')) {
-      return 'requesting summary';
-    }
-
-    return '';
   }
 
   /**
@@ -153,6 +91,7 @@ export class WorkerService {
 
     // Data retrieval
     this.app.get('/api/observations', this.handleGetObservations.bind(this));
+    this.app.get('/api/observations/by-ids', this.handleGetObservationsByIds.bind(this));
     this.app.get('/api/summaries', this.handleGetSummaries.bind(this));
     this.app.get('/api/prompts', this.handleGetPrompts.bind(this));
     this.app.get('/api/stats', this.handleGetStats.bind(this));
@@ -162,10 +101,6 @@ export class WorkerService {
     // Settings
     this.app.get('/api/settings', this.handleGetSettings.bind(this));
     this.app.post('/api/settings', this.handleUpdateSettings.bind(this));
-
-    // MCP toggle
-    this.app.get('/api/mcp/status', this.handleGetMcpStatus.bind(this));
-    this.app.post('/api/mcp/toggle', this.handleToggleMcp.bind(this));
 
     // Search API endpoints (for skill-based search)
     this.app.get('/api/search/observations', this.handleSearchObservations.bind(this));
@@ -186,17 +121,6 @@ export class WorkerService {
   async start(): Promise<void> {
     // Initialize database (once, stays open)
     await this.dbManager.initialize();
-
-    // Connect to MCP search server
-    const searchServerPath = path.join(__dirname, '..', '..', 'plugin', 'scripts', 'search-server.mjs');
-    const transport = new StdioClientTransport({
-      command: 'node',
-      args: [searchServerPath],
-      env: process.env
-    });
-
-    await this.mcpClient.connect(transport);
-    logger.success('WORKER', 'Connected to MCP search server');
 
     // Start HTTP server
     const port = getWorkerPort();
@@ -275,20 +199,20 @@ export class WorkerService {
       timestamp: Date.now()
     });
 
-    // Send initial processing status (based on queue depth + active generators)
-    const isProcessing = this.sessionManager.isAnySessionProcessing();
+    // Send initial processing status
     this.sseBroadcaster.broadcast({
       type: 'processing_status',
-      isProcessing
+      isProcessing: this.isProcessing
     });
   }
 
   /**
    * Initialize a new session
    */
-  private handleSessionInit(req: Request, res: Response): void {
+  private async handleSessionInit(req: Request, res: Response): Promise<void> {
     try {
       const sessionDbId = parseInt(req.params.sessionDbId, 10);
+      const { jitEnabled } = req.body;
       const session = this.sessionManager.initializeSession(sessionDbId);
 
       // Get the latest user_prompt for this session to sync to Chroma
@@ -319,61 +243,70 @@ export class WorkerService {
           }
         });
 
-        // Start activity indicator immediately when prompt arrives (work is about to begin)
-        this.sseBroadcaster.broadcast({
-          type: 'processing_status',
-          isProcessing: true
-        });
-
-        // Sync user prompt to Chroma with error logging
-        const chromaStart = Date.now();
-        const promptText = latestPrompt.prompt_text;
+        // Sync user prompt to Chroma (fire-and-forget)
         this.dbManager.getChromaSync().syncUserPrompt(
           latestPrompt.id,
           latestPrompt.sdk_session_id,
           latestPrompt.project,
-          promptText,
+          latestPrompt.prompt_text,
           latestPrompt.prompt_number,
           latestPrompt.created_at_epoch
-        ).then(() => {
-          const chromaDuration = Date.now() - chromaStart;
-          const truncatedPrompt = promptText.length > 60
-            ? promptText.substring(0, 60) + '...'
-            : promptText;
-          logger.debug('CHROMA', 'User prompt synced', {
-            promptId: latestPrompt.id,
-            duration: `${chromaDuration}ms`,
-            prompt: truncatedPrompt
-          });
-        }).catch(err => {
-          logger.error('CHROMA', 'Failed to sync user_prompt', {
-            promptId: latestPrompt.id,
-            sessionId: sessionDbId
-          }, err);
+        ).catch(err => {
+          logger.error('WORKER', 'Failed to sync user_prompt to Chroma', { promptId: latestPrompt.id }, err);
         });
       }
 
-      // Broadcast processing status (based on queue depth)
-      this.broadcastProcessingStatus();
+      // JIT context filtering (if enabled)
+      let context = null;
+      if (jitEnabled) {
+        try {
+          // Fetch recent observations for this project (for JIT filtering)
+          const recentObservations = this.dbManager.getSessionStore().getRecentObservations(session.project, 50);
+          const observationList = recentObservations.map(obs => ({
+            id: obs.id,
+            type: obs.type,
+            title: obs.title
+          }));
+
+          // Start persistent JIT session
+          await this.sdkAgent.startJitSession(session, observationList);
+
+          // Run filter query with user prompt
+          const selectedIds = await this.sdkAgent.runFilterQuery(sessionDbId, session.userPrompt);
+
+          // Fetch full observations by IDs
+          if (selectedIds.length > 0) {
+            const fullObservations = this.dbManager.getSessionStore().getObservationsByIds(selectedIds);
+            context = fullObservations.map(obs => ({
+              id: obs.id,
+              type: obs.type,
+              title: obs.title,
+              subtitle: obs.subtitle,
+              text: obs.text,
+              narrative: obs.narrative
+            }));
+
+            logger.info('WORKER', 'JIT context filtered', {
+              sessionDbId,
+              totalObservations: observationList.length,
+              selectedCount: selectedIds.length
+            });
+          } else {
+            logger.info('WORKER', 'JIT filter returned no observations', { sessionDbId });
+          }
+        } catch (error) {
+          logger.failure('WORKER', 'JIT context filtering failed', { sessionDbId }, error as Error);
+          // Continue without context on error (graceful degradation)
+        }
+      }
+
+      // Start processing indicator
+      this.broadcastProcessingStatus(true);
 
       // Start SDK agent in background (pass worker ref for spinner control)
-      logger.info('SESSION', 'Generator starting', {
-        sessionId: sessionDbId,
-        project: session.project,
-        promptNum: session.lastPromptNumber
+      this.sdkAgent.startSession(session, this).catch(err => {
+        logger.failure('WORKER', 'SDK agent error', { sessionId: sessionDbId }, err);
       });
-
-      session.generatorPromise = this.sdkAgent.startSession(session, this)
-        .catch(err => {
-          logger.failure('SDK', 'SDK agent error', { sessionId: sessionDbId }, err);
-        })
-        .finally(() => {
-          // Clear generator reference when completed
-          logger.info('SESSION', `Generator finished`, { sessionId: sessionDbId });
-          session.generatorPromise = null;
-          // Broadcast status change (generator finished, may stop spinner)
-          this.broadcastProcessingStatus();
-        });
 
       // Broadcast SSE event
       this.sseBroadcaster.broadcast({
@@ -382,7 +315,12 @@ export class WorkerService {
         project: session.project
       });
 
-      res.json({ status: 'initialized', sessionDbId, port: getWorkerPort() });
+      res.json({
+        status: 'initialized',
+        sessionDbId,
+        port: getWorkerPort(),
+        context
+      });
     } catch (error) {
       logger.failure('WORKER', 'Session init failed', {}, error as Error);
       res.status(500).json({ error: (error as Error).message });
@@ -396,39 +334,22 @@ export class WorkerService {
   private handleObservations(req: Request, res: Response): void {
     try {
       const sessionDbId = parseInt(req.params.sessionDbId, 10);
-      const { tool_name, tool_input, tool_response, prompt_number, cwd } = req.body;
+      const { tool_name, tool_input, tool_response, prompt_number } = req.body;
 
       this.sessionManager.queueObservation(sessionDbId, {
         tool_name,
         tool_input,
         tool_response,
-        prompt_number,
-        cwd
+        prompt_number
       });
 
       // CRITICAL: Ensure SDK agent is running to consume the queue
       const session = this.sessionManager.getSession(sessionDbId);
       if (session && !session.generatorPromise) {
-        logger.info('SESSION', 'Generator auto-starting (observation)', {
-          sessionId: sessionDbId,
-          queueDepth: session.pendingMessages.length
+        session.generatorPromise = this.sdkAgent.startSession(session, this).catch(err => {
+          logger.failure('WORKER', 'SDK agent error', { sessionId: sessionDbId }, err);
         });
-
-        session.generatorPromise = this.sdkAgent.startSession(session, this)
-          .catch(err => {
-            logger.failure('SDK', 'SDK agent error', { sessionId: sessionDbId }, err);
-          })
-          .finally(() => {
-            // Clear generator reference when completed
-            logger.info('SESSION', `Generator finished`, { sessionId: sessionDbId });
-            session.generatorPromise = null;
-            // Broadcast status change (generator finished, may stop spinner)
-            this.broadcastProcessingStatus();
-          });
       }
-
-      // Broadcast activity status (queue depth changed)
-      this.broadcastProcessingStatus();
 
       // Broadcast SSE event
       this.sseBroadcaster.broadcast({
@@ -450,33 +371,15 @@ export class WorkerService {
   private handleSummarize(req: Request, res: Response): void {
     try {
       const sessionDbId = parseInt(req.params.sessionDbId, 10);
-      const { last_user_message, last_assistant_message } = req.body;
-
-      this.sessionManager.queueSummarize(sessionDbId, last_user_message, last_assistant_message);
+      this.sessionManager.queueSummarize(sessionDbId);
 
       // CRITICAL: Ensure SDK agent is running to consume the queue
       const session = this.sessionManager.getSession(sessionDbId);
       if (session && !session.generatorPromise) {
-        logger.info('SESSION', 'Generator auto-starting (summarize)', {
-          sessionId: sessionDbId,
-          queueDepth: session.pendingMessages.length
+        session.generatorPromise = this.sdkAgent.startSession(session, this).catch(err => {
+          logger.failure('WORKER', 'SDK agent error', { sessionId: sessionDbId }, err);
         });
-
-        session.generatorPromise = this.sdkAgent.startSession(session, this)
-          .catch(err => {
-            logger.failure('SDK', 'SDK agent error', { sessionId: sessionDbId }, err);
-          })
-          .finally(() => {
-            // Clear generator reference when completed
-            logger.info('SESSION', `Generator finished`, { sessionId: sessionDbId });
-            session.generatorPromise = null;
-            // Broadcast status change (generator finished, may stop spinner)
-            this.broadcastProcessingStatus();
-          });
       }
-
-      // Broadcast activity status (queue depth changed)
-      this.broadcastProcessingStatus();
 
       res.json({ status: 'queued' });
     } catch (error) {
@@ -517,9 +420,14 @@ export class WorkerService {
   private async handleSessionDelete(req: Request, res: Response): Promise<void> {
     try {
       const sessionDbId = parseInt(req.params.sessionDbId, 10);
+
+      // Cleanup JIT session resources
+      this.sdkAgent.cleanupJitSession(sessionDbId);
+
+      // Complete session (aborts SDK agents, cleans up in-memory resources)
       await this.sessionManager.deleteSession(sessionDbId);
 
-      // Mark session complete in database
+      // Mark session as completed in database (preserves record)
       this.dbManager.markSessionComplete(sessionDbId);
 
       // Broadcast SSE event
@@ -547,13 +455,17 @@ export class WorkerService {
         return;
       }
 
+      // Cleanup JIT session resources
+      this.sdkAgent.cleanupJitSession(sessionDbId);
+
+      // Complete session (aborts SDK agents, cleans up in-memory resources)
       await this.sessionManager.deleteSession(sessionDbId);
 
-      // Mark session complete in database
+      // Mark session as completed in database (preserves record)
       this.dbManager.markSessionComplete(sessionDbId);
 
-      // Broadcast processing status (based on queue depth)
-      this.broadcastProcessingStatus();
+      // Stop processing indicator
+      this.broadcastProcessingStatus(false);
 
       // Broadcast SSE event
       this.sseBroadcaster.broadcast({
@@ -579,6 +491,40 @@ export class WorkerService {
       res.json(result);
     } catch (error) {
       logger.failure('WORKER', 'Get observations failed', {}, error as Error);
+      res.status(500).json({ error: (error as Error).message });
+    }
+  }
+
+  /**
+   * Get observations by comma-separated IDs
+   * Example: GET /api/observations/by-ids?ids=5972,5973,5974
+   */
+  private handleGetObservationsByIds(req: Request, res: Response): void {
+    try {
+      const idsParam = req.query.ids as string;
+      if (!idsParam) {
+        res.status(400).json({ error: 'Missing required parameter: ids' });
+        return;
+      }
+
+      // Parse comma-separated IDs
+      const ids = idsParam.split(',').map(id => parseInt(id.trim(), 10)).filter(id => !isNaN(id));
+      if (ids.length === 0) {
+        res.status(400).json({ error: 'No valid IDs provided' });
+        return;
+      }
+
+      // Fetch observations
+      const store = this.dbManager.getSessionStore();
+      const observations = store.getObservationsByIds(ids);
+
+      res.json({
+        observations,
+        count: observations.length,
+        requestedIds: ids
+      });
+    } catch (error) {
+      logger.failure('WORKER', 'Get observations by IDs failed', {}, error as Error);
       res.status(500).json({ error: (error as Error).message });
     }
   }
@@ -763,8 +709,7 @@ export class WorkerService {
    * Get processing status (for viewer UI spinner)
    */
   private handleGetProcessingStatus(req: Request, res: Response): void {
-    const isProcessing = this.sessionManager.isAnySessionProcessing();
-    res.json({ isProcessing });
+    res.json({ isProcessing: this.isProcessing });
   }
 
   // ============================================================================
@@ -773,19 +718,9 @@ export class WorkerService {
 
   /**
    * Broadcast processing status change to SSE clients
-   * Checks both queue depth and active generators to prevent premature spinner stop
    */
-  broadcastProcessingStatus(): void {
-    const isProcessing = this.sessionManager.isAnySessionProcessing();
-    const queueDepth = this.sessionManager.getTotalQueueDepth();
-    const activeSessions = this.sessionManager.getActiveSessionCount();
-
-    logger.info('WORKER', 'Broadcasting processing status', {
-      isProcessing,
-      queueDepth,
-      activeSessions
-    });
-
+  broadcastProcessingStatus(isProcessing: boolean): void {
+    this.isProcessing = isProcessing;
     this.sseBroadcaster.broadcast({
       type: 'processing_status',
       isProcessing
@@ -794,99 +729,23 @@ export class WorkerService {
 
   /**
    * Set processing status (called by hooks)
-   * NOTE: This now broadcasts computed status based on active processing (ignores input)
    */
   private handleSetProcessing(req: Request, res: Response): void {
     try {
-      // Broadcast current computed status (ignores manual input)
-      this.broadcastProcessingStatus();
+      const { isProcessing } = req.body;
 
-      const isProcessing = this.sessionManager.isAnySessionProcessing();
-      const queueDepth = this.sessionManager.getTotalQueueDepth();
-      const activeSessions = this.sessionManager.getActiveSessionCount();
-      logger.debug('WORKER', 'Processing status broadcast', { isProcessing, queueDepth, activeSessions });
-
-      res.json({ status: 'ok', isProcessing });
-    } catch (error) {
-      logger.failure('WORKER', 'Failed to broadcast processing status', {}, error as Error);
-      res.status(500).json({ error: (error as Error).message });
-    }
-  }
-
-  // ============================================================================
-  // MCP Toggle Handlers
-  // ============================================================================
-
-  /**
-   * GET /api/mcp/status - Check if MCP search server is enabled
-   */
-  private handleGetMcpStatus(req: Request, res: Response): void {
-    try {
-      const enabled = this.isMcpEnabled();
-      res.json({ enabled });
-    } catch (error) {
-      logger.failure('WORKER', 'Get MCP status failed', {}, error as Error);
-      res.status(500).json({ error: (error as Error).message });
-    }
-  }
-
-  /**
-   * POST /api/mcp/toggle - Toggle MCP search server on/off
-   * Body: { enabled: boolean }
-   */
-  private handleToggleMcp(req: Request, res: Response): void {
-    try {
-      const { enabled } = req.body;
-
-      if (typeof enabled !== 'boolean') {
-        res.status(400).json({ error: 'enabled must be a boolean' });
+      if (typeof isProcessing !== 'boolean') {
+        res.status(400).json({ error: 'isProcessing must be a boolean' });
         return;
       }
 
-      this.toggleMcp(enabled);
-      res.json({ success: true, enabled: this.isMcpEnabled() });
+      this.broadcastProcessingStatus(isProcessing);
+      logger.debug('WORKER', 'Processing status updated', { isProcessing });
+
+      res.json({ status: 'ok', isProcessing });
     } catch (error) {
-      logger.failure('WORKER', 'Toggle MCP failed', {}, error as Error);
-      res.status(500).json({ success: false, error: (error as Error).message });
-    }
-  }
-
-  // ============================================================================
-  // MCP Toggle Helpers
-  // ============================================================================
-
-  /**
-   * Check if MCP search server is enabled
-   */
-  private isMcpEnabled(): boolean {
-    const packageRoot = getPackageRoot();
-    const mcpPath = path.join(packageRoot, 'plugin', '.mcp.json');
-    return existsSync(mcpPath);
-  }
-
-  /**
-   * Toggle MCP search server (rename .mcp.json <-> .mcp.json.disabled)
-   */
-  private toggleMcp(enabled: boolean): void {
-    try {
-      const packageRoot = getPackageRoot();
-      const mcpPath = path.join(packageRoot, 'plugin', '.mcp.json');
-      const mcpDisabledPath = path.join(packageRoot, 'plugin', '.mcp.json.disabled');
-
-      if (enabled && existsSync(mcpDisabledPath)) {
-        // Enable: rename .mcp.json.disabled -> .mcp.json
-        renameSync(mcpDisabledPath, mcpPath);
-        logger.info('WORKER', 'MCP search server enabled');
-      } else if (!enabled && existsSync(mcpPath)) {
-        // Disable: rename .mcp.json -> .mcp.json.disabled
-        renameSync(mcpPath, mcpDisabledPath);
-        logger.info('WORKER', 'MCP search server disabled');
-      } else {
-        logger.debug('WORKER', 'MCP toggle no-op (already in desired state)', { enabled });
-      }
-    } catch (error) {
-      logger.failure('WORKER', 'Failed to toggle MCP', { enabled }, error as Error);
-      throw error;
+      logger.failure('WORKER', 'Failed to set processing status', {}, error as Error);
+      res.status(500).json({ error: (error as Error).message });
     }
   }
 
@@ -898,15 +757,37 @@ export class WorkerService {
    * Search observations
    * GET /api/search/observations?query=...&format=index&limit=20&project=...
    */
-  private async handleSearchObservations(req: Request, res: Response): Promise<void> {
+  private handleSearchObservations(req: Request, res: Response): void {
     try {
-      const result = await this.mcpClient.callTool({
-        name: 'search_observations',
-        arguments: req.query
+      const query = req.query.query as string;
+      const format = (req.query.format as string) || 'full';
+      const limit = parseInt(req.query.limit as string, 10) || 20;
+      const project = req.query.project as string | undefined;
+
+      if (!query) {
+        res.status(400).json({ error: 'Missing required parameter: query' });
+        return;
+      }
+
+      const sessionSearch = this.dbManager.getSessionSearch();
+      const results = sessionSearch.searchObservations(query, { limit, project });
+
+      res.json({
+        query,
+        count: results.length,
+        format,
+        results: format === 'index' ? results.map(r => ({
+          id: r.id,
+          type: r.type,
+          title: r.title,
+          subtitle: r.subtitle,
+          created_at_epoch: r.created_at_epoch,
+          project: r.project,
+          score: r.score
+        })) : results
       });
-      res.json(result.content);
     } catch (error) {
-      logger.failure('WORKER', 'Search failed', {}, error as Error);
+      logger.failure('WORKER', 'Search observations failed', {}, error as Error);
       res.status(500).json({ error: (error as Error).message });
     }
   }
@@ -915,15 +796,35 @@ export class WorkerService {
    * Search session summaries
    * GET /api/search/sessions?query=...&format=index&limit=20
    */
-  private async handleSearchSessions(req: Request, res: Response): Promise<void> {
+  private handleSearchSessions(req: Request, res: Response): void {
     try {
-      const result = await this.mcpClient.callTool({
-        name: 'search_sessions',
-        arguments: req.query
+      const query = req.query.query as string;
+      const format = (req.query.format as string) || 'full';
+      const limit = parseInt(req.query.limit as string, 10) || 20;
+
+      if (!query) {
+        res.status(400).json({ error: 'Missing required parameter: query' });
+        return;
+      }
+
+      const sessionSearch = this.dbManager.getSessionSearch();
+      const results = sessionSearch.searchSessions(query, { limit });
+
+      res.json({
+        query,
+        count: results.length,
+        format,
+        results: format === 'index' ? results.map(r => ({
+          id: r.id,
+          request: r.request,
+          completed: r.completed,
+          created_at_epoch: r.created_at_epoch,
+          project: r.project,
+          score: r.score
+        })) : results
       });
-      res.json(result.content);
     } catch (error) {
-      logger.failure('WORKER', 'Search failed', {}, error as Error);
+      logger.failure('WORKER', 'Search sessions failed', {}, error as Error);
       res.status(500).json({ error: (error as Error).message });
     }
   }
@@ -932,15 +833,36 @@ export class WorkerService {
    * Search user prompts
    * GET /api/search/prompts?query=...&format=index&limit=20
    */
-  private async handleSearchPrompts(req: Request, res: Response): Promise<void> {
+  private handleSearchPrompts(req: Request, res: Response): void {
     try {
-      const result = await this.mcpClient.callTool({
-        name: 'search_user_prompts',
-        arguments: req.query
+      const query = req.query.query as string;
+      const format = (req.query.format as string) || 'full';
+      const limit = parseInt(req.query.limit as string, 10) || 20;
+      const project = req.query.project as string | undefined;
+
+      if (!query) {
+        res.status(400).json({ error: 'Missing required parameter: query' });
+        return;
+      }
+
+      const sessionSearch = this.dbManager.getSessionSearch();
+      const results = sessionSearch.searchUserPrompts(query, { limit, project });
+
+      res.json({
+        query,
+        count: results.length,
+        format,
+        results: format === 'index' ? results.map(r => ({
+          id: r.id,
+          claude_session_id: r.claude_session_id,
+          prompt_number: r.prompt_number,
+          prompt_text: r.prompt_text,
+          created_at_epoch: r.created_at_epoch,
+          score: r.score
+        })) : results
       });
-      res.json(result.content);
     } catch (error) {
-      logger.failure('WORKER', 'Search failed', {}, error as Error);
+      logger.failure('WORKER', 'Search prompts failed', {}, error as Error);
       res.status(500).json({ error: (error as Error).message });
     }
   }
@@ -949,15 +871,37 @@ export class WorkerService {
    * Search observations by concept
    * GET /api/search/by-concept?concept=discovery&format=index&limit=5
    */
-  private async handleSearchByConcept(req: Request, res: Response): Promise<void> {
+  private handleSearchByConcept(req: Request, res: Response): void {
     try {
-      const result = await this.mcpClient.callTool({
-        name: 'find_by_concept',
-        arguments: req.query
+      const concept = req.query.concept as string;
+      const format = (req.query.format as string) || 'full';
+      const limit = parseInt(req.query.limit as string, 10) || 10;
+      const project = req.query.project as string | undefined;
+
+      if (!concept) {
+        res.status(400).json({ error: 'Missing required parameter: concept' });
+        return;
+      }
+
+      const sessionSearch = this.dbManager.getSessionSearch();
+      const results = sessionSearch.findByConcept(concept, { limit, project });
+
+      res.json({
+        concept,
+        count: results.length,
+        format,
+        results: format === 'index' ? results.map(r => ({
+          id: r.id,
+          type: r.type,
+          title: r.title,
+          subtitle: r.subtitle,
+          created_at_epoch: r.created_at_epoch,
+          project: r.project,
+          concepts: r.concepts
+        })) : results
       });
-      res.json(result.content);
     } catch (error) {
-      logger.failure('WORKER', 'Search failed', {}, error as Error);
+      logger.failure('WORKER', 'Search by concept failed', {}, error as Error);
       res.status(500).json({ error: (error as Error).message });
     }
   }
@@ -966,15 +910,45 @@ export class WorkerService {
    * Search by file path
    * GET /api/search/by-file?filePath=...&format=index&limit=10
    */
-  private async handleSearchByFile(req: Request, res: Response): Promise<void> {
+  private handleSearchByFile(req: Request, res: Response): void {
     try {
-      const result = await this.mcpClient.callTool({
-        name: 'find_by_file',
-        arguments: req.query
+      const filePath = req.query.filePath as string;
+      const format = (req.query.format as string) || 'full';
+      const limit = parseInt(req.query.limit as string, 10) || 10;
+      const project = req.query.project as string | undefined;
+
+      if (!filePath) {
+        res.status(400).json({ error: 'Missing required parameter: filePath' });
+        return;
+      }
+
+      const sessionSearch = this.dbManager.getSessionSearch();
+      const results = sessionSearch.findByFile(filePath, { limit, project });
+
+      res.json({
+        filePath,
+        count: results.observations.length + results.sessions.length,
+        format,
+        results: {
+          observations: format === 'index' ? results.observations.map(r => ({
+            id: r.id,
+            type: r.type,
+            title: r.title,
+            subtitle: r.subtitle,
+            created_at_epoch: r.created_at_epoch,
+            project: r.project
+          })) : results.observations,
+          sessions: format === 'index' ? results.sessions.map(r => ({
+            id: r.id,
+            request: r.request,
+            completed: r.completed,
+            created_at_epoch: r.created_at_epoch,
+            project: r.project
+          })) : results.sessions
+        }
       });
-      res.json(result.content);
     } catch (error) {
-      logger.failure('WORKER', 'Search failed', {}, error as Error);
+      logger.failure('WORKER', 'Search by file failed', {}, error as Error);
       res.status(500).json({ error: (error as Error).message });
     }
   }
@@ -983,15 +957,36 @@ export class WorkerService {
    * Search observations by type
    * GET /api/search/by-type?type=bugfix&format=index&limit=10
    */
-  private async handleSearchByType(req: Request, res: Response): Promise<void> {
+  private handleSearchByType(req: Request, res: Response): void {
     try {
-      const result = await this.mcpClient.callTool({
-        name: 'find_by_type',
-        arguments: req.query
+      const type = req.query.type as string;
+      const format = (req.query.format as string) || 'full';
+      const limit = parseInt(req.query.limit as string, 10) || 10;
+      const project = req.query.project as string | undefined;
+
+      if (!type) {
+        res.status(400).json({ error: 'Missing required parameter: type' });
+        return;
+      }
+
+      const sessionSearch = this.dbManager.getSessionSearch();
+      const results = sessionSearch.findByType(type as any, { limit, project });
+
+      res.json({
+        type,
+        count: results.length,
+        format,
+        results: format === 'index' ? results.map(r => ({
+          id: r.id,
+          type: r.type,
+          title: r.title,
+          subtitle: r.subtitle,
+          created_at_epoch: r.created_at_epoch,
+          project: r.project
+        })) : results
       });
-      res.json(result.content);
     } catch (error) {
-      logger.failure('WORKER', 'Search failed', {}, error as Error);
+      logger.failure('WORKER', 'Search by type failed', {}, error as Error);
       res.status(500).json({ error: (error as Error).message });
     }
   }
@@ -1000,15 +995,49 @@ export class WorkerService {
    * Get recent context (summaries and observations for a project)
    * GET /api/context/recent?project=...&limit=3
    */
-  private async handleGetRecentContext(req: Request, res: Response): Promise<void> {
+  private handleGetRecentContext(req: Request, res: Response): void {
     try {
-      const result = await this.mcpClient.callTool({
-        name: 'get_recent_context',
-        arguments: req.query
+      const project = (req.query.project as string) || path.basename(process.cwd());
+      const limit = parseInt(req.query.limit as string, 10) || 3;
+
+      const sessionStore = this.dbManager.getSessionStore();
+      const sessions = sessionStore.getRecentSessionsWithStatus(project, limit);
+
+      const contextData = sessions.map(session => {
+        const summary = session.has_summary && session.sdk_session_id
+          ? sessionStore.getSummaryForSession(session.sdk_session_id)
+          : null;
+
+        const observations = session.sdk_session_id
+          ? sessionStore.getObservationsForSession(session.sdk_session_id)
+          : [];
+
+        return {
+          session_id: session.id,
+          sdk_session_id: session.sdk_session_id,
+          project: session.project,
+          status: session.status,
+          has_summary: session.has_summary,
+          summary,
+          observations: observations.map(o => ({
+            id: o.id,
+            type: o.type,
+            title: o.title,
+            subtitle: o.subtitle,
+            created_at_epoch: o.created_at_epoch
+          })),
+          created_at_epoch: session.started_at_epoch
+        };
       });
-      res.json(result.content);
+
+      res.json({
+        project,
+        limit,
+        count: contextData.length,
+        sessions: contextData
+      });
     } catch (error) {
-      logger.failure('WORKER', 'Search failed', {}, error as Error);
+      logger.failure('WORKER', 'Get recent context failed', {}, error as Error);
       res.status(500).json({ error: (error as Error).message });
     }
   }
@@ -1017,15 +1046,59 @@ export class WorkerService {
    * Get context timeline around an anchor point
    * GET /api/context/timeline?anchor=123&depth_before=10&depth_after=10&project=...
    */
-  private async handleGetContextTimeline(req: Request, res: Response): Promise<void> {
+  private handleGetContextTimeline(req: Request, res: Response): void {
     try {
-      const result = await this.mcpClient.callTool({
-        name: 'get_context_timeline',
-        arguments: req.query
+      const anchor = req.query.anchor as string;
+      const depthBefore = parseInt(req.query.depth_before as string, 10) || 10;
+      const depthAfter = parseInt(req.query.depth_after as string, 10) || 10;
+      const project = req.query.project as string | undefined;
+
+      if (!anchor) {
+        res.status(400).json({ error: 'Missing required parameter: anchor' });
+        return;
+      }
+
+      const sessionStore = this.dbManager.getSessionStore();
+      let timeline;
+
+      // Check if anchor is a number (observation ID)
+      if (/^\d+$/.test(anchor)) {
+        const obsId = parseInt(anchor, 10);
+        const obs = sessionStore.getObservationById(obsId);
+        if (!obs) {
+          res.status(404).json({ error: `Observation #${obsId} not found` });
+          return;
+        }
+        timeline = sessionStore.getTimelineAroundObservation(obsId, obs.created_at_epoch, depthBefore, depthAfter, project);
+      } else if (anchor.startsWith('S') || anchor.startsWith('#S')) {
+        // Session ID
+        const sessionId = anchor.replace(/^#?S/, '');
+        const sessionNum = parseInt(sessionId, 10);
+        const sessions = sessionStore.getSessionSummariesByIds([sessionNum]);
+        if (sessions.length === 0) {
+          res.status(404).json({ error: `Session #${sessionNum} not found` });
+          return;
+        }
+        timeline = sessionStore.getTimelineAroundTimestamp(sessions[0].created_at_epoch, depthBefore, depthAfter, project);
+      } else {
+        // ISO timestamp
+        const date = new Date(anchor);
+        if (isNaN(date.getTime())) {
+          res.status(400).json({ error: `Invalid timestamp: ${anchor}` });
+          return;
+        }
+        timeline = sessionStore.getTimelineAroundTimestamp(date.getTime(), depthBefore, depthAfter, project);
+      }
+
+      res.json({
+        anchor,
+        depth_before: depthBefore,
+        depth_after: depthAfter,
+        project,
+        timeline
       });
-      res.json(result.content);
     } catch (error) {
-      logger.failure('WORKER', 'Search failed', {}, error as Error);
+      logger.failure('WORKER', 'Get context timeline failed', {}, error as Error);
       res.status(500).json({ error: (error as Error).message });
     }
   }
@@ -1034,15 +1107,74 @@ export class WorkerService {
    * Get timeline by query (search first, then get timeline around best match)
    * GET /api/timeline/by-query?query=...&mode=auto&depth_before=10&depth_after=10
    */
-  private async handleGetTimelineByQuery(req: Request, res: Response): Promise<void> {
+  private handleGetTimelineByQuery(req: Request, res: Response): void {
     try {
-      const result = await this.mcpClient.callTool({
-        name: 'get_timeline_by_query',
-        arguments: req.query
+      const query = req.query.query as string;
+      const mode = (req.query.mode as string) || 'auto';
+      const depthBefore = parseInt(req.query.depth_before as string, 10) || 10;
+      const depthAfter = parseInt(req.query.depth_after as string, 10) || 10;
+      const project = req.query.project as string | undefined;
+
+      if (!query) {
+        res.status(400).json({ error: 'Missing required parameter: query' });
+        return;
+      }
+
+      const sessionSearch = this.dbManager.getSessionSearch();
+      const sessionStore = this.dbManager.getSessionStore();
+
+      // Search based on mode
+      let bestMatch: any = null;
+      let searchResults: any = null;
+
+      if (mode === 'observations' || mode === 'auto') {
+        const obsResults = sessionSearch.searchObservations(query, { limit: 1, project });
+        if (obsResults.length > 0) {
+          bestMatch = obsResults[0];
+          searchResults = { type: 'observation', results: obsResults };
+        }
+      }
+
+      if (!bestMatch && (mode === 'sessions' || mode === 'auto')) {
+        const sessionResults = sessionSearch.searchSessions(query, { limit: 1 });
+        if (sessionResults.length > 0) {
+          bestMatch = sessionResults[0];
+          searchResults = { type: 'session', results: sessionResults };
+        }
+      }
+
+      if (!bestMatch) {
+        res.json({
+          query,
+          mode,
+          match: null,
+          timeline: null,
+          message: 'No matches found for query'
+        });
+        return;
+      }
+
+      // Get timeline around best match
+      const timeline = searchResults.type === 'observation'
+        ? sessionStore.getTimelineAroundObservation(bestMatch.id, bestMatch.created_at_epoch, depthBefore, depthAfter, project)
+        : sessionStore.getTimelineAroundTimestamp(bestMatch.created_at_epoch, depthBefore, depthAfter, project);
+
+      res.json({
+        query,
+        mode,
+        match: {
+          type: searchResults.type,
+          id: bestMatch.id,
+          title: bestMatch.title || bestMatch.request,
+          score: bestMatch.score,
+          created_at_epoch: bestMatch.created_at_epoch
+        },
+        depth_before: depthBefore,
+        depth_after: depthAfter,
+        timeline
       });
-      res.json(result.content);
     } catch (error) {
-      logger.failure('WORKER', 'Search failed', {}, error as Error);
+      logger.failure('WORKER', 'Get timeline by query failed', {}, error as Error);
       res.status(500).json({ error: (error as Error).message });
     }
   }

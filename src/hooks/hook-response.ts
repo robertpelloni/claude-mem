@@ -1,5 +1,3 @@
-import { happy_path_error__with_fallback } from '../utils/silent-debug.js';
-
 export type HookType = 'PreCompact' | 'SessionStart' | 'UserPromptSubmit' | 'PostToolUse' | 'Stop' | string;
 
 export interface HookResponseOptions {
@@ -12,7 +10,7 @@ export interface HookResponse {
   suppressOutput?: boolean;
   stopReason?: string;
   hookSpecificOutput?: {
-    hookEventName: 'SessionStart' | 'PostToolUse';
+    hookEventName: 'SessionStart' | 'UserPromptSubmit';
     additionalContext: string;
   };
 }
@@ -32,7 +30,7 @@ function buildHookResponse(
 
     return {
       continue: false,
-      stopReason: options.reason || happy_path_error__with_fallback('hook-response: options.reason is null', {}, 'Pre-compact operation failed'),
+      stopReason: options.reason || 'Pre-compact operation failed',
       suppressOutput: true
     };
   }
@@ -40,8 +38,6 @@ function buildHookResponse(
   if (hookType === 'SessionStart') {
     if (success && options.context) {
       return {
-        continue: true,
-        suppressOutput: true,
         hookSpecificOutput: {
           hookEventName: 'SessionStart',
           additionalContext: options.context
@@ -55,17 +51,23 @@ function buildHookResponse(
     };
   }
 
-  if (hookType === 'UserPromptSubmit' || hookType === 'PostToolUse') {
+  if (hookType === 'UserPromptSubmit') {
     if (success && options.context) {
       return {
-        continue: true,
-        suppressOutput: true,
         hookSpecificOutput: {
-          hookEventName: hookType as 'PostToolUse',
+          hookEventName: 'UserPromptSubmit',
           additionalContext: options.context
         }
       };
     }
+
+    return {
+      continue: true,
+      suppressOutput: true
+    };
+  }
+
+  if (hookType === 'PostToolUse') {
     return {
       continue: true,
       suppressOutput: true

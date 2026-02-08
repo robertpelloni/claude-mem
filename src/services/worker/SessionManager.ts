@@ -11,89 +11,45 @@
 import { EventEmitter } from 'events';
 import { DatabaseManager } from './DatabaseManager.js';
 import { logger } from '../../utils/logger.js';
-import { silentDebug } from '../../utils/silent-debug.js';
-import { silentDebug } from '../../utils/silent-debug.js';
 import type { ActiveSession, PendingMessage, ObservationData } from '../worker-types.js';
 
 export class SessionManager {
   private dbManager: DatabaseManager;
   private sessions: Map<number, ActiveSession> = new Map();
   private sessionQueues: Map<number, EventEmitter> = new Map();
-  private onSessionDeletedCallback?: () => void;
 
   constructor(dbManager: DatabaseManager) {
     this.dbManager = dbManager;
   }
 
   /**
-   * Set callback to be called when a session is deleted (for broadcasting status)
-   */
-  setOnSessionDeleted(callback: () => void): void {
-    this.onSessionDeletedCallback = callback;
-  }
-
-  /**
    * Initialize a new session or return existing one
    */
-  initializeSession(sessionDbId: number, currentUserPrompt?: string, promptNumber?: number): ActiveSession {
+  initializeSession(sessionDbId: number): ActiveSession {
     // Check if already active
     let session = this.sessions.get(sessionDbId);
     if (session) {
-      // Update userPrompt for continuation prompts
-      if (currentUserPrompt) {
-        silentDebug('[SessionManager] Updating userPrompt for continuation', {
-          sessionDbId,
-          promptNumber,
-          oldPrompt: session.userPrompt.substring(0, 80),
-          newPrompt: currentUserPrompt.substring(0, 80)
-        });
-        session.userPrompt = currentUserPrompt;
-        session.lastPromptNumber = promptNumber || session.lastPromptNumber;
-      } else {
-        silentDebug('[SessionManager] No currentUserPrompt provided for existing session', {
-          sessionDbId,
-          promptNumber,
-          usingCachedPrompt: session.userPrompt.substring(0, 80)
-        });
-      }
       return session;
     }
 
     // Fetch from database
     const dbSession = this.dbManager.getSessionById(sessionDbId);
 
-    // Use currentUserPrompt if provided, otherwise fall back to database (first prompt)
-    const userPrompt = currentUserPrompt || dbSession.user_prompt;
-
-    if (!currentUserPrompt) {
-      silentDebug('[SessionManager] No currentUserPrompt provided for new session, using database', {
-        sessionDbId,
-        promptNumber,
-        dbPrompt: dbSession.user_prompt.substring(0, 80)
-      });
-    } else {
-      silentDebug('[SessionManager] Initializing session with fresh userPrompt', {
-        sessionDbId,
-        promptNumber,
-        userPrompt: currentUserPrompt.substring(0, 80)
-      });
-    }
-
     // Create active session
     session = {
       sessionDbId,
       claudeSessionId: dbSession.claude_session_id,
       sdkSessionId: null,
+      jitSessionId: null,
+      jitAbortController: null,
+      jitGeneratorPromise: null,
       project: dbSession.project,
-      userPrompt,
+      userPrompt: dbSession.user_prompt,
       pendingMessages: [],
       abortController: new AbortController(),
       generatorPromise: null,
-      lastPromptNumber: promptNumber || this.dbManager.getSessionStore().getPromptCounter(sessionDbId),
-      startTime: Date.now(),
-      cumulativeInputTokens: 0,
-      cumulativeOutputTokens: 0,
-      currentToolUseId: null  // For Endless Mode v7.1
+      lastPromptNumber: this.dbManager.getSessionStore().getPromptCounter(sessionDbId),
+      startTime: Date.now()
     };
 
     this.sessions.set(sessionDbId, session);
@@ -102,13 +58,7 @@ export class SessionManager {
     const emitter = new EventEmitter();
     this.sessionQueues.set(sessionDbId, emitter);
 
-    logger.info('SESSION', 'Session initialized', {
-      sessionId: sessionDbId,
-      project: session.project,
-      claudeSessionId: session.claudeSessionId,
-      queueDepth: 0,
-      hasGenerator: false
-    });
+    logger.info('WORKER', 'Session initialized', { sessionDbId, project: session.project });
 
     return session;
   }
@@ -131,31 +81,21 @@ export class SessionManager {
       session = this.initializeSession(sessionDbId);
     }
 
-    const beforeDepth = session.pendingMessages.length;
-
     session.pendingMessages.push({
       type: 'observation',
       tool_name: data.tool_name,
       tool_input: data.tool_input,
       tool_response: data.tool_response,
-      prompt_number: data.prompt_number,
-      cwd: data.cwd,
-      tool_use_id: data.tool_use_id  // Pass tool_use_id for Endless Mode correlation
+      prompt_number: data.prompt_number
     });
-
-    const afterDepth = session.pendingMessages.length;
 
     // Notify generator immediately (zero latency)
     const emitter = this.sessionQueues.get(sessionDbId);
     emitter?.emit('message');
 
-    // Format tool name for logging
-    const toolSummary = logger.formatTool(data.tool_name, data.tool_input);
-
-    logger.info('SESSION', `Observation queued (${beforeDepth}→${afterDepth})`, {
-      sessionId: sessionDbId,
-      tool: toolSummary,
-      hasGenerator: !!session.generatorPromise
+    logger.debug('WORKER', 'Observation queued', {
+      sessionDbId,
+      queueLength: session.pendingMessages.length
     });
   }
 
@@ -163,67 +103,54 @@ export class SessionManager {
    * Queue a summarize request (zero-latency notification)
    * Auto-initializes session if not in memory but exists in database
    */
-  queueSummarize(sessionDbId: number, lastUserMessage: string, lastAssistantMessage?: string): void {
+  queueSummarize(sessionDbId: number): void {
     // Auto-initialize from database if needed (handles worker restarts)
     let session = this.sessions.get(sessionDbId);
     if (!session) {
       session = this.initializeSession(sessionDbId);
     }
 
-    const beforeDepth = session.pendingMessages.length;
-
-    session.pendingMessages.push({
-      type: 'summarize',
-      last_user_message: lastUserMessage,
-      last_assistant_message: lastAssistantMessage
-    });
-
-    const afterDepth = session.pendingMessages.length;
+    session.pendingMessages.push({ type: 'summarize' });
 
     const emitter = this.sessionQueues.get(sessionDbId);
     emitter?.emit('message');
 
-    logger.info('SESSION', `Summarize queued (${beforeDepth}→${afterDepth})`, {
-      sessionId: sessionDbId,
-      hasGenerator: !!session.generatorPromise
-    });
+    logger.debug('WORKER', 'Summarize queued', { sessionDbId });
   }
 
   /**
-   * Delete a session (abort SDK agent and cleanup)
+   * Complete a session (abort SDK agents and cleanup in-memory resources)
+   * NOTE: Does not delete from database - only marks as completed
    */
   async deleteSession(sessionDbId: number): Promise<void> {
     const session = this.sessions.get(sessionDbId);
     if (!session) {
-      return; // Already deleted
+      return; // Already cleaned up
     }
 
-    const sessionDuration = Date.now() - session.startTime;
-
-    // Abort the SDK agent
+    // Abort the main SDK agent
     session.abortController.abort();
 
-    // Wait for generator to finish
-    if (session.generatorPromise) {
-      await session.generatorPromise.catch((error) => {
-        silentDebug('Failed to wait for generator promise during session deletion', { sessionDbId, error });
-      });
+    // Abort the JIT session if it exists
+    if (session.jitAbortController) {
+      session.jitAbortController.abort();
     }
 
-    // Cleanup
+    // Wait for main generator to finish
+    if (session.generatorPromise) {
+      await session.generatorPromise.catch(() => {});
+    }
+
+    // Wait for JIT generator to finish
+    if (session.jitGeneratorPromise) {
+      await session.jitGeneratorPromise.catch(() => {});
+    }
+
+    // Cleanup in-memory resources
     this.sessions.delete(sessionDbId);
     this.sessionQueues.delete(sessionDbId);
 
-    logger.info('SESSION', 'Session deleted', {
-      sessionId: sessionDbId,
-      duration: `${(sessionDuration / 1000).toFixed(1)}s`,
-      project: session.project
-    });
-
-    // Trigger callback to broadcast status update (spinner may need to stop)
-    if (this.onSessionDeletedCallback) {
-      this.onSessionDeletedCallback();
-    }
+    logger.info('WORKER', 'Session completed and cleaned up', { sessionDbId });
   }
 
   /**
@@ -248,115 +175,6 @@ export class SessionManager {
    */
   getActiveSessionCount(): number {
     return this.sessions.size;
-  }
-
-  /**
-   * Get total queue depth across all sessions (for activity indicator)
-   */
-  getTotalQueueDepth(): number {
-    let total = 0;
-    for (const session of this.sessions.values()) {
-      total += session.pendingMessages.length;
-    }
-    return total;
-  }
-
-  /**
-   * Get total active work (queued + currently processing)
-   * Counts both pending messages and items actively being processed by SDK agents
-   */
-  getTotalActiveWork(): number {
-    let total = 0;
-    for (const session of this.sessions.values()) {
-      // Count queued messages
-      total += session.pendingMessages.length;
-      // Count currently processing item (1 per active generator)
-      if (session.generatorPromise !== null) {
-        total += 1;
-      }
-    }
-    return total;
-  }
-
-  /**
-   * Check if any session is actively processing (has pending messages OR active generator)
-   * Used for activity indicator to prevent spinner from stopping while SDK is processing
-   */
-  isAnySessionProcessing(): boolean {
-    for (const session of this.sessions.values()) {
-      // Has queued messages waiting to be processed
-      if (session.pendingMessages.length > 0) {
-        return true;
-      }
-      // Has active SDK generator running (processing dequeued messages)
-      if (session.generatorPromise !== null) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  /**
-   * Get session emitter for event listening
-   */
-  getSessionEmitter(sessionDbId: number): EventEmitter | undefined {
-    return this.sessionQueues.get(sessionDbId);
-  }
-
-  /**
-   * Wait for the next SDK response to be processed
-   * Returns the observation (or null if no observation was created)
-   * Throws on timeout
-   *
-   * CRITICAL: Waits for 'sdk_response_complete' event which fires for ALL responses,
-   * including <no_observation> responses. This prevents blocking when SDK skips storage.
-   */
-  async waitForNextObservation(
-    sessionDbId: number,
-    timeoutMs: number
-  ): Promise<any> {
-    return new Promise((resolve, reject) => {
-      const emitter = this.sessionQueues.get(sessionDbId);
-      if (!emitter) {
-        logger.error('SESSION', 'No emitter found - cannot wait for observation', {
-          sessionId: sessionDbId
-        });
-        reject(new Error('Session not found'));
-        return;
-      }
-
-      logger.debug('SESSION', 'Waiting for sdk_response_complete event', {
-        sessionId: sessionDbId,
-        timeoutMs
-      });
-
-      const timeoutId = setTimeout(() => {
-        emitter.off('sdk_response_complete', handler);
-        logger.warn('SESSION', 'Timeout waiting for SDK response', {
-          sessionId: sessionDbId,
-          timeoutMs
-        });
-        reject(new Error('Timeout waiting for SDK response'));
-      }, timeoutMs);
-
-      const handler = (response: any) => {
-        clearTimeout(timeoutId);
-        emitter.off('sdk_response_complete', handler);
-
-        // Response format: { observations: [...], isEmpty: boolean }
-        const observation = response?.observations?.[0] ?? null;
-
-        logger.debug('SESSION', 'Received sdk_response_complete event', {
-          sessionId: sessionDbId,
-          hasObservation: observation !== null,
-          obsId: observation?.id,
-          type: observation?.type
-        });
-        resolve(observation);
-      };
-
-      emitter.once('sdk_response_complete', handler);
-    });
   }
 
   /**
@@ -394,12 +212,6 @@ export class SessionManager {
       while (session.pendingMessages.length > 0) {
         const message = session.pendingMessages.shift()!;
         yield message;
-
-        // If we just yielded a summary, that's the end of this batch - stop the iterator
-        if (message.type === 'summarize') {
-          logger.info('SESSION', `Summary yielded - ending generator`, { sessionId: sessionDbId });
-          return;
-        }
       }
     }
   }
