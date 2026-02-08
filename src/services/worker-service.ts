@@ -1,2149 +1,595 @@
 /**
- * Worker Service v2: Clean Object-Oriented Architecture
- *
- * This is a complete rewrite following the architecture document.
- * Key improvements:
- * - Single database connection (no open/close churn)
- * - Event-driven queues (zero polling)
- * - DRY utilities for pagination and settings
- * - Clean separation of concerns
- * - ~600-700 lines (down from 1173)
+ * Worker Service - Long-running HTTP service managed by PM2
+ * Replaces detached Bun worker processes with single persistent Node service
  */
 
 import express, { Request, Response } from 'express';
-import cors from 'cors';
-import http from 'http';
-import path from 'path';
-import { readFileSync, writeFileSync, statSync, existsSync, renameSync } from 'fs';
-import { homedir } from 'os';
-import { getPackageRoot } from '../shared/paths.js';
-import { getWorkerPort } from '../shared/worker-utils.js';
+import { query } from '@anthropic-ai/claude-agent-sdk';
+import type { SDKUserMessage, SDKSystemMessage } from '@anthropic-ai/claude-agent-sdk';
+import { SessionStore } from './sqlite/SessionStore.js';
+import { buildInitPrompt, buildObservationPrompt, buildSummaryPrompt } from '../sdk/prompts.js';
+import { parseObservations, parseSummary } from '../sdk/parser.js';
+import type { SDKSession } from '../sdk/prompts.js';
 import { logger } from '../utils/logger.js';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { ensureAllDataDirs } from '../shared/paths.js';
 
-// Import composed services
-import { DatabaseManager } from './worker/DatabaseManager.js';
-import { SessionManager } from './worker/SessionManager.js';
-import { SSEBroadcaster } from './worker/SSEBroadcaster.js';
-import { SDKAgent } from './worker/SDKAgent.js';
-import { PaginationHelper } from './worker/PaginationHelper.js';
-import { SettingsManager } from './worker/SettingsManager.js';
-import { getBranchInfo, switchBranch, pullUpdates, type BranchInfo, type SwitchResult } from './worker/BranchManager.js';
-import {
-  OBSERVATION_TYPES,
-  OBSERVATION_CONCEPTS,
-  DEFAULT_OBSERVATION_TYPES_STRING,
-  DEFAULT_OBSERVATION_CONCEPTS_STRING
-} from '../constants/observation-metadata.js';
-import { stripMemoryTagsFromPrompt, stripMemoryTagsFromJson } from '../utils/tag-stripping.js';
+const MODEL = process.env.CLAUDE_MEM_MODEL || 'claude-sonnet-4-5';
+const DISALLOWED_TOOLS = ['Glob', 'Grep', 'ListMcpResourcesTool', 'WebSearch'];
+const FIXED_PORT = parseInt(process.env.CLAUDE_MEM_WORKER_PORT || '37777', 10);
 
-export class WorkerService {
+interface ObservationMessage {
+  type: 'observation';
+  tool_name: string;
+  tool_input: string;
+  tool_output: string;
+  prompt_number: number;
+}
+
+interface SummarizeMessage {
+  type: 'summarize';
+  prompt_number: number;
+}
+
+type WorkerMessage = ObservationMessage | SummarizeMessage;
+
+/**
+ * Active session state
+ */
+interface ActiveSession {
+  sessionDbId: number;
+  claudeSessionId: string; // Real Claude Code session ID
+  sdkSessionId: string | null;
+  project: string;
+  userPrompt: string;
+  pendingMessages: WorkerMessage[];
+  abortController: AbortController;
+  generatorPromise: Promise<void> | null;
+  lastPromptNumber: number; // Track which prompt_number we last sent to SDK
+  observationCounter: number; // Counter for correlation IDs
+  startTime: number; // Session start timestamp
+}
+
+class WorkerService {
   private app: express.Application;
-  private server: http.Server | null = null;
-  private startTime: number = Date.now();
-  private mcpClient: Client;
-
-  // Composed services
-  private dbManager: DatabaseManager;
-  private sessionManager: SessionManager;
-  private sseBroadcaster: SSEBroadcaster;
-  private sdkAgent: SDKAgent;
-  private paginationHelper: PaginationHelper;
-  private settingsManager: SettingsManager;
+  private port: number | null = null;
+  private sessions: Map<number, ActiveSession> = new Map();
 
   constructor() {
     this.app = express();
-
-    // Initialize services (dependency injection)
-    this.dbManager = new DatabaseManager();
-    this.sessionManager = new SessionManager(this.dbManager);
-    this.sseBroadcaster = new SSEBroadcaster();
-    this.sdkAgent = new SDKAgent(this.dbManager, this.sessionManager);
-    this.paginationHelper = new PaginationHelper(this.dbManager);
-    this.settingsManager = new SettingsManager(this.dbManager);
-
-    // Set callback for when sessions are deleted (to update activity indicator)
-    this.sessionManager.setOnSessionDeleted(() => {
-      this.broadcastProcessingStatus();
-    });
-
-    this.mcpClient = new Client({
-      name: 'worker-search-proxy',
-      version: '1.0.0'
-    }, { capabilities: {} });
-
-    this.setupMiddleware();
-    this.setupRoutes();
-  }
-
-  /**
-   * Setup Express middleware
-   */
-  private setupMiddleware(): void {
     this.app.use(express.json({ limit: '50mb' }));
-    this.app.use(cors());
 
-    // HTTP request/response logging middleware
-    this.app.use((req, res, next) => {
-      // Skip logging for static assets and health checks
-      if (req.path.startsWith('/health') || req.path === '/' || req.path.includes('.')) {
-        return next();
-      }
-
-      const start = Date.now();
-      const requestId = `${req.method}-${Date.now()}`;
-
-      // Log incoming request with body summary
-      const bodySummary = this.summarizeRequestBody(req.method, req.path, req.body);
-      logger.info('HTTP', `→ ${req.method} ${req.path}`, { requestId }, bodySummary);
-
-      // Capture response
-      const originalSend = res.send.bind(res);
-      res.send = function(body: any) {
-        const duration = Date.now() - start;
-        logger.info('HTTP', `← ${res.statusCode} ${req.path}`, { requestId, duration: `${duration}ms` });
-        return originalSend(body);
-      };
-
-      next();
-    });
-
-    // Serve static files for web UI (viewer-bundle.js, logos, fonts, etc.)
-    const packageRoot = getPackageRoot();
-    const uiDir = path.join(packageRoot, 'plugin', 'ui');
-    this.app.use(express.static(uiDir));
-  }
-
-  /**
-   * Summarize request body for logging
-   */
-  private summarizeRequestBody(method: string, path: string, body: any): string {
-    if (!body || Object.keys(body).length === 0) return '';
-
-    // Session init
-    if (path.includes('/init')) {
-      return '';
-    }
-
-    // Observations
-    if (path.includes('/observations')) {
-      const toolName = body.tool_name || '?';
-      const toolInput = body.tool_input;
-      const toolSummary = logger.formatTool(toolName, toolInput);
-      return `tool=${toolSummary}`;
-    }
-
-    // Summarize request
-    if (path.includes('/summarize')) {
-      return 'requesting summary';
-    }
-
-    return '';
-  }
-
-  /**
-   * Setup HTTP routes
-   */
-  private setupRoutes(): void {
-    // Health & Viewer
+    // Health check
     this.app.get('/health', this.handleHealth.bind(this));
-    this.app.get('/', this.handleViewerUI.bind(this));
-    this.app.get('/stream', this.handleSSEStream.bind(this));
 
-    // Session endpoints (legacy - using sessionDbId in URL for backward compatibility with web UI)
-    this.app.post('/sessions/:sessionDbId/init', this.handleSessionInit.bind(this));
-    this.app.post('/sessions/:sessionDbId/observations', this.handleObservations.bind(this));
+    // Session endpoints
+    this.app.post('/sessions/:sessionDbId/init', this.handleInit.bind(this));
+    this.app.post('/sessions/:sessionDbId/observations', this.handleObservation.bind(this));
     this.app.post('/sessions/:sessionDbId/summarize', this.handleSummarize.bind(this));
-    this.app.get('/sessions/:sessionDbId/status', this.handleSessionStatus.bind(this));
-    this.app.delete('/sessions/:sessionDbId', this.handleSessionDelete.bind(this));
-    this.app.post('/sessions/:sessionDbId/complete', this.handleSessionComplete.bind(this));
-
-    // New session endpoints (using claudeSessionId in body - hooks use these)
-    this.app.post('/api/sessions/init', this.handleSessionInitByClaudeId.bind(this));
-    this.app.post('/api/sessions/observations', this.handleObservationsByClaudeId.bind(this));
-    this.app.post('/api/sessions/summarize', this.handleSummarizeByClaudeId.bind(this));
-    this.app.post('/api/sessions/complete', this.handleSessionCompleteByClaudeId.bind(this));
-    this.app.get('/api/context/inject', this.handleContextInject.bind(this));
-
-    // Data retrieval
-    this.app.get('/api/observations', this.handleGetObservations.bind(this));
-    this.app.get('/api/summaries', this.handleGetSummaries.bind(this));
-    this.app.get('/api/prompts', this.handleGetPrompts.bind(this));
-
-    // Fetch by ID
-    this.app.get('/api/observation/:id', this.handleGetObservationById.bind(this));
-    this.app.get('/api/session/:id', this.handleGetSessionById.bind(this));
-    this.app.get('/api/prompt/:id', this.handleGetPromptById.bind(this));
-
-    this.app.get('/api/stats', this.handleGetStats.bind(this));
-    this.app.get('/api/projects', this.handleGetProjects.bind(this));
-    this.app.get('/api/processing-status', this.handleGetProcessingStatus.bind(this));
-    this.app.post('/api/processing', this.handleSetProcessing.bind(this));
-
-    // Settings
-    this.app.get('/api/settings', this.handleGetSettings.bind(this));
-    this.app.post('/api/settings', this.handleUpdateSettings.bind(this));
-
-    // MCP toggle
-    this.app.get('/api/mcp/status', this.handleGetMcpStatus.bind(this));
-    this.app.post('/api/mcp/toggle', this.handleToggleMcp.bind(this));
-
-    // Branch switching (beta toggle)
-    this.app.get('/api/branch/status', this.handleGetBranchStatus.bind(this));
-    this.app.post('/api/branch/switch', this.handleSwitchBranch.bind(this));
-    this.app.post('/api/branch/update', this.handleUpdateBranch.bind(this));
-
-    // Search API endpoints (for skill-based search)
-    // Unified endpoints (new consolidated API)
-    this.app.get('/api/search', this.handleUnifiedSearch.bind(this));
-    this.app.get('/api/timeline', this.handleUnifiedTimeline.bind(this));
-    this.app.get('/api/decisions', this.handleDecisions.bind(this));
-    this.app.get('/api/changes', this.handleChanges.bind(this));
-    this.app.get('/api/how-it-works', this.handleHowItWorks.bind(this));
-
-    // Backward compatibility endpoints (use /api/search with type param instead)
-    this.app.get('/api/search/observations', this.handleSearchObservations.bind(this));
-    this.app.get('/api/search/sessions', this.handleSearchSessions.bind(this));
-    this.app.get('/api/search/prompts', this.handleSearchPrompts.bind(this));
-    this.app.get('/api/search/by-concept', this.handleSearchByConcept.bind(this));
-    this.app.get('/api/search/by-file', this.handleSearchByFile.bind(this));
-    this.app.get('/api/search/by-type', this.handleSearchByType.bind(this));
-    this.app.get('/api/context/recent', this.handleGetRecentContext.bind(this));
-    this.app.get('/api/context/timeline', this.handleGetContextTimeline.bind(this));
-    this.app.get('/api/context/preview', this.handleContextPreview.bind(this));
-    this.app.get('/api/timeline/by-query', this.handleGetTimelineByQuery.bind(this));
-    this.app.get('/api/search/help', this.handleSearchHelp.bind(this));
+    this.app.get('/sessions/:sessionDbId/status', this.handleStatus.bind(this));
+    this.app.delete('/sessions/:sessionDbId', this.handleDelete.bind(this));
   }
 
-  /**
-   * Cleanup orphaned MCP server processes (uvx/chroma) from previous sessions
-   */
-  private async cleanupOrphanedProcesses(): Promise<void> {
-    try {
-      const { execSync } = await import('child_process');
-
-      // Find orphaned uvx processes (which spawn chroma servers)
-      try {
-        const processes = execSync('pgrep -fl uvx', { encoding: 'utf-8', stdio: 'pipe' }).trim();
-        if (processes) {
-          const processCount = processes.split('\n').length;
-          logger.info('WORKER', 'Cleaning up orphaned MCP processes', { count: processCount });
-
-          // Kill the processes
-          execSync('pkill -f uvx', { stdio: 'pipe' });
-          logger.success('WORKER', `Cleaned up ${processCount} orphaned MCP server processes`);
-        }
-      } catch (error: any) {
-        // pgrep returns exit code 1 if no processes found (not an error)
-        if (error.status === 1) {
-          logger.debug('WORKER', 'No orphaned MCP processes to clean up');
-        } else {
-          throw error;
-        }
-      }
-    } catch (error) {
-      // Don't fail startup if cleanup fails
-      logger.warn('WORKER', 'Failed to cleanup orphaned processes (non-fatal)', {}, error as Error);
-    }
-  }
-
-  /**
-   * Start the worker service
-   */
   async start(): Promise<void> {
-    // Cleanup orphaned processes from previous sessions
-    await this.cleanupOrphanedProcesses();
+    this.port = FIXED_PORT;
 
-    // Initialize database (once, stays open)
-    await this.dbManager.initialize();
+    // Clean up orphaned sessions from previous worker instances
+    const db = new SessionStore();
+    const cleanedCount = db.cleanupOrphanedSessions();
+    db.close();
 
-    // Connect to MCP search server
-    const searchServerPath = path.join(__dirname, '..', '..', 'plugin', 'scripts', 'search-server.cjs');
-    const transport = new StdioClientTransport({
-      command: 'node',
-      args: [searchServerPath],
-      env: process.env
-    });
-
-    await this.mcpClient.connect(transport);
-    logger.success('WORKER', 'Connected to MCP search server');
-
-    // Start HTTP server
-    const port = getWorkerPort();
-    this.server = await new Promise<http.Server>((resolve, reject) => {
-      const srv = this.app.listen(port, () => resolve(srv));
-      srv.on('error', reject);
-    });
-
-    logger.info('SYSTEM', 'Worker started', { port, pid: process.pid });
-  }
-
-  /**
-   * Shutdown the worker service
-   */
-  async shutdown(): Promise<void> {
-    // Shutdown all active sessions
-    await this.sessionManager.shutdownAll();
-
-    // Close MCP client connection (terminates search server process)
-    if (this.mcpClient) {
-      try {
-        await this.mcpClient.close();
-        logger.info('SYSTEM', 'MCP client closed');
-      } catch (error) {
-        logger.error('SYSTEM', 'Failed to close MCP client', {}, error as Error);
-      }
+    if (cleanedCount > 0) {
+      logger.info('SYSTEM', `Cleaned up ${cleanedCount} orphaned sessions`);
     }
 
-    // Close HTTP server
-    if (this.server) {
-      await new Promise<void>((resolve, reject) => {
-        this.server!.close(err => err ? reject(err) : resolve());
+    return new Promise((resolve, reject) => {
+      this.app.listen(FIXED_PORT, '127.0.0.1', () => {
+        logger.info('SYSTEM', `Worker started`, { port: FIXED_PORT, pid: process.pid, activeSessions: this.sessions.size });
+        resolve();
+      }).on('error', (err: any) => {
+        if (err.code === 'EADDRINUSE') {
+          logger.error('SYSTEM', `Port ${FIXED_PORT} already in use - worker may already be running`);
+        }
+        reject(err);
       });
-    }
-
-    // Close database connection (includes ChromaSync cleanup)
-    await this.dbManager.close();
-
-    logger.info('SYSTEM', 'Worker shutdown complete');
+    });
   }
 
-  // ============================================================================
-  // Route Handlers
-  // ============================================================================
-
   /**
-   * Health check endpoint
+   * GET /health
    */
   private handleHealth(req: Request, res: Response): void {
-    res.json({ status: 'ok', timestamp: Date.now() });
-  }
-
-  /**
-   * Serve viewer UI
-   */
-  private handleViewerUI(req: Request, res: Response): void {
-    try {
-      const packageRoot = getPackageRoot();
-      const viewerPath = path.join(packageRoot, 'plugin', 'ui', 'viewer.html');
-      const html = readFileSync(viewerPath, 'utf-8');
-      res.setHeader('Content-Type', 'text/html');
-      res.send(html);
-    } catch (error) {
-      logger.failure('WORKER', 'Viewer UI error', {}, error as Error);
-      res.status(500).json({ error: 'Failed to load viewer UI' });
-    }
-  }
-
-  /**
-   * SSE stream endpoint
-   */
-  private handleSSEStream(req: Request, res: Response): void {
-    // Setup SSE headers
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
-
-    // Add client to broadcaster
-    this.sseBroadcaster.addClient(res);
-
-    // Send initial_load event with projects list
-    const allProjects = this.dbManager.getSessionStore().getAllProjects();
-    this.sseBroadcaster.broadcast({
-      type: 'initial_load',
-      projects: allProjects,
-      timestamp: Date.now()
-    });
-
-    // Send initial processing status (based on queue depth + active generators)
-    const isProcessing = this.sessionManager.isAnySessionProcessing();
-    const queueDepth = this.sessionManager.getTotalActiveWork(); // Includes queued + actively processing
-    this.sseBroadcaster.broadcast({
-      type: 'processing_status',
-      isProcessing,
-      queueDepth
+    res.json({
+      status: 'ok',
+      port: this.port,
+      pid: process.pid,
+      activeSessions: this.sessions.size,
+      uptime: process.uptime(),
+      memory: process.memoryUsage()
     });
   }
 
   /**
-   * Initialize a new session
+   * POST /sessions/:sessionDbId/init
+   * Body: { project, userPrompt }
    */
-  private handleSessionInit(req: Request, res: Response): void {
-    try {
-      const sessionDbId = parseInt(req.params.sessionDbId, 10);
-      const { userPrompt, promptNumber } = req.body;
-      const session = this.sessionManager.initializeSession(sessionDbId, userPrompt, promptNumber);
+  private async handleInit(req: Request, res: Response): Promise<void> {
+    const sessionDbId = parseInt(req.params.sessionDbId, 10);
+    const { project, userPrompt } = req.body;
 
-      // Get the latest user_prompt for this session to sync to Chroma
-      const db = this.dbManager.getSessionStore().db;
-      const latestPrompt = db.prepare(`
-        SELECT
-          up.*,
-          s.sdk_session_id,
-          s.project
-        FROM user_prompts up
-        JOIN sdk_sessions s ON up.claude_session_id = s.claude_session_id
-        WHERE up.claude_session_id = ?
-        ORDER BY up.created_at_epoch DESC
-        LIMIT 1
-      `).get(session.claudeSessionId) as any;
+    const correlationId = logger.sessionId(sessionDbId);
+    logger.info('WORKER', 'Session init', { correlationId, project });
 
-      // Broadcast new prompt to SSE clients (for web UI)
-      if (latestPrompt) {
-        this.sseBroadcaster.broadcast({
-          type: 'new_prompt',
-          prompt: {
-            id: latestPrompt.id,
-            claude_session_id: latestPrompt.claude_session_id,
-            project: latestPrompt.project,
-            prompt_number: latestPrompt.prompt_number,
-            prompt_text: latestPrompt.prompt_text,
-            created_at_epoch: latestPrompt.created_at_epoch
-          }
-        });
+    // Fetch real Claude Code session ID from database
+    const db = new SessionStore();
+    const dbSession = db.getSessionById(sessionDbId);
+    if (!dbSession) {
+      db.close();
+      res.status(404).json({ error: 'Session not found in database' });
+      return;
+    }
 
-        // Start activity indicator immediately when prompt arrives (work is about to begin)
-        this.sseBroadcaster.broadcast({
-          type: 'processing_status',
-          isProcessing: true
-        });
+    // Get the real claude_session_id (which is the same as sdk_session_id now)
+    const claudeSessionId = dbSession.sdk_session_id || `session-${sessionDbId}`;
 
-        // Sync user prompt to Chroma with error logging
-        const chromaStart = Date.now();
-        const promptText = latestPrompt.prompt_text;
-        this.dbManager.getChromaSync().syncUserPrompt(
-          latestPrompt.id,
-          latestPrompt.sdk_session_id,
-          latestPrompt.project,
-          promptText,
-          latestPrompt.prompt_number,
-          latestPrompt.created_at_epoch
-        ).then(() => {
-          const chromaDuration = Date.now() - chromaStart;
-          const truncatedPrompt = promptText.length > 60
-            ? promptText.substring(0, 60) + '...'
-            : promptText;
-          logger.debug('CHROMA', 'User prompt synced', {
-            promptId: latestPrompt.id,
-            duration: `${chromaDuration}ms`,
-            prompt: truncatedPrompt
-          });
-        }).catch(err => {
-          logger.error('CHROMA', 'Failed to sync user_prompt', {
-            promptId: latestPrompt.id,
-            sessionId: sessionDbId
-          }, err);
-        });
-      }
+    // Create session state
+    const session: ActiveSession = {
+      sessionDbId,
+      claudeSessionId,
+      sdkSessionId: dbSession.sdk_session_id || null, // Set from database since we set both fields now
+      project,
+      userPrompt,
+      pendingMessages: [],
+      abortController: new AbortController(),
+      generatorPromise: null,
+      lastPromptNumber: 0,
+      observationCounter: 0,
+      startTime: Date.now()
+    };
 
-      // Broadcast processing status (based on queue depth)
-      this.broadcastProcessingStatus();
+    this.sessions.set(sessionDbId, session);
+    db.close();
 
-      // Start SDK agent in background (pass worker ref for spinner control)
-      logger.info('SESSION', 'Generator starting', {
-        sessionId: sessionDbId,
-        project: session.project,
-        promptNum: session.lastPromptNumber
-      });
+    // Start SDK agent in background
+    session.generatorPromise = this.runSDKAgent(session).catch(err => {
+      logger.failure('WORKER', 'SDK agent error', { sessionId: sessionDbId }, err);
+      const db = new SessionStore();
+      db.markSessionFailed(sessionDbId);
+      db.close();
+      this.sessions.delete(sessionDbId);
+    });
 
-      session.generatorPromise = this.sdkAgent.startSession(session, this)
-        .catch(err => {
-          logger.failure('SDK', 'SDK agent error', { sessionId: sessionDbId }, err);
-        })
-        .finally(() => {
-          // Clear generator reference when completed
-          logger.info('SESSION', `Generator finished`, { sessionId: sessionDbId });
-          session.generatorPromise = null;
-          // Broadcast status change (generator finished, may stop spinner)
-          this.broadcastProcessingStatus();
-        });
+    logger.success('WORKER', 'Session initialized', { sessionId: sessionDbId, port: this.port });
+    res.json({
+      status: 'initialized',
+      sessionDbId,
+      port: this.port
+    });
+  }
 
-      // Broadcast SSE event
-      this.sseBroadcaster.broadcast({
-        type: 'session_started',
+  /**
+   * POST /sessions/:sessionDbId/observations
+   * Body: { tool_name, tool_input, tool_output, prompt_number }
+   */
+  private handleObservation(req: Request, res: Response): void {
+    const sessionDbId = parseInt(req.params.sessionDbId, 10);
+    const { tool_name, tool_input, tool_output, prompt_number } = req.body;
+
+    let session = this.sessions.get(sessionDbId);
+    if (!session) {
+      // Auto-create session if it doesn't exist (e.g., worker restarted)
+      // Fetch real session ID from database
+      const db = new SessionStore();
+      const dbSession = db.getSessionById(sessionDbId);
+      db.close();
+
+      const claudeSessionId = dbSession?.sdk_session_id || `session-${sessionDbId}`;
+
+      session = {
         sessionDbId,
-        project: session.project
-      });
-
-      res.json({ status: 'initialized', sessionDbId, port: getWorkerPort() });
-    } catch (error) {
-      logger.failure('WORKER', 'Session init failed', {}, error as Error);
-      res.status(500).json({ error: (error as Error).message });
-    }
-  }
-
-  /**
-   * Queue observations for processing
-   * CRITICAL: Ensures SDK agent is running to process the queue (ALWAYS SAVE EVERYTHING)
-   */
-  private handleObservations(req: Request, res: Response): void {
-    try {
-      const sessionDbId = parseInt(req.params.sessionDbId, 10);
-      const { tool_name, tool_input, tool_response, prompt_number, cwd } = req.body;
-
-      this.sessionManager.queueObservation(sessionDbId, {
-        tool_name,
-        tool_input,
-        tool_response,
-        prompt_number,
-        cwd
-      });
-
-      // CRITICAL: Ensure SDK agent is running to consume the queue
-      const session = this.sessionManager.getSession(sessionDbId);
-      if (session && !session.generatorPromise) {
-        logger.info('SESSION', 'Generator auto-starting (observation)', {
-          sessionId: sessionDbId,
-          queueDepth: session.pendingMessages.length
-        });
-
-        session.generatorPromise = this.sdkAgent.startSession(session, this)
-          .catch(err => {
-            logger.failure('SDK', 'SDK agent error', { sessionId: sessionDbId }, err);
-          })
-          .finally(() => {
-            // Clear generator reference when completed
-            logger.info('SESSION', `Generator finished`, { sessionId: sessionDbId });
-            session.generatorPromise = null;
-            // Broadcast status change (generator finished, may stop spinner)
-            this.broadcastProcessingStatus();
-          });
-      }
-
-      // Broadcast activity status (queue depth changed)
-      this.broadcastProcessingStatus();
-
-      // Broadcast SSE event
-      this.sseBroadcaster.broadcast({
-        type: 'observation_queued',
-        sessionDbId
-      });
-
-      res.json({ status: 'queued' });
-    } catch (error) {
-      logger.failure('WORKER', 'Observation queuing failed', {}, error as Error);
-      res.status(500).json({ error: (error as Error).message });
-    }
-  }
-
-  /**
-   * Queue summarize request
-   * CRITICAL: Ensures SDK agent is running to process the queue (ALWAYS SAVE EVERYTHING)
-   */
-  private handleSummarize(req: Request, res: Response): void {
-    try {
-      const sessionDbId = parseInt(req.params.sessionDbId, 10);
-      const { last_user_message, last_assistant_message } = req.body;
-
-      this.sessionManager.queueSummarize(sessionDbId, last_user_message, last_assistant_message);
-
-      // CRITICAL: Ensure SDK agent is running to consume the queue
-      const session = this.sessionManager.getSession(sessionDbId);
-      if (session && !session.generatorPromise) {
-        logger.info('SESSION', 'Generator auto-starting (summarize)', {
-          sessionId: sessionDbId,
-          queueDepth: session.pendingMessages.length
-        });
-
-        session.generatorPromise = this.sdkAgent.startSession(session, this)
-          .catch(err => {
-            logger.failure('SDK', 'SDK agent error', { sessionId: sessionDbId }, err);
-          })
-          .finally(() => {
-            // Clear generator reference when completed
-            logger.info('SESSION', `Generator finished`, { sessionId: sessionDbId });
-            session.generatorPromise = null;
-            // Broadcast status change (generator finished, may stop spinner)
-            this.broadcastProcessingStatus();
-          });
-      }
-
-      // Broadcast activity status (queue depth changed)
-      this.broadcastProcessingStatus();
-
-      res.json({ status: 'queued' });
-    } catch (error) {
-      logger.failure('WORKER', 'Summarize queuing failed', {}, error as Error);
-      res.status(500).json({ error: (error as Error).message });
-    }
-  }
-
-  /**
-   * Get session status
-   */
-  private handleSessionStatus(req: Request, res: Response): void {
-    try {
-      const sessionDbId = parseInt(req.params.sessionDbId, 10);
-      const session = this.sessionManager.getSession(sessionDbId);
-
-      if (!session) {
-        res.json({ status: 'not_found' });
-        return;
-      }
-
-      res.json({
-        status: 'active',
-        sessionDbId,
-        project: session.project,
-        queueLength: session.pendingMessages.length,
-        uptime: Date.now() - session.startTime
-      });
-    } catch (error) {
-      logger.failure('WORKER', 'Session status failed', {}, error as Error);
-      res.status(500).json({ error: (error as Error).message });
-    }
-  }
-
-  /**
-   * Delete a session
-   */
-  private async handleSessionDelete(req: Request, res: Response): Promise<void> {
-    try {
-      const sessionDbId = parseInt(req.params.sessionDbId, 10);
-      await this.sessionManager.deleteSession(sessionDbId);
-
-      // Mark session complete in database
-      this.dbManager.markSessionComplete(sessionDbId);
-
-      // Broadcast SSE event
-      this.sseBroadcaster.broadcast({
-        type: 'session_completed',
-        sessionDbId
-      });
-
-      res.json({ status: 'deleted' });
-    } catch (error) {
-      logger.failure('WORKER', 'Session delete failed', {}, error as Error);
-      res.status(500).json({ error: (error as Error).message });
-    }
-  }
-
-  /**
-   * Complete a session (backward compatibility for cleanup-hook)
-   * cleanup-hook expects POST /sessions/:sessionDbId/complete instead of DELETE
-   */
-  private async handleSessionComplete(req: Request, res: Response): Promise<void> {
-    try {
-      const sessionDbId = parseInt(req.params.sessionDbId, 10);
-      if (isNaN(sessionDbId)) {
-        res.status(400).json({ success: false, error: 'Invalid session ID' });
-        return;
-      }
-
-      await this.sessionManager.deleteSession(sessionDbId);
-
-      // Mark session complete in database
-      this.dbManager.markSessionComplete(sessionDbId);
-
-      // Broadcast processing status (based on queue depth)
-      this.broadcastProcessingStatus();
-
-      // Broadcast SSE event
-      this.sseBroadcaster.broadcast({
-        type: 'session_completed',
-        timestamp: Date.now(),
-        sessionDbId
-      });
-
-      res.json({ success: true });
-    } catch (error) {
-      logger.failure('WORKER', 'Session complete failed', {}, error as Error);
-      res.status(500).json({ success: false, error: String(error) });
-    }
-  }
-
-  // ============================================================================
-  // New Hook API Endpoints (using claudeSessionId - hooks become pure HTTP clients)
-  // ============================================================================
-
-  /**
-   * Initialize session by claudeSessionId (new-hook uses this)
-   * POST /api/sessions/init
-   * Body: { claudeSessionId, project, userPrompt }
-   *
-   * Creates session, increments prompt counter, saves user prompt, initializes SDK agent
-   */
-  private handleSessionInitByClaudeId(req: Request, res: Response): void {
-    try {
-      const { claudeSessionId, project, userPrompt } = req.body;
-
-      if (!claudeSessionId) {
-        res.status(400).json({ error: 'Missing claudeSessionId' });
-        return;
-      }
-
-      const store = this.dbManager.getSessionStore();
-
-      // Create or get existing session (idempotent)
-      const sessionDbId = store.createSDKSession(claudeSessionId, project || '', userPrompt || '');
-      const promptNumber = store.incrementPromptCounter(sessionDbId);
-
-      // Strip memory tags before saving user prompt
-      const cleanedUserPrompt = stripMemoryTagsFromPrompt(userPrompt || '');
-
-      // Skip memory operations for fully private prompts
-      if (!cleanedUserPrompt || cleanedUserPrompt.trim() === '') {
-        logger.debug('HOOK', 'Prompt entirely private, skipping memory operations', {
-          sessionId: sessionDbId,
-          promptNumber
-        });
-        res.json({ status: 'skipped', sessionDbId, promptNumber, reason: 'private' });
-        return;
-      }
-
-      // Save the cleaned user prompt
-      store.saveUserPrompt(claudeSessionId, promptNumber, cleanedUserPrompt);
-
-      // Strip leading slash from commands for memory agent
-      const cleanedPrompt = userPrompt?.startsWith('/') ? userPrompt.substring(1) : userPrompt;
-
-      // Initialize in-memory session and start SDK agent
-      const session = this.sessionManager.initializeSession(sessionDbId, cleanedPrompt, promptNumber);
-
-      // Get the latest user_prompt for Chroma sync
-      const latestPrompt = store.db.prepare(`
-        SELECT
-          up.*,
-          s.sdk_session_id,
-          s.project
-        FROM user_prompts up
-        JOIN sdk_sessions s ON up.claude_session_id = s.claude_session_id
-        WHERE up.claude_session_id = ?
-        ORDER BY up.created_at_epoch DESC
-        LIMIT 1
-      `).get(claudeSessionId) as any;
-
-      // Broadcast new prompt to SSE clients
-      if (latestPrompt) {
-        this.sseBroadcaster.broadcast({
-          type: 'new_prompt',
-          prompt: {
-            id: latestPrompt.id,
-            claude_session_id: latestPrompt.claude_session_id,
-            project: latestPrompt.project,
-            prompt_number: latestPrompt.prompt_number,
-            prompt_text: latestPrompt.prompt_text,
-            created_at_epoch: latestPrompt.created_at_epoch
-          }
-        });
-
-        // Start activity indicator
-        this.sseBroadcaster.broadcast({
-          type: 'processing_status',
-          isProcessing: true
-        });
-
-        // Sync user prompt to Chroma
-        const chromaStart = Date.now();
-        const promptText = latestPrompt.prompt_text;
-        this.dbManager.getChromaSync().syncUserPrompt(
-          latestPrompt.id,
-          latestPrompt.sdk_session_id,
-          latestPrompt.project,
-          promptText,
-          latestPrompt.prompt_number,
-          latestPrompt.created_at_epoch
-        ).catch(err => {
-          logger.error('CHROMA', 'Failed to sync user_prompt', {
-            promptId: latestPrompt.id,
-            sessionId: sessionDbId
-          }, err);
-        });
-      }
-
-      // Broadcast processing status
-      this.broadcastProcessingStatus();
+        claudeSessionId,
+        sdkSessionId: null,
+        project: dbSession?.project || '',
+        userPrompt: dbSession?.user_prompt || '',
+        pendingMessages: [],
+        abortController: new AbortController(),
+        generatorPromise: null,
+        lastPromptNumber: 0,
+        observationCounter: 0,
+        startTime: Date.now()
+      };
+      this.sessions.set(sessionDbId, session);
 
       // Start SDK agent in background
-      logger.info('SESSION', 'Generator starting', {
-        sessionId: sessionDbId,
-        project: session.project,
-        promptNum: session.lastPromptNumber
+      session.generatorPromise = this.runSDKAgent(session).catch(err => {
+        logger.failure('WORKER', 'SDK agent error', { sessionId: sessionDbId }, err);
+        const db = new SessionStore();
+        db.markSessionFailed(sessionDbId);
+        db.close();
+        this.sessions.delete(sessionDbId);
       });
+    }
 
-      session.generatorPromise = this.sdkAgent.startSession(session, this)
-        .catch(err => {
-          logger.failure('SDK', 'SDK agent error', { sessionId: sessionDbId }, err);
-        })
-        .finally(() => {
-          logger.info('SESSION', `Generator finished`, { sessionId: sessionDbId });
-          session.generatorPromise = null;
-          this.broadcastProcessingStatus();
-        });
+    // Create correlation ID for tracking this observation
+    session.observationCounter++;
+    const correlationId = logger.correlationId(sessionDbId, session.observationCounter);
+    const toolStr = logger.formatTool(tool_name, tool_input);
 
-      // Broadcast SSE event
-      this.sseBroadcaster.broadcast({
-        type: 'session_started',
+    logger.dataIn('WORKER', `Observation queued: ${toolStr}`, {
+      correlationId,
+      queue: session.pendingMessages.length + 1
+    });
+
+    session.pendingMessages.push({
+      type: 'observation',
+      tool_name,
+      tool_input,
+      tool_output,
+      prompt_number
+    });
+
+    res.json({ status: 'queued', queueLength: session.pendingMessages.length });
+  }
+
+  /**
+   * POST /sessions/:sessionDbId/summarize
+   * Body: { prompt_number }
+   */
+  private handleSummarize(req: Request, res: Response): void {
+    const sessionDbId = parseInt(req.params.sessionDbId, 10);
+    const { prompt_number } = req.body;
+
+    let session = this.sessions.get(sessionDbId);
+    if (!session) {
+      // Auto-create session if it doesn't exist (e.g., worker restarted)
+      // Fetch real session ID from database
+      const db = new SessionStore();
+      const dbSession = db.getSessionById(sessionDbId);
+      db.close();
+
+      const claudeSessionId = dbSession?.sdk_session_id || `session-${sessionDbId}`;
+
+      session = {
         sessionDbId,
-        project: session.project
+        claudeSessionId,
+        sdkSessionId: null,
+        project: dbSession?.project || '',
+        userPrompt: dbSession?.user_prompt || '',
+        pendingMessages: [],
+        abortController: new AbortController(),
+        generatorPromise: null,
+        lastPromptNumber: 0,
+        observationCounter: 0,
+        startTime: Date.now()
+      };
+      this.sessions.set(sessionDbId, session);
+
+      // Start SDK agent in background
+      session.generatorPromise = this.runSDKAgent(session).catch(err => {
+        logger.failure('WORKER', 'SDK agent error', { sessionId: sessionDbId }, err);
+        const db = new SessionStore();
+        db.markSessionFailed(sessionDbId);
+        db.close();
+        this.sessions.delete(sessionDbId);
       });
-
-      res.json({ status: 'initialized', sessionDbId, promptNumber, port: getWorkerPort() });
-    } catch (error) {
-      logger.failure('WORKER', 'Session init by claudeId failed', {}, error as Error);
-      res.status(500).json({ error: (error as Error).message });
-    }
-  }
-
-  /**
-   * Queue observation by claudeSessionId (save-hook uses this)
-   * POST /api/sessions/observations
-   * Body: { claudeSessionId, tool_name, tool_input, tool_response, cwd }
-   *
-   * Checks privacy, queues observation for SDK agent processing
-   */
-  private handleObservationsByClaudeId(req: Request, res: Response): void {
-    try {
-      const { claudeSessionId, tool_name, tool_input, tool_response, cwd } = req.body;
-
-      if (!claudeSessionId) {
-        res.status(400).json({ error: 'Missing claudeSessionId' });
-        return;
-      }
-
-      const store = this.dbManager.getSessionStore();
-
-      // Get or create session
-      const sessionDbId = store.createSDKSession(claudeSessionId, '', '');
-      const promptNumber = store.getPromptCounter(sessionDbId);
-
-      // Privacy check: skip if user prompt was entirely private
-      const userPrompt = store.getUserPrompt(claudeSessionId, promptNumber);
-      if (!userPrompt || userPrompt.trim() === '') {
-        logger.debug('HOOK', 'Skipping observation - user prompt was entirely private', {
-          sessionId: sessionDbId,
-          promptNumber,
-          tool_name
-        });
-        res.json({ status: 'skipped', reason: 'private' });
-        return;
-      }
-
-      // Strip memory tags from tool_input and tool_response
-      let cleanedToolInput = '{}';
-      let cleanedToolResponse = '{}';
-
-      try {
-        cleanedToolInput = tool_input !== undefined
-          ? stripMemoryTagsFromJson(JSON.stringify(tool_input))
-          : '{}';
-      } catch (error) {
-        cleanedToolInput = '{"error": "Failed to serialize tool_input"}';
-      }
-
-      try {
-        cleanedToolResponse = tool_response !== undefined
-          ? stripMemoryTagsFromJson(JSON.stringify(tool_response))
-          : '{}';
-      } catch (error) {
-        cleanedToolResponse = '{"error": "Failed to serialize tool_response"}';
-      }
-
-      // Queue observation
-      this.sessionManager.queueObservation(sessionDbId, {
-        tool_name,
-        tool_input: cleanedToolInput,
-        tool_response: cleanedToolResponse,
-        prompt_number: promptNumber,
-        cwd: cwd || ''
-      });
-
-      // Ensure SDK agent is running
-      const session = this.sessionManager.getSession(sessionDbId);
-      if (session && !session.generatorPromise) {
-        logger.info('SESSION', 'Generator auto-starting (observation)', {
-          sessionId: sessionDbId,
-          queueDepth: session.pendingMessages.length
-        });
-
-        session.generatorPromise = this.sdkAgent.startSession(session, this)
-          .catch(err => {
-            logger.failure('SDK', 'SDK agent error', { sessionId: sessionDbId }, err);
-          })
-          .finally(() => {
-            logger.info('SESSION', `Generator finished`, { sessionId: sessionDbId });
-            session.generatorPromise = null;
-            this.broadcastProcessingStatus();
-          });
-      }
-
-      // Broadcast activity status
-      this.broadcastProcessingStatus();
-
-      // Broadcast SSE event
-      this.sseBroadcaster.broadcast({
-        type: 'observation_queued',
-        sessionDbId
-      });
-
-      res.json({ status: 'queued' });
-    } catch (error) {
-      logger.failure('WORKER', 'Observation by claudeId failed', {}, error as Error);
-      res.status(500).json({ error: (error as Error).message });
-    }
-  }
-
-  /**
-   * Queue summarize by claudeSessionId (summary-hook uses this)
-   * POST /api/sessions/summarize
-   * Body: { claudeSessionId, last_user_message, last_assistant_message }
-   *
-   * Checks privacy, queues summarize request for SDK agent
-   */
-  private handleSummarizeByClaudeId(req: Request, res: Response): void {
-    try {
-      const { claudeSessionId, last_user_message, last_assistant_message } = req.body;
-
-      if (!claudeSessionId) {
-        res.status(400).json({ error: 'Missing claudeSessionId' });
-        return;
-      }
-
-      const store = this.dbManager.getSessionStore();
-
-      // Get or create session
-      const sessionDbId = store.createSDKSession(claudeSessionId, '', '');
-      const promptNumber = store.getPromptCounter(sessionDbId);
-
-      // Privacy check: skip if user prompt was entirely private
-      const userPrompt = store.getUserPrompt(claudeSessionId, promptNumber);
-      if (!userPrompt || userPrompt.trim() === '') {
-        logger.debug('HOOK', 'Skipping summary - user prompt was entirely private', {
-          sessionId: sessionDbId,
-          promptNumber
-        });
-        res.json({ status: 'skipped', reason: 'private' });
-        return;
-      }
-
-      // Queue summarize
-      this.sessionManager.queueSummarize(sessionDbId, last_user_message || '', last_assistant_message);
-
-      // Ensure SDK agent is running
-      const session = this.sessionManager.getSession(sessionDbId);
-      if (session && !session.generatorPromise) {
-        logger.info('SESSION', 'Generator auto-starting (summarize)', {
-          sessionId: sessionDbId,
-          queueDepth: session.pendingMessages.length
-        });
-
-        session.generatorPromise = this.sdkAgent.startSession(session, this)
-          .catch(err => {
-            logger.failure('SDK', 'SDK agent error', { sessionId: sessionDbId }, err);
-          })
-          .finally(() => {
-            logger.info('SESSION', `Generator finished`, { sessionId: sessionDbId });
-            session.generatorPromise = null;
-            this.broadcastProcessingStatus();
-          });
-      }
-
-      // Broadcast activity status
-      this.broadcastProcessingStatus();
-
-      res.json({ status: 'queued' });
-    } catch (error) {
-      logger.failure('WORKER', 'Summarize by claudeId failed', {}, error as Error);
-      res.status(500).json({ error: (error as Error).message });
-    }
-  }
-
-  /**
-   * Complete session by claudeSessionId (cleanup-hook uses this)
-   * POST /api/sessions/complete
-   * Body: { claudeSessionId }
-   *
-   * Marks session complete, stops SDK agent, broadcasts status
-   */
-  private async handleSessionCompleteByClaudeId(req: Request, res: Response): Promise<void> {
-    try {
-      const { claudeSessionId } = req.body;
-
-      if (!claudeSessionId) {
-        res.status(400).json({ success: false, error: 'Missing claudeSessionId' });
-        return;
-      }
-
-      const store = this.dbManager.getSessionStore();
-
-      // Find session by claudeSessionId
-      const session = store.findActiveSDKSession(claudeSessionId);
-      if (!session) {
-        // No active session - nothing to clean up (may have already been completed)
-        res.json({ success: true, message: 'No active session found' });
-        return;
-      }
-
-      const sessionDbId = session.id;
-
-      // Delete from session manager (aborts SDK agent)
-      await this.sessionManager.deleteSession(sessionDbId);
-
-      // Mark session complete in database
-      this.dbManager.markSessionComplete(sessionDbId);
-
-      // Broadcast processing status
-      this.broadcastProcessingStatus();
-
-      // Broadcast SSE event
-      this.sseBroadcaster.broadcast({
-        type: 'session_completed',
-        timestamp: Date.now(),
-        sessionDbId
-      });
-
-      res.json({ success: true });
-    } catch (error) {
-      logger.failure('WORKER', 'Session complete by claudeId failed', {}, error as Error);
-      res.status(500).json({ success: false, error: String(error) });
-    }
-  }
-
-  /**
-   * Get context injection for SessionStart hook (context-hook uses this)
-   * GET /api/context/inject?project=...&colors=true
-   *
-   * Returns pre-formatted context string ready for display.
-   * Use colors=true for ANSI-colored terminal output.
-   */
-  private async handleContextInject(req: Request, res: Response): Promise<void> {
-    try {
-      const projectName = req.query.project as string;
-      const useColors = req.query.colors === 'true';
-
-      if (!projectName) {
-        res.status(400).json({ error: 'Project parameter is required' });
-        return;
-      }
-
-      // Import context generator (runs in worker, has access to database)
-      const { generateContext } = await import('./context-generator.js');
-
-      // Use project name as CWD (generateContext uses path.basename to get project)
-      const cwd = `/context/${projectName}`;
-
-      // Generate context
-      const contextText = await generateContext(
-        {
-          session_id: 'context-inject-' + Date.now(),
-          cwd: cwd
-        },
-        useColors
-      );
-
-      // Return as plain text
-      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-      res.send(contextText);
-    } catch (error) {
-      logger.failure('WORKER', 'Context inject failed', {}, error as Error);
-      res.status(500).json({ error: (error as Error).message });
-    }
-  }
-
-  /**
-   * Get paginated observations
-   */
-  private handleGetObservations(req: Request, res: Response): void {
-    try {
-      const { offset, limit, project } = parsePaginationParams(req);
-      const result = this.paginationHelper.getObservations(offset, limit, project);
-      res.json(result);
-    } catch (error) {
-      logger.failure('WORKER', 'Get observations failed', {}, error as Error);
-      res.status(500).json({ error: (error as Error).message });
-    }
-  }
-
-  /**
-   * Get paginated summaries
-   */
-  private handleGetSummaries(req: Request, res: Response): void {
-    try {
-      const { offset, limit, project } = parsePaginationParams(req);
-      const result = this.paginationHelper.getSummaries(offset, limit, project);
-      res.json(result);
-    } catch (error) {
-      logger.failure('WORKER', 'Get summaries failed', {}, error as Error);
-      res.status(500).json({ error: (error as Error).message });
-    }
-  }
-
-  /**
-   * Get paginated user prompts
-   */
-  private handleGetPrompts(req: Request, res: Response): void {
-    try {
-      const { offset, limit, project } = parsePaginationParams(req);
-      const result = this.paginationHelper.getPrompts(offset, limit, project);
-      res.json(result);
-    } catch (error) {
-      logger.failure('WORKER', 'Get prompts failed', {}, error as Error);
-      res.status(500).json({ error: (error as Error).message });
-    }
-  }
-
-  /**
-   * Get observation by ID
-   * GET /api/observation/:id
-   */
-  private handleGetObservationById(req: Request, res: Response): void {
-    try {
-      const id = parseInt(req.params.id, 10);
-      if (isNaN(id)) {
-        res.status(400).json({ error: 'Invalid observation ID' });
-        return;
-      }
-
-      const store = this.dbManager.getSessionStore();
-      const observation = store.getObservationById(id);
-
-      if (!observation) {
-        res.status(404).json({ error: `Observation #${id} not found` });
-        return;
-      }
-
-      res.json(observation);
-    } catch (error) {
-      logger.failure('WORKER', 'Get observation by ID failed', {}, error as Error);
-      res.status(500).json({ error: (error as Error).message });
-    }
-  }
-
-  /**
-   * Get session by ID
-   * GET /api/session/:id
-   */
-  private handleGetSessionById(req: Request, res: Response): void {
-    try {
-      const id = parseInt(req.params.id, 10);
-      if (isNaN(id)) {
-        res.status(400).json({ error: 'Invalid session ID' });
-        return;
-      }
-
-      const store = this.dbManager.getSessionStore();
-      const sessions = store.getSessionSummariesByIds([id]);
-
-      if (sessions.length === 0) {
-        res.status(404).json({ error: `Session #${id} not found` });
-        return;
-      }
-
-      res.json(sessions[0]);
-    } catch (error) {
-      logger.failure('WORKER', 'Get session by ID failed', {}, error as Error);
-      res.status(500).json({ error: (error as Error).message });
-    }
-  }
-
-  /**
-   * Get user prompt by ID
-   * GET /api/prompt/:id
-   */
-  private handleGetPromptById(req: Request, res: Response): void {
-    try {
-      const id = parseInt(req.params.id, 10);
-      if (isNaN(id)) {
-        res.status(400).json({ error: 'Invalid prompt ID' });
-        return;
-      }
-
-      const store = this.dbManager.getSessionStore();
-      const prompts = store.getUserPromptsByIds([id]);
-
-      if (prompts.length === 0) {
-        res.status(404).json({ error: `Prompt #${id} not found` });
-        return;
-      }
-
-      res.json(prompts[0]);
-    } catch (error) {
-      logger.failure('WORKER', 'Get prompt by ID failed', {}, error as Error);
-      res.status(500).json({ error: (error as Error).message });
-    }
-  }
-
-  /**
-   * Get database statistics (with worker metadata)
-   */
-  private handleGetStats(req: Request, res: Response): void {
-    try {
-      const db = this.dbManager.getSessionStore().db;
-
-      // Read version from package.json
-      const packageRoot = getPackageRoot();
-      const packageJsonPath = path.join(packageRoot, 'package.json');
-      const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf-8'));
-      const version = packageJson.version;
-
-      // Get database stats
-      const totalObservations = db.prepare('SELECT COUNT(*) as count FROM observations').get() as { count: number };
-      const totalSessions = db.prepare('SELECT COUNT(*) as count FROM sdk_sessions').get() as { count: number };
-      const totalSummaries = db.prepare('SELECT COUNT(*) as count FROM session_summaries').get() as { count: number };
-
-      // Get database file size and path
-      const dbPath = path.join(homedir(), '.claude-mem', 'claude-mem.db');
-      let dbSize = 0;
-      if (existsSync(dbPath)) {
-        dbSize = statSync(dbPath).size;
-      }
-
-      // Worker metadata
-      const uptime = Math.floor((Date.now() - this.startTime) / 1000);
-      const activeSessions = this.sessionManager.getActiveSessionCount();
-      const sseClients = this.sseBroadcaster.getClientCount();
-
-      res.json({
-        worker: {
-          version,
-          uptime,
-          activeSessions,
-          sseClients,
-          port: getWorkerPort()
-        },
-        database: {
-          path: dbPath,
-          size: dbSize,
-          observations: totalObservations.count,
-          sessions: totalSessions.count,
-          summaries: totalSummaries.count
-        }
-      });
-    } catch (error) {
-      logger.failure('WORKER', 'Get stats failed', {}, error as Error);
-      res.status(500).json({ error: (error as Error).message });
-    }
-  }
-
-  /**
-   * Get list of distinct projects from observations
-   * GET /api/projects
-   */
-  private handleGetProjects(req: Request, res: Response): void {
-    try {
-      const db = this.dbManager.getSessionStore().db;
-
-      const rows = db.prepare(`
-        SELECT DISTINCT project
-        FROM observations
-        WHERE project IS NOT NULL
-        GROUP BY project
-        ORDER BY MAX(created_at_epoch) DESC
-      `).all() as Array<{ project: string }>;
-
-      const projects = rows.map(row => row.project);
-
-      res.json({ projects });
-    } catch (error) {
-      logger.failure('WORKER', 'Get projects failed', {}, error as Error);
-      res.status(500).json({ error: (error as Error).message });
-    }
-  }
-
-  /**
-   * Validate context settings from request body
-   */
-  private validateContextSettings(settings: any): { valid: boolean; error?: string } {
-    // Validate boolean string values
-    const booleanSettings = [
-      'CLAUDE_MEM_CONTEXT_SHOW_READ_TOKENS',
-      'CLAUDE_MEM_CONTEXT_SHOW_WORK_TOKENS',
-      'CLAUDE_MEM_CONTEXT_SHOW_SAVINGS_AMOUNT',
-      'CLAUDE_MEM_CONTEXT_SHOW_SAVINGS_PERCENT',
-      'CLAUDE_MEM_CONTEXT_SHOW_LAST_SUMMARY',
-      'CLAUDE_MEM_CONTEXT_SHOW_LAST_MESSAGE',
-    ];
-
-    for (const key of booleanSettings) {
-      if (settings[key] && !['true', 'false'].includes(settings[key])) {
-        return { valid: false, error: `${key} must be "true" or "false"` };
-      }
     }
 
-    // Validate FULL_COUNT (0-20)
-    if (settings.CLAUDE_MEM_CONTEXT_FULL_COUNT) {
-      const count = parseInt(settings.CLAUDE_MEM_CONTEXT_FULL_COUNT, 10);
-      if (isNaN(count) || count < 0 || count > 20) {
-        return { valid: false, error: 'CLAUDE_MEM_CONTEXT_FULL_COUNT must be between 0 and 20' };
-      }
-    }
-
-    // Validate SESSION_COUNT (1-50)
-    if (settings.CLAUDE_MEM_CONTEXT_SESSION_COUNT) {
-      const count = parseInt(settings.CLAUDE_MEM_CONTEXT_SESSION_COUNT, 10);
-      if (isNaN(count) || count < 1 || count > 50) {
-        return { valid: false, error: 'CLAUDE_MEM_CONTEXT_SESSION_COUNT must be between 1 and 50' };
-      }
-    }
-
-    // Validate FULL_FIELD
-    if (settings.CLAUDE_MEM_CONTEXT_FULL_FIELD) {
-      if (!['narrative', 'facts'].includes(settings.CLAUDE_MEM_CONTEXT_FULL_FIELD)) {
-        return { valid: false, error: 'CLAUDE_MEM_CONTEXT_FULL_FIELD must be "narrative" or "facts"' };
-      }
-    }
-
-    // Validate observation types
-    if (settings.CLAUDE_MEM_CONTEXT_OBSERVATION_TYPES) {
-      const types = settings.CLAUDE_MEM_CONTEXT_OBSERVATION_TYPES.split(',').map((t: string) => t.trim());
-      for (const type of types) {
-        if (type && !OBSERVATION_TYPES.includes(type as any)) {
-          return { valid: false, error: `Invalid observation type: ${type}. Valid types: ${OBSERVATION_TYPES.join(', ')}` };
-        }
-      }
-    }
-
-    // Validate observation concepts
-    if (settings.CLAUDE_MEM_CONTEXT_OBSERVATION_CONCEPTS) {
-      const concepts = settings.CLAUDE_MEM_CONTEXT_OBSERVATION_CONCEPTS.split(',').map((c: string) => c.trim());
-      for (const concept of concepts) {
-        if (concept && !OBSERVATION_CONCEPTS.includes(concept as any)) {
-          return { valid: false, error: `Invalid observation concept: ${concept}. Valid concepts: ${OBSERVATION_CONCEPTS.join(', ')}` };
-        }
-      }
-    }
-
-    return { valid: true };
-  }
-
-  /**
-   * Get environment settings (from ~/.claude/settings.json)
-   */
-  private handleGetSettings(req: Request, res: Response): void {
-    try {
-      const settingsPath = path.join(homedir(), '.claude-mem', 'settings.json');
-
-      if (!existsSync(settingsPath)) {
-        // Return defaults if file doesn't exist
-        res.json({
-          CLAUDE_MEM_MODEL: 'claude-haiku-4-5',
-          CLAUDE_MEM_CONTEXT_OBSERVATIONS: '50',
-          CLAUDE_MEM_WORKER_PORT: '37777',
-          CLAUDE_MEM_RUNTIME: 'node',
-          // Token Economics
-          CLAUDE_MEM_CONTEXT_SHOW_READ_TOKENS: 'true',
-          CLAUDE_MEM_CONTEXT_SHOW_WORK_TOKENS: 'true',
-          CLAUDE_MEM_CONTEXT_SHOW_SAVINGS_AMOUNT: 'true',
-          CLAUDE_MEM_CONTEXT_SHOW_SAVINGS_PERCENT: 'true',
-          // Observation Filtering
-          CLAUDE_MEM_CONTEXT_OBSERVATION_TYPES: DEFAULT_OBSERVATION_TYPES_STRING,
-          CLAUDE_MEM_CONTEXT_OBSERVATION_CONCEPTS: DEFAULT_OBSERVATION_CONCEPTS_STRING,
-          // Display Configuration
-          CLAUDE_MEM_CONTEXT_FULL_COUNT: '5',
-          CLAUDE_MEM_CONTEXT_FULL_FIELD: 'narrative',
-          CLAUDE_MEM_CONTEXT_SESSION_COUNT: '10',
-          // Feature Toggles
-          CLAUDE_MEM_CONTEXT_SHOW_LAST_SUMMARY: 'true',
-          CLAUDE_MEM_CONTEXT_SHOW_LAST_MESSAGE: 'false',
-        });
-        return;
-      }
-
-      const settingsData = readFileSync(settingsPath, 'utf-8');
-      const settings = JSON.parse(settingsData);
-      const env = settings.env || {};
-
-      res.json({
-        CLAUDE_MEM_MODEL: env.CLAUDE_MEM_MODEL || 'claude-haiku-4-5',
-        CLAUDE_MEM_CONTEXT_OBSERVATIONS: env.CLAUDE_MEM_CONTEXT_OBSERVATIONS || '50',
-        CLAUDE_MEM_WORKER_PORT: env.CLAUDE_MEM_WORKER_PORT || '37777',
-        CLAUDE_MEM_RUNTIME: env.CLAUDE_MEM_RUNTIME || 'node',
-        // Token Economics
-        CLAUDE_MEM_CONTEXT_SHOW_READ_TOKENS: env.CLAUDE_MEM_CONTEXT_SHOW_READ_TOKENS || 'true',
-        CLAUDE_MEM_CONTEXT_SHOW_WORK_TOKENS: env.CLAUDE_MEM_CONTEXT_SHOW_WORK_TOKENS || 'true',
-        CLAUDE_MEM_CONTEXT_SHOW_SAVINGS_AMOUNT: env.CLAUDE_MEM_CONTEXT_SHOW_SAVINGS_AMOUNT || 'true',
-        CLAUDE_MEM_CONTEXT_SHOW_SAVINGS_PERCENT: env.CLAUDE_MEM_CONTEXT_SHOW_SAVINGS_PERCENT || 'true',
-        // Observation Filtering
-        CLAUDE_MEM_CONTEXT_OBSERVATION_TYPES: env.CLAUDE_MEM_CONTEXT_OBSERVATION_TYPES || DEFAULT_OBSERVATION_TYPES_STRING,
-        CLAUDE_MEM_CONTEXT_OBSERVATION_CONCEPTS: env.CLAUDE_MEM_CONTEXT_OBSERVATION_CONCEPTS || DEFAULT_OBSERVATION_CONCEPTS_STRING,
-        // Display Configuration
-        CLAUDE_MEM_CONTEXT_FULL_COUNT: env.CLAUDE_MEM_CONTEXT_FULL_COUNT || '5',
-        CLAUDE_MEM_CONTEXT_FULL_FIELD: env.CLAUDE_MEM_CONTEXT_FULL_FIELD || 'narrative',
-        CLAUDE_MEM_CONTEXT_SESSION_COUNT: env.CLAUDE_MEM_CONTEXT_SESSION_COUNT || '10',
-        // Feature Toggles
-        CLAUDE_MEM_CONTEXT_SHOW_LAST_SUMMARY: env.CLAUDE_MEM_CONTEXT_SHOW_LAST_SUMMARY || 'true',
-        CLAUDE_MEM_CONTEXT_SHOW_LAST_MESSAGE: env.CLAUDE_MEM_CONTEXT_SHOW_LAST_MESSAGE || 'false',
-      });
-    } catch (error) {
-      logger.failure('WORKER', 'Get settings failed', {}, error as Error);
-      res.status(500).json({ error: (error as Error).message });
-    }
-  }
-
-  /**
-   * Update environment settings (in ~/.claude/settings.json) with validation
-   */
-  private handleUpdateSettings(req: Request, res: Response): void {
-    try {
-      // Validate CLAUDE_MEM_CONTEXT_OBSERVATIONS
-      if (req.body.CLAUDE_MEM_CONTEXT_OBSERVATIONS) {
-        const obsCount = parseInt(req.body.CLAUDE_MEM_CONTEXT_OBSERVATIONS, 10);
-        if (isNaN(obsCount) || obsCount < 1 || obsCount > 200) {
-          res.status(400).json({
-            success: false,
-            error: 'CLAUDE_MEM_CONTEXT_OBSERVATIONS must be between 1 and 200'
-          });
-          return;
-        }
-      }
-
-      // Validate CLAUDE_MEM_WORKER_PORT
-      if (req.body.CLAUDE_MEM_WORKER_PORT) {
-        const port = parseInt(req.body.CLAUDE_MEM_WORKER_PORT, 10);
-        if (isNaN(port) || port < 1024 || port > 65535) {
-          res.status(400).json({
-            success: false,
-            error: 'CLAUDE_MEM_WORKER_PORT must be between 1024 and 65535'
-          });
-          return;
-        }
-      }
-
-      // Validate CLAUDE_MEM_RUNTIME
-      if (req.body.CLAUDE_MEM_RUNTIME) {
-        if (!['node', 'bun'].includes(req.body.CLAUDE_MEM_RUNTIME)) {
-          res.status(400).json({
-            success: false,
-            error: 'CLAUDE_MEM_RUNTIME must be "node" or "bun"'
-          });
-          return;
-        }
-      }
-
-      // Validate context settings
-      const validation = this.validateContextSettings(req.body);
-      if (!validation.valid) {
-        res.status(400).json({
-          success: false,
-          error: validation.error
-        });
-        return;
-      }
-
-      // Read existing settings
-      const settingsPath = path.join(homedir(), '.claude-mem', 'settings.json');
-      let settings: any = { env: {} };
-
-      if (existsSync(settingsPath)) {
-        const settingsData = readFileSync(settingsPath, 'utf-8');
-        settings = JSON.parse(settingsData);
-        if (!settings.env) {
-          settings.env = {};
-        }
-      }
-
-      // Update all settings from request body
-      const settingKeys = [
-        'CLAUDE_MEM_MODEL',
-        'CLAUDE_MEM_CONTEXT_OBSERVATIONS',
-        'CLAUDE_MEM_WORKER_PORT',
-        'CLAUDE_MEM_RUNTIME',
-        'CLAUDE_MEM_CONTEXT_SHOW_READ_TOKENS',
-        'CLAUDE_MEM_CONTEXT_SHOW_WORK_TOKENS',
-        'CLAUDE_MEM_CONTEXT_SHOW_SAVINGS_AMOUNT',
-        'CLAUDE_MEM_CONTEXT_SHOW_SAVINGS_PERCENT',
-        'CLAUDE_MEM_CONTEXT_OBSERVATION_TYPES',
-        'CLAUDE_MEM_CONTEXT_OBSERVATION_CONCEPTS',
-        'CLAUDE_MEM_CONTEXT_FULL_COUNT',
-        'CLAUDE_MEM_CONTEXT_FULL_FIELD',
-        'CLAUDE_MEM_CONTEXT_SESSION_COUNT',
-        'CLAUDE_MEM_CONTEXT_SHOW_LAST_SUMMARY',
-        'CLAUDE_MEM_CONTEXT_SHOW_LAST_MESSAGE',
-      ];
-
-      for (const key of settingKeys) {
-        if (req.body[key] !== undefined) {
-          settings.env[key] = req.body[key];
-        }
-      }
-
-      // Write back
-      writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf-8');
-
-      logger.info('WORKER', 'Settings updated');
-      res.json({ success: true, message: 'Settings updated successfully' });
-    } catch (error) {
-      logger.failure('WORKER', 'Update settings failed', {}, error as Error);
-      res.status(500).json({ success: false, error: String(error) });
-    }
-  }
-
-  /**
-   * Get processing status (for viewer UI spinner and queue indicator)
-   */
-  private handleGetProcessingStatus(req: Request, res: Response): void {
-    const isProcessing = this.sessionManager.isAnySessionProcessing();
-    const queueDepth = this.sessionManager.getTotalActiveWork(); // Includes queued + actively processing
-    res.json({ isProcessing, queueDepth });
-  }
-
-  // ============================================================================
-  // Processing Status Helpers
-  // ============================================================================
-
-  /**
-   * Broadcast processing status change to SSE clients
-   * Checks both queue depth and active generators to prevent premature spinner stop
-   */
-  broadcastProcessingStatus(): void {
-    const isProcessing = this.sessionManager.isAnySessionProcessing();
-    const queueDepth = this.sessionManager.getTotalActiveWork(); // Includes queued + actively processing
-    const activeSessions = this.sessionManager.getActiveSessionCount();
-
-    logger.info('WORKER', 'Broadcasting processing status', {
-      isProcessing,
-      queueDepth,
-      activeSessions
+    logger.dataIn('WORKER', 'Summary requested', {
+      sessionId: sessionDbId,
+      promptNumber: prompt_number,
+      queue: session.pendingMessages.length + 1
     });
 
-    this.sseBroadcaster.broadcast({
-      type: 'processing_status',
-      isProcessing,
-      queueDepth
+    session.pendingMessages.push({
+      type: 'summarize',
+      prompt_number
+    });
+
+    res.json({ status: 'queued', queueLength: session.pendingMessages.length });
+  }
+
+  /**
+   * GET /sessions/:sessionDbId/status
+   */
+  private handleStatus(req: Request, res: Response): void {
+    const sessionDbId = parseInt(req.params.sessionDbId, 10);
+
+    const session = this.sessions.get(sessionDbId);
+    if (!session) {
+      res.status(404).json({ error: 'Session not found' });
+      return;
+    }
+
+    res.json({
+      sessionDbId,
+      sdkSessionId: session.sdkSessionId,
+      project: session.project,
+      pendingMessages: session.pendingMessages.length
     });
   }
 
   /**
-   * Set processing status (called by hooks)
-   * NOTE: This now broadcasts computed status based on active processing (ignores input)
+   * DELETE /sessions/:sessionDbId
    */
-  private handleSetProcessing(req: Request, res: Response): void {
-    try {
-      // Broadcast current computed status (ignores manual input)
-      this.broadcastProcessingStatus();
+  private async handleDelete(req: Request, res: Response): Promise<void> {
+    const sessionDbId = parseInt(req.params.sessionDbId, 10);
 
-      const isProcessing = this.sessionManager.isAnySessionProcessing();
-      const queueDepth = this.sessionManager.getTotalQueueDepth();
-      const activeSessions = this.sessionManager.getActiveSessionCount();
-      logger.debug('WORKER', 'Processing status broadcast', { isProcessing, queueDepth, activeSessions });
-
-      res.json({ status: 'ok', isProcessing });
-    } catch (error) {
-      logger.failure('WORKER', 'Failed to broadcast processing status', {}, error as Error);
-      res.status(500).json({ error: (error as Error).message });
+    const session = this.sessions.get(sessionDbId);
+    if (!session) {
+      res.status(404).json({ error: 'Session not found' });
+      return;
     }
-  }
 
-  // ============================================================================
-  // MCP Toggle Handlers
-  // ============================================================================
+    logger.warn('WORKER', 'Session delete requested', { sessionId: sessionDbId });
 
-  /**
-   * GET /api/mcp/status - Check if MCP search server is enabled
-   */
-  private handleGetMcpStatus(req: Request, res: Response): void {
-    try {
-      const enabled = this.isMcpEnabled();
-      res.json({ enabled });
-    } catch (error) {
-      logger.failure('WORKER', 'Get MCP status failed', {}, error as Error);
-      res.status(500).json({ error: (error as Error).message });
+    // Abort SDK agent
+    session.abortController.abort();
+
+    // Wait for generator to finish (with timeout)
+    if (session.generatorPromise) {
+      await Promise.race([
+        session.generatorPromise,
+        new Promise(resolve => setTimeout(resolve, 5000))
+      ]);
     }
+
+    // Mark as failed since we're aborting
+    const db = new SessionStore();
+    db.markSessionFailed(sessionDbId);
+    db.close();
+
+    this.sessions.delete(sessionDbId);
+
+    logger.info('WORKER', 'Session deleted', { sessionId: sessionDbId });
+    res.json({ status: 'deleted' });
   }
 
   /**
-   * POST /api/mcp/toggle - Toggle MCP search server on/off
-   * Body: { enabled: boolean }
+   * Run SDK agent for a session
    */
-  private handleToggleMcp(req: Request, res: Response): void {
-    try {
-      const { enabled } = req.body;
+  private async runSDKAgent(session: ActiveSession): Promise<void> {
+    logger.info('SDK', 'Agent starting', { sessionId: session.sessionDbId });
 
-      if (typeof enabled !== 'boolean') {
-        res.status(400).json({ error: 'enabled must be a boolean' });
-        return;
+    try {
+      const queryResult = query({
+        prompt: this.createMessageGenerator(session),
+        options: {
+          model: MODEL,
+          disallowedTools: DISALLOWED_TOOLS,
+          abortController: session.abortController
+          // pathToClaudeCodeExecutable: SDK auto-detects (v0.1.23+)
+        }
+      });
+
+      for await (const message of queryResult) {
+        // Handle system init message
+        if (message.type === 'system' && message.subtype === 'init') {
+          const systemMsg = message as SDKSystemMessage;
+          if (systemMsg.session_id) {
+            // Update in database first, check if it succeeded
+            const db = new SessionStore();
+            const updated = db.updateSDKSessionId(session.sessionDbId, systemMsg.session_id);
+            db.close();
+
+            if (updated) {
+              logger.success('SDK', 'Session initialized', {
+                sessionId: session.sessionDbId,
+                sdkSessionId: systemMsg.session_id
+              });
+              session.sdkSessionId = systemMsg.session_id;
+            }
+          }
+        }
+        // Handle assistant messages
+        else if (message.type === 'assistant') {
+          const content = message.message.content;
+          const textContent = Array.isArray(content)
+            ? content.filter((c: any) => c.type === 'text').map((c: any) => c.text).join('\n')
+            : typeof content === 'string' ? content : '';
+
+          const responseSize = textContent.length;
+          logger.dataOut('SDK', `Response received (${responseSize} chars)`, {
+            sessionId: session.sessionDbId,
+            promptNumber: session.lastPromptNumber
+          });
+
+          // In debug mode, log the full response
+          logger.debug('SDK', 'Full response', { sessionId: session.sessionDbId }, textContent);
+
+          // Parse and store with prompt number
+          this.handleAgentMessage(session, textContent, session.lastPromptNumber);
+        }
       }
 
-      this.toggleMcp(enabled);
-      res.json({ success: true, enabled: this.isMcpEnabled() });
-    } catch (error) {
-      logger.failure('WORKER', 'Toggle MCP failed', {}, error as Error);
-      res.status(500).json({ success: false, error: (error as Error).message });
-    }
-  }
+      // Mark completed
+      const sessionDuration = Date.now() - session.startTime;
+      logger.success('SDK', 'Agent completed', {
+        sessionId: session.sessionDbId,
+        duration: `${(sessionDuration / 1000).toFixed(1)}s`
+      });
 
-  // ============================================================================
-  // MCP Toggle Helpers
-  // ============================================================================
+      const db = new SessionStore();
+      db.markSessionCompleted(session.sessionDbId);
+      db.close();
 
-  /**
-   * Check if MCP search server is enabled
-   */
-  private isMcpEnabled(): boolean {
-    const packageRoot = getPackageRoot();
-    const mcpPath = path.join(packageRoot, 'plugin', '.mcp.json');
-    return existsSync(mcpPath);
-  }
+      this.sessions.delete(session.sessionDbId);
 
-  /**
-   * Toggle MCP search server (rename .mcp.json <-> .mcp.json.disabled)
-   */
-  private toggleMcp(enabled: boolean): void {
-    try {
-      const packageRoot = getPackageRoot();
-      const mcpPath = path.join(packageRoot, 'plugin', '.mcp.json');
-      const mcpDisabledPath = path.join(packageRoot, 'plugin', '.mcp.json.disabled');
-
-      if (enabled && existsSync(mcpDisabledPath)) {
-        // Enable: rename .mcp.json.disabled -> .mcp.json
-        renameSync(mcpDisabledPath, mcpPath);
-        logger.info('WORKER', 'MCP search server enabled');
-      } else if (!enabled && existsSync(mcpPath)) {
-        // Disable: rename .mcp.json -> .mcp.json.disabled
-        renameSync(mcpPath, mcpDisabledPath);
-        logger.info('WORKER', 'MCP search server disabled');
+    } catch (error: any) {
+      if (error.name === 'AbortError') {
+        logger.warn('SDK', 'Agent aborted', { sessionId: session.sessionDbId });
       } else {
-        logger.debug('WORKER', 'MCP toggle no-op (already in desired state)', { enabled });
+        logger.failure('SDK', 'Agent error', { sessionId: session.sessionDbId }, error);
       }
-    } catch (error) {
-      logger.failure('WORKER', 'Failed to toggle MCP', { enabled }, error as Error);
       throw error;
     }
   }
 
-  // ============================================================================
-  // Branch Switching Handlers (Beta Toggle)
-  // ============================================================================
-
   /**
-   * GET /api/branch/status - Get current branch information
+   * Create async message generator for SDK streaming
+   * Keeps running continuously - no finalize, agent stays alive for entire Claude Code session
    */
-  private handleGetBranchStatus(req: Request, res: Response): void {
-    try {
-      const info = getBranchInfo();
-      res.json(info);
-    } catch (error) {
-      logger.failure('WORKER', 'Failed to get branch status', {}, error as Error);
-      res.status(500).json({ error: (error as Error).message });
-    }
-  }
+  private async* createMessageGenerator(session: ActiveSession): AsyncIterable<SDKUserMessage> {
+    // Use real Claude Code session ID instead of fake session-{dbId}
+    const initPrompt = buildInitPrompt(session.project, session.claudeSessionId, session.userPrompt);
 
-  /**
-   * POST /api/branch/switch - Switch to a different branch
-   * Body: { branch: "main" | "beta/7.0" }
-   */
-  private async handleSwitchBranch(req: Request, res: Response): Promise<void> {
-    try {
-      const { branch } = req.body;
-
-      if (!branch) {
-        res.status(400).json({ success: false, error: 'Missing branch parameter' });
-        return;
-      }
-
-      // Validate branch name
-      const allowedBranches = ['main', 'beta/7.0'];
-      if (!allowedBranches.includes(branch)) {
-        res.status(400).json({
-          success: false,
-          error: `Invalid branch. Allowed: ${allowedBranches.join(', ')}`
-        });
-        return;
-      }
-
-      logger.info('WORKER', 'Branch switch requested', { branch });
-
-      const result = await switchBranch(branch);
-
-      if (result.success) {
-        // Schedule worker restart after response is sent
-        setTimeout(() => {
-          logger.info('WORKER', 'Restarting worker after branch switch');
-          process.exit(0); // PM2 will restart the worker
-        }, 1000);
-      }
-
-      res.json(result);
-    } catch (error) {
-      logger.failure('WORKER', 'Branch switch failed', {}, error as Error);
-      res.status(500).json({ success: false, error: (error as Error).message });
-    }
-  }
-
-  /**
-   * POST /api/branch/update - Pull latest updates for current branch
-   */
-  private async handleUpdateBranch(req: Request, res: Response): Promise<void> {
-    try {
-      logger.info('WORKER', 'Branch update requested');
-
-      const result = await pullUpdates();
-
-      if (result.success) {
-        // Schedule worker restart after response is sent
-        setTimeout(() => {
-          logger.info('WORKER', 'Restarting worker after branch update');
-          process.exit(0); // PM2 will restart the worker
-        }, 1000);
-      }
-
-      res.json(result);
-    } catch (error) {
-      logger.failure('WORKER', 'Branch update failed', {}, error as Error);
-      res.status(500).json({ success: false, error: (error as Error).message });
-    }
-  }
-
-  // ============================================================================
-  // Search API Handlers (for skill-based search)
-  // ============================================================================
-
-  // ============================================================================
-  // Unified Search API Handlers (New Consolidated API)
-  // ============================================================================
-
-  /**
-   * Unified search across all memory types (observations, sessions, prompts)
-   * GET /api/search?query=...&format=index&limit=20
-   */
-  private async handleUnifiedSearch(req: Request, res: Response): Promise<void> {
-    try {
-      const result = await this.mcpClient.callTool({
-        name: 'search',
-        arguments: req.query
-      });
-      res.json(result.content);
-    } catch (error) {
-      logger.failure('WORKER', 'Unified search failed', {}, error as Error);
-      res.status(500).json({ error: (error as Error).message });
-    }
-  }
-
-  /**
-   * Unified timeline (anchor or query-based)
-   * GET /api/timeline?anchor=123 OR GET /api/timeline?query=...
-   */
-  private async handleUnifiedTimeline(req: Request, res: Response): Promise<void> {
-    try {
-      const result = await this.mcpClient.callTool({
-        name: 'timeline',
-        arguments: req.query
-      });
-      res.json(result.content);
-    } catch (error) {
-      logger.failure('WORKER', 'Unified timeline failed', {}, error as Error);
-      res.status(500).json({ error: (error as Error).message });
-    }
-  }
-
-  /**
-   * Semantic shortcut for finding decision observations
-   * GET /api/decisions?format=index&limit=20
-   */
-  private async handleDecisions(req: Request, res: Response): Promise<void> {
-    try {
-      const result = await this.mcpClient.callTool({
-        name: 'decisions',
-        arguments: req.query
-      });
-      res.json(result.content);
-    } catch (error) {
-      logger.failure('WORKER', 'Decisions search failed', {}, error as Error);
-      res.status(500).json({ error: (error as Error).message });
-    }
-  }
-
-  /**
-   * Semantic shortcut for finding change-related observations
-   * GET /api/changes?format=index&limit=20
-   */
-  private async handleChanges(req: Request, res: Response): Promise<void> {
-    try {
-      const result = await this.mcpClient.callTool({
-        name: 'changes',
-        arguments: req.query
-      });
-      res.json(result.content);
-    } catch (error) {
-      logger.failure('WORKER', 'Changes search failed', {}, error as Error);
-      res.status(500).json({ error: (error as Error).message });
-    }
-  }
-
-  /**
-   * Semantic shortcut for finding "how it works" explanations
-   * GET /api/how-it-works?format=index&limit=20
-   */
-  private async handleHowItWorks(req: Request, res: Response): Promise<void> {
-    try {
-      const result = await this.mcpClient.callTool({
-        name: 'how_it_works',
-        arguments: req.query
-      });
-      res.json(result.content);
-    } catch (error) {
-      logger.failure('WORKER', 'How it works search failed', {}, error as Error);
-      res.status(500).json({ error: (error as Error).message });
-    }
-  }
-
-  // ============================================================================
-  // Backward Compatibility API Handlers
-  // All functionality available via /api/search with type/obs_type/concepts/files params
-  // ============================================================================
-
-  /**
-   * Search observations (use /api/search?type=observations instead)
-   * GET /api/search/observations?query=...&format=index&limit=20&project=...
-   */
-  private async handleSearchObservations(req: Request, res: Response): Promise<void> {
-    try {
-      const result = await this.mcpClient.callTool({
-        name: 'search_observations',
-        arguments: req.query
-      });
-      res.json(result.content);
-    } catch (error) {
-      logger.failure('WORKER', 'Search failed', {}, error as Error);
-      res.status(500).json({ error: (error as Error).message });
-    }
-  }
-
-  /**
-   * Search session summaries
-   * GET /api/search/sessions?query=...&format=index&limit=20
-   */
-  private async handleSearchSessions(req: Request, res: Response): Promise<void> {
-    try {
-      const result = await this.mcpClient.callTool({
-        name: 'search_sessions',
-        arguments: req.query
-      });
-      res.json(result.content);
-    } catch (error) {
-      logger.failure('WORKER', 'Search failed', {}, error as Error);
-      res.status(500).json({ error: (error as Error).message });
-    }
-  }
-
-  /**
-   * Search user prompts
-   * GET /api/search/prompts?query=...&format=index&limit=20
-   */
-  private async handleSearchPrompts(req: Request, res: Response): Promise<void> {
-    try {
-      const result = await this.mcpClient.callTool({
-        name: 'search_user_prompts',
-        arguments: req.query
-      });
-      res.json(result.content);
-    } catch (error) {
-      logger.failure('WORKER', 'Search failed', {}, error as Error);
-      res.status(500).json({ error: (error as Error).message });
-    }
-  }
-
-  /**
-   * Search observations by concept
-   * GET /api/search/by-concept?concept=discovery&format=index&limit=5
-   */
-  private async handleSearchByConcept(req: Request, res: Response): Promise<void> {
-    try {
-      const result = await this.mcpClient.callTool({
-        name: 'find_by_concept',
-        arguments: req.query
-      });
-      res.json(result.content);
-    } catch (error) {
-      logger.failure('WORKER', 'Search failed', {}, error as Error);
-      res.status(500).json({ error: (error as Error).message });
-    }
-  }
-
-  /**
-   * Search by file path
-   * GET /api/search/by-file?filePath=...&format=index&limit=10
-   */
-  private async handleSearchByFile(req: Request, res: Response): Promise<void> {
-    try {
-      const result = await this.mcpClient.callTool({
-        name: 'find_by_file',
-        arguments: req.query
-      });
-      res.json(result.content);
-    } catch (error) {
-      logger.failure('WORKER', 'Search failed', {}, error as Error);
-      res.status(500).json({ error: (error as Error).message });
-    }
-  }
-
-  /**
-   * Search observations by type
-   * GET /api/search/by-type?type=bugfix&format=index&limit=10
-   */
-  private async handleSearchByType(req: Request, res: Response): Promise<void> {
-    try {
-      const result = await this.mcpClient.callTool({
-        name: 'find_by_type',
-        arguments: req.query
-      });
-      res.json(result.content);
-    } catch (error) {
-      logger.failure('WORKER', 'Search failed', {}, error as Error);
-      res.status(500).json({ error: (error as Error).message });
-    }
-  }
-
-  /**
-   * Get recent context (summaries and observations for a project)
-   * GET /api/context/recent?project=...&limit=3
-   */
-  private async handleGetRecentContext(req: Request, res: Response): Promise<void> {
-    try {
-      const result = await this.mcpClient.callTool({
-        name: 'get_recent_context',
-        arguments: req.query
-      });
-      res.json(result.content);
-    } catch (error) {
-      logger.failure('WORKER', 'Search failed', {}, error as Error);
-      res.status(500).json({ error: (error as Error).message });
-    }
-  }
-
-  /**
-   * Get context timeline around an anchor point
-   * GET /api/context/timeline?anchor=123&depth_before=10&depth_after=10&project=...
-   */
-  private async handleGetContextTimeline(req: Request, res: Response): Promise<void> {
-    try {
-      const result = await this.mcpClient.callTool({
-        name: 'get_context_timeline',
-        arguments: req.query
-      });
-      res.json(result.content);
-    } catch (error) {
-      logger.failure('WORKER', 'Search failed', {}, error as Error);
-      res.status(500).json({ error: (error as Error).message });
-    }
-  }
-
-  /**
-   * Generate context preview for settings modal
-   * GET /api/context/preview?project=...
-   */
-  private async handleContextPreview(req: Request, res: Response): Promise<void> {
-    try {
-      // Dynamic import to use BUILT context-hook function
-      const packageRoot = getPackageRoot();
-      const contextHookPath = path.join(packageRoot, 'plugin', 'scripts', 'context-hook.js');
-      const { contextHook } = await import(contextHookPath);
-
-      // Get project from query parameter
-      const projectName = req.query.project as string;
-
-      if (!projectName) {
-        return res.status(400).json({ error: 'Project parameter is required' });
-      }
-
-      // Use project name as CWD (contextHook uses path.basename to get project)
-      const cwd = `/preview/${projectName}`;
-
-      // Generate preview context (with colors for terminal display)
-      const contextText = await contextHook(
-        {
-          session_id: 'preview-' + Date.now(),
-          cwd: cwd
-        },
-        true  // useColors=true for ANSI terminal output
-      );
-
-      // Return as plain text
-      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-      res.send(contextText);
-    } catch (error) {
-      logger.failure('WORKER', 'Context preview generation failed', {}, error as Error);
-      res.status(500).json({
-        error: 'Failed to generate context preview',
-        message: (error as Error).message
-      });
-    }
-  }
-
-  /**
-   * Get timeline by query (search first, then get timeline around best match)
-   * GET /api/timeline/by-query?query=...&mode=auto&depth_before=10&depth_after=10
-   */
-  private async handleGetTimelineByQuery(req: Request, res: Response): Promise<void> {
-    try {
-      const result = await this.mcpClient.callTool({
-        name: 'get_timeline_by_query',
-        arguments: req.query
-      });
-      res.json(result.content);
-    } catch (error) {
-      logger.failure('WORKER', 'Search failed', {}, error as Error);
-      res.status(500).json({ error: (error as Error).message });
-    }
-  }
-
-  /**
-   * Get search help documentation
-   * GET /api/search/help
-   */
-  private handleSearchHelp(req: Request, res: Response): void {
-    res.json({
-      title: 'Claude-Mem Search API',
-      description: 'HTTP API for searching persistent memory',
-      endpoints: [
-        {
-          path: '/api/search/observations',
-          method: 'GET',
-          description: 'Search observations using full-text search',
-          parameters: {
-            query: 'Search query (required)',
-            format: 'Response format: "index" or "full" (default: "full")',
-            limit: 'Number of results (default: 20)',
-            project: 'Filter by project name (optional)'
-          }
-        },
-        {
-          path: '/api/search/sessions',
-          method: 'GET',
-          description: 'Search session summaries using full-text search',
-          parameters: {
-            query: 'Search query (required)',
-            format: 'Response format: "index" or "full" (default: "full")',
-            limit: 'Number of results (default: 20)'
-          }
-        },
-        {
-          path: '/api/search/prompts',
-          method: 'GET',
-          description: 'Search user prompts using full-text search',
-          parameters: {
-            query: 'Search query (required)',
-            format: 'Response format: "index" or "full" (default: "full")',
-            limit: 'Number of results (default: 20)',
-            project: 'Filter by project name (optional)'
-          }
-        },
-        {
-          path: '/api/search/by-concept',
-          method: 'GET',
-          description: 'Find observations by concept tag',
-          parameters: {
-            concept: 'Concept tag (required): discovery, decision, bugfix, feature, refactor',
-            format: 'Response format: "index" or "full" (default: "full")',
-            limit: 'Number of results (default: 10)',
-            project: 'Filter by project name (optional)'
-          }
-        },
-        {
-          path: '/api/search/by-file',
-          method: 'GET',
-          description: 'Find observations and sessions by file path',
-          parameters: {
-            filePath: 'File path or partial path (required)',
-            format: 'Response format: "index" or "full" (default: "full")',
-            limit: 'Number of results per type (default: 10)',
-            project: 'Filter by project name (optional)'
-          }
-        },
-        {
-          path: '/api/search/by-type',
-          method: 'GET',
-          description: 'Find observations by type',
-          parameters: {
-            type: 'Observation type (required): discovery, decision, bugfix, feature, refactor',
-            format: 'Response format: "index" or "full" (default: "full")',
-            limit: 'Number of results (default: 10)',
-            project: 'Filter by project name (optional)'
-          }
-        },
-        {
-          path: '/api/context/recent',
-          method: 'GET',
-          description: 'Get recent session context including summaries and observations',
-          parameters: {
-            project: 'Project name (default: current directory)',
-            limit: 'Number of recent sessions (default: 3)'
-          }
-        },
-        {
-          path: '/api/context/timeline',
-          method: 'GET',
-          description: 'Get unified timeline around a specific point in time',
-          parameters: {
-            anchor: 'Anchor point: observation ID, session ID (e.g., "S123"), or ISO timestamp (required)',
-            depth_before: 'Number of records before anchor (default: 10)',
-            depth_after: 'Number of records after anchor (default: 10)',
-            project: 'Filter by project name (optional)'
-          }
-        },
-        {
-          path: '/api/timeline/by-query',
-          method: 'GET',
-          description: 'Search for best match, then get timeline around it',
-          parameters: {
-            query: 'Search query (required)',
-            mode: 'Search mode: "auto", "observations", or "sessions" (default: "auto")',
-            depth_before: 'Number of records before match (default: 10)',
-            depth_after: 'Number of records after match (default: 10)',
-            project: 'Filter by project name (optional)'
-          }
-        },
-        {
-          path: '/api/search/help',
-          method: 'GET',
-          description: 'Get this help documentation'
-        }
-      ],
-      examples: [
-        'curl "http://localhost:37777/api/search/observations?query=authentication&format=index&limit=5"',
-        'curl "http://localhost:37777/api/search/by-type?type=bugfix&limit=10"',
-        'curl "http://localhost:37777/api/context/recent?project=claude-mem&limit=3"',
-        'curl "http://localhost:37777/api/context/timeline?anchor=123&depth_before=5&depth_after=5"'
-      ]
+    logger.dataIn('SDK', `Init prompt sent (${initPrompt.length} chars)`, {
+      sessionId: session.sessionDbId,
+      claudeSessionId: session.claudeSessionId,
+      project: session.project
     });
+    logger.debug('SDK', 'Full init prompt', { sessionId: session.sessionDbId }, initPrompt);
+
+    yield {
+      type: 'user',
+      session_id: session.claudeSessionId, // Use real session ID from the start
+      parent_tool_use_id: null,
+      message: {
+        role: 'user',
+        content: initPrompt
+      }
+    };
+
+    // Process messages continuously until session is deleted
+    while (true) {
+      if (session.abortController.signal.aborted) {
+        break;
+      }
+
+      if (session.pendingMessages.length === 0) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+        continue;
+      }
+
+      while (session.pendingMessages.length > 0) {
+        const message = session.pendingMessages.shift()!;
+
+        if (message.type === 'summarize') {
+          session.lastPromptNumber = message.prompt_number;
+
+          const db = new SessionStore();
+          const dbSession = db.getSessionById(session.sessionDbId) as SDKSession | undefined;
+          db.close();
+
+          if (dbSession) {
+            const summarizePrompt = buildSummaryPrompt(dbSession);
+
+            logger.dataIn('SDK', `Summary prompt sent (${summarizePrompt.length} chars)`, {
+              sessionId: session.sessionDbId,
+              promptNumber: message.prompt_number
+            });
+            logger.debug('SDK', 'Full summary prompt', { sessionId: session.sessionDbId }, summarizePrompt);
+
+            yield {
+              type: 'user',
+              session_id: session.claudeSessionId, // Use real session ID
+              parent_tool_use_id: null,
+              message: {
+                role: 'user',
+                content: summarizePrompt
+              }
+            };
+          }
+        } else if (message.type === 'observation') {
+          session.lastPromptNumber = message.prompt_number;
+
+          const observationPrompt = buildObservationPrompt({
+            id: 0,
+            tool_name: message.tool_name,
+            tool_input: message.tool_input,
+            tool_output: message.tool_output,
+            created_at_epoch: Date.now()
+          });
+
+          const toolStr = logger.formatTool(message.tool_name, message.tool_input);
+          const correlationId = logger.correlationId(session.sessionDbId, session.observationCounter);
+
+          logger.dataIn('SDK', `Observation prompt: ${toolStr}`, {
+            correlationId,
+            promptNumber: message.prompt_number,
+            size: `${observationPrompt.length} chars`
+          });
+          logger.debug('SDK', 'Full observation prompt', { correlationId }, observationPrompt);
+
+          yield {
+            type: 'user',
+            session_id: session.claudeSessionId, // Use real session ID
+            parent_tool_use_id: null,
+            message: {
+              role: 'user',
+              content: observationPrompt
+            }
+          };
+        }
+      }
+    }
+  }
+
+  /**
+   * Handle agent message - parse and store observations/summaries
+   * Gets prompt_number from the message that triggered this response
+   */
+  private handleAgentMessage(session: ActiveSession, content: string, promptNumber: number): void {
+    const correlationId = logger.correlationId(session.sessionDbId, session.observationCounter);
+
+    // Parse observations
+    const observations = parseObservations(content, correlationId);
+
+    if (observations.length > 0) {
+      logger.info('PARSER', `Parsed ${observations.length} observation(s)`, {
+        correlationId,
+        promptNumber,
+        types: observations.map(o => o.type).join(', ')
+      });
+    }
+
+    const db = new SessionStore();
+    for (const obs of observations) {
+      if (session.sdkSessionId) {
+        db.storeObservation(session.sdkSessionId, session.project, obs, promptNumber);
+        logger.success('DB', 'Observation stored', {
+          correlationId,
+          type: obs.type,
+          title: obs.title
+        });
+      }
+    }
+
+    // Parse summary
+    const summary = parseSummary(content, session.sessionDbId);
+    if (summary && session.sdkSessionId) {
+      logger.info('PARSER', 'Summary parsed', {
+        sessionId: session.sessionDbId,
+        promptNumber
+      });
+
+      db.storeSummary(session.sdkSessionId, session.project, summary, promptNumber);
+      logger.success('DB', 'Summary stored', { sessionId: session.sessionDbId });
+    }
+
+    db.close();
   }
 }
 
-// ============================================================================
-// Utilities
-// ============================================================================
-
-/**
- * Parse pagination parameters from request
- */
-function parsePaginationParams(req: Request): { offset: number; limit: number; project?: string } {
-  const offset = parseInt(req.query.offset as string, 10) || 0;
-  const limit = Math.min(parseInt(req.query.limit as string, 10) || 20, 100); // Max 100
-  const project = req.query.project as string | undefined;
-
-  return { offset, limit, project };
-}
-
-// ============================================================================
-// Main Entry Point
-// ============================================================================
-
-/**
- * Start the worker service (if running as main module)
- * Note: Using require.main check for CJS compatibility (build outputs CJS)
- */
-if (require.main === module || !module.parent) {
-  const worker = new WorkerService();
+// Main entry point
+async function main() {
+  const service = new WorkerService();
+  await service.start();
 
   // Graceful shutdown
-  process.on('SIGTERM', async () => {
-    logger.info('SYSTEM', 'Received SIGTERM, shutting down gracefully');
-    await worker.shutdown();
+  process.on('SIGINT', () => {
+    logger.warn('SYSTEM', 'Shutting down (SIGINT)');
     process.exit(0);
   });
 
-  process.on('SIGINT', async () => {
-    logger.info('SYSTEM', 'Received SIGINT, shutting down gracefully');
-    await worker.shutdown();
+  process.on('SIGTERM', () => {
+    logger.warn('SYSTEM', 'Shutting down (SIGTERM)');
     process.exit(0);
-  });
-
-  // Start the worker
-  worker.start().catch(error => {
-    logger.failure('SYSTEM', 'Worker startup failed', {}, error);
-    process.exit(1);
   });
 }
 
-export default WorkerService;
+// Auto-start when run directly (not when imported)
+main().catch(err => {
+  logger.failure('SYSTEM', 'Fatal startup error', {}, err);
+  process.exit(1);
+});
+
+export { WorkerService };
