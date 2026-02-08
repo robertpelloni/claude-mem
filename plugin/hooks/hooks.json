@@ -7,13 +7,13 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cd \"${CLAUDE_PLUGIN_ROOT}/..\" && npm install --prefer-offline --no-audit --no-fund --loglevel=error && node ${CLAUDE_PLUGIN_ROOT}/scripts/context-hook.js",
-            "timeout": 300
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/smart-install.js\" && node ${CLAUDE_PLUGIN_ROOT}/scripts/context-hook.js",
+            "timeout": 5
           },
           {
             "type": "command",
             "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/user-message-hook.js",
-            "timeout": 10
+            "timeout": 5
           }
         ]
       }

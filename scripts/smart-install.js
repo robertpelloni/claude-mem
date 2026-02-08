@@ -12,7 +12,7 @@
  */
 
 import { existsSync, readFileSync, writeFileSync } from 'fs';
-import { execSync } from 'child_process';
+import { execSync, spawnSync } from 'child_process';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -51,10 +51,31 @@ function getPackageVersion() {
   }
 }
 
+function getNodeVersion() {
+  return process.version; // e.g., "v22.21.1"
+}
+
 function getInstalledVersion() {
   try {
     if (existsSync(VERSION_MARKER_PATH)) {
-      return readFileSync(VERSION_MARKER_PATH, 'utf-8').trim();
+      const content = readFileSync(VERSION_MARKER_PATH, 'utf-8').trim();
+
+      // Try parsing as JSON (new format)
+      try {
+        const marker = JSON.parse(content);
+        return {
+          packageVersion: marker.packageVersion,
+          nodeVersion: marker.nodeVersion,
+          installedAt: marker.installedAt
+        };
+      } catch {
+        // Fallback: old format (plain text version string)
+        return {
+          packageVersion: content,
+          nodeVersion: null, // Unknown
+          installedAt: null
+        };
+      }
     }
   } catch (error) {
     // Marker doesn't exist or can't be read
@@ -62,9 +83,14 @@ function getInstalledVersion() {
   return null;
 }
 
-function setInstalledVersion(version) {
+function setInstalledVersion(packageVersion, nodeVersion) {
   try {
-    writeFileSync(VERSION_MARKER_PATH, version, 'utf-8');
+    const marker = {
+      packageVersion,
+      nodeVersion,
+      installedAt: new Date().toISOString()
+    };
+    writeFileSync(VERSION_MARKER_PATH, JSON.stringify(marker, null, 2), 'utf-8');
   } catch (error) {
     log(`⚠️  Failed to write version marker: ${error.message}`, colors.yellow);
   }
@@ -84,22 +110,75 @@ function needsInstall() {
   }
 
   // Check version marker
-  const currentVersion = getPackageVersion();
-  const installedVersion = getInstalledVersion();
+  const currentPackageVersion = getPackageVersion();
+  const currentNodeVersion = getNodeVersion();
+  const installed = getInstalledVersion();
 
-  if (!installedVersion) {
+  if (!installed) {
     log('📦 No version marker found - installing', colors.cyan);
     return true;
   }
 
-  if (currentVersion !== installedVersion) {
-    log(`📦 Version changed (${installedVersion} → ${currentVersion}) - updating`, colors.cyan);
+  // Check package version
+  if (currentPackageVersion !== installed.packageVersion) {
+    log(`📦 Version changed (${installed.packageVersion} → ${currentPackageVersion}) - updating`, colors.cyan);
+    return true;
+  }
+
+  // Check Node.js version
+  if (installed.nodeVersion && currentNodeVersion !== installed.nodeVersion) {
+    log(`📦 Node.js version changed (${installed.nodeVersion} → ${currentNodeVersion}) - rebuilding native modules`, colors.cyan);
+    return true;
+  }
+
+  // If old format (no nodeVersion), assume needs install
+  if (!installed.nodeVersion) {
+    log('📦 Old version marker format - updating', colors.cyan);
     return true;
   }
 
   // All good - no install needed
-  log(`✓ Dependencies already installed (v${currentVersion})`, colors.dim);
+  log(`✓ Dependencies already installed (v${currentPackageVersion})`, colors.dim);
   return false;
+}
+
+/**
+ * Verify that better-sqlite3 native module loads correctly
+ * This catches ABI mismatches and corrupted builds
+ */
+async function verifyNativeModules() {
+  try {
+    log('🔍 Verifying native modules...', colors.dim);
+
+    // Try to actually load better-sqlite3
+    const { default: Database } = await import('better-sqlite3');
+
+    // Try to create a test in-memory database
+    const db = new Database(':memory:');
+
+    // Run a simple query to ensure it works
+    const result = db.prepare('SELECT 1 + 1 as result').get();
+
+    // Clean up
+    db.close();
+
+    if (result.result !== 2) {
+      throw new Error('SQLite math check failed');
+    }
+
+    log('✓ Native modules verified', colors.dim);
+    return true;
+
+  } catch (error) {
+    if (error.code === 'ERR_DLOPEN_FAILED') {
+      log('⚠️  Native module ABI mismatch detected', colors.yellow);
+      return false;
+    }
+
+    // Other errors are unexpected - log and fail
+    log(`❌ Native module verification failed: ${error.message}`, colors.red);
+    return false;
+  }
 }
 
 function getWindowsErrorHelp(errorOutput) {
@@ -157,89 +236,100 @@ function getWindowsErrorHelp(errorOutput) {
   return help.join('\n');
 }
 
-function runNpmInstall() {
+async function runNpmInstall() {
   const isWindows = process.platform === 'win32';
 
   log('', colors.cyan);
   log('🔨 Installing dependencies...', colors.bright);
   log('', colors.reset);
 
-  try {
-    // Run npm install with error output visible
-    execSync('npm install --prefer-offline --no-audit --no-fund', {
-      cwd: PLUGIN_ROOT,
-      stdio: 'inherit', // Show all output including errors
-      encoding: 'utf-8',
-    });
+  // Try normal install first, then retry with force if it fails
+  const strategies = [
+    { command: 'npm install', label: 'normal' },
+    { command: 'npm install --force', label: 'with force flag' },
+  ];
 
-    // Verify better-sqlite3 was installed
-    if (!existsSync(BETTER_SQLITE3_PATH)) {
-      throw new Error('better-sqlite3 installation verification failed');
+  let lastError = null;
+
+  for (const { command, label } of strategies) {
+    try {
+      log(`Attempting install ${label}...`, colors.dim);
+
+      // Run npm install silently
+      execSync(command, {
+        cwd: PLUGIN_ROOT,
+        stdio: 'pipe', // Silent output unless error
+        encoding: 'utf-8',
+      });
+
+      // Verify better-sqlite3 was installed
+      if (!existsSync(BETTER_SQLITE3_PATH)) {
+        throw new Error('better-sqlite3 installation verification failed');
+      }
+
+      // NEW: Verify native modules actually work
+      const nativeModulesWork = await verifyNativeModules();
+      if (!nativeModulesWork) {
+        throw new Error('Native modules failed to load after install');
+      }
+
+      const packageVersion = getPackageVersion();
+      const nodeVersion = getNodeVersion();
+      setInstalledVersion(packageVersion, nodeVersion);
+
+      log('', colors.green);
+      log('✅ Dependencies installed successfully!', colors.bright);
+      log(`   Package version: ${packageVersion}`, colors.dim);
+      log(`   Node.js version: ${nodeVersion}`, colors.dim);
+      log('', colors.reset);
+
+      return true;
+
+    } catch (error) {
+      lastError = error;
+      // Continue to next strategy
     }
-
-    const version = getPackageVersion();
-    setInstalledVersion(version);
-
-    log('', colors.green);
-    log('✅ Dependencies installed successfully!', colors.bright);
-    log(`   Version: ${version}`, colors.dim);
-    log('', colors.reset);
-
-    return true;
-
-  } catch (error) {
-    log('', colors.red);
-    log('❌ Installation failed!', colors.bright);
-    log('', colors.reset);
-
-    // Provide Windows-specific help
-    if (isWindows && error.message && error.message.includes('better-sqlite3')) {
-      log(getWindowsErrorHelp(error.message), colors.yellow);
-    }
-
-    // Show generic error info
-    if (error.stderr) {
-      log('Error output:', colors.dim);
-      log(error.stderr.toString(), colors.red);
-    } else if (error.message) {
-      log(error.message, colors.red);
-    }
-
-    return false;
   }
+
+  // All strategies failed - show error
+  log('', colors.red);
+  log('❌ Installation failed after retrying!', colors.bright);
+  log('', colors.reset);
+
+  // Provide Windows-specific help
+  if (isWindows && lastError && lastError.message && lastError.message.includes('better-sqlite3')) {
+    log(getWindowsErrorHelp(lastError.message), colors.yellow);
+  }
+
+  // Show generic error info with troubleshooting steps
+  if (lastError) {
+    if (lastError.stderr) {
+      log('Error output:', colors.dim);
+      log(lastError.stderr.toString(), colors.red);
+    } else if (lastError.message) {
+      log(lastError.message, colors.red);
+    }
+
+    log('', colors.yellow);
+    log('📋 Troubleshooting Steps:', colors.bright);
+    log('', colors.reset);
+    log('1. Check your internet connection', colors.yellow);
+    log('2. Try running: npm cache clean --force', colors.yellow);
+    log('3. Try running: npm install (in plugin directory)', colors.yellow);
+    log('4. Check npm version: npm --version (requires npm 7+)', colors.yellow);
+    log('5. Try updating npm: npm install -g npm@latest', colors.yellow);
+    log('', colors.reset);
+  }
+
+  return false;
 }
 
-function startWorker() {
-  const ECOSYSTEM_CONFIG = join(PLUGIN_ROOT, 'ecosystem.config.cjs');
-  const PM2_PATH = join(PLUGIN_ROOT, 'node_modules', '.bin', 'pm2');
-
-  log('🚀 Starting worker service...', colors.dim);
-
-  try {
-    // Use the full path to PM2 to avoid PATH issues on Windows
-    // PM2 will either start it or report it's already running (both are success cases)
-    execSync(`"${PM2_PATH}" start "${ECOSYSTEM_CONFIG}"`, {
-      cwd: PLUGIN_ROOT,
-      stdio: 'pipe', // Capture output to avoid clutter
-      encoding: 'utf-8',
-    });
-
-    log('✓ Worker service ready', colors.dim);
-    return true;
-
-  } catch (error) {
-    // PM2 errors are often non-critical (e.g., "already running")
-    // Don't fail the entire setup if worker start has issues
-    log(`⚠️  Worker startup issue (non-critical): ${error.message}`, colors.yellow);
-
-    // Check if it's just because worker is already running
-    if (error.message && (error.message.includes('already') || error.message.includes('exist'))) {
-      log('✓ Worker was already running', colors.dim);
-      return true;
-    }
-
-    return false;
-  }
+/**
+ * Check if we should fail when worker startup fails
+ * Returns true if worker failed AND dependencies are missing
+ */
+function shouldFailOnWorkerStartup(workerStarted) {
+  return !workerStarted && !existsSync(NODE_MODULES_PATH);
 }
 
 async function main() {
@@ -248,26 +338,64 @@ async function main() {
     const installNeeded = needsInstall();
 
     if (installNeeded) {
-      // Run installation
-      const installSuccess = runNpmInstall();
+      // Run installation (now async)
+      const installSuccess = await runNpmInstall();
 
       if (!installSuccess) {
         log('', colors.red);
-        log('⚠️  Installation failed - worker startup may fail', colors.yellow);
+        log('⚠️  Installation failed', colors.yellow);
         log('', colors.reset);
-        // Don't exit - still try to start worker with existing deps
+        process.exit(1);
+      }
+    } else {
+      // NEW: Even if install not needed, verify native modules work
+      const nativeModulesWork = await verifyNativeModules();
+
+      if (!nativeModulesWork) {
+        log('📦 Native modules need rebuild - reinstalling', colors.cyan);
+        const installSuccess = await runNpmInstall();
+
+        if (!installSuccess) {
+          log('', colors.red);
+          log('⚠️  Native module rebuild failed', colors.yellow);
+          log('', colors.reset);
+          process.exit(1);
+        }
       }
     }
 
-    // Always start/ensure worker is running
-    // This runs whether we installed deps or not
-    startWorker();
+    // Try to start the PM2 worker after fresh install
+    try {
+      log('🚀 Starting worker service...', colors.cyan);
+      // On Windows, PM2 executable is pm2.cmd, not pm2
+      const localPm2Base = join(NODE_MODULES_PATH, '.bin', 'pm2');
+      const localPm2Cmd = process.platform === 'win32' ? localPm2Base + '.cmd' : localPm2Base;
+      const pm2Command = existsSync(localPm2Cmd) ? localPm2Cmd : 'pm2';
+      const ecosystemPath = join(PLUGIN_ROOT, 'ecosystem.config.cjs');
 
-    // Success - dependencies installed (if needed) and worker running
+      // Using spawnSync with array args to avoid command injection risks
+      const result = spawnSync(pm2Command, ['start', ecosystemPath], {
+        cwd: PLUGIN_ROOT,
+        stdio: 'pipe',
+        encoding: 'utf-8'
+      });
+      if (result.status !== 0) {
+        throw new Error(result.stderr || 'PM2 start failed');
+      }
+
+      log('✅ Worker service started', colors.green);
+    } catch (error) {
+      // Worker might already be running or PM2 not available - that's okay
+      // The ensureWorkerRunning() function will handle auto-start when needed
+      log('ℹ️ Worker startup error', colors.dim);
+    }
+
+    // Success - dependencies installed (if needed)
     process.exit(0);
 
   } catch (error) {
     log(`❌ Unexpected error: ${error.message}`, colors.red);
+    log('', colors.reset);
     process.exit(1);
   }
 }

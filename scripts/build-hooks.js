@@ -26,14 +26,14 @@ const WORKER_SERVICE = {
   source: 'src/services/worker-service.ts'
 };
 
-const SEARCH_SERVER = {
-  name: 'search-server',
-  source: 'src/servers/search-server.ts'
+const MCP_SERVER = {
+  name: 'mcp-server',
+  source: 'src/servers/mcp-server.ts'
 };
 
-const RUNTIME_LAUNCHER = {
-  name: 'run',
-  source: 'src/bin/run.ts'
+const CONTEXT_GENERATOR = {
+  name: 'context-generator',
+  source: 'src/services/context-generator.ts'
 };
 
 async function buildHooks() {
@@ -97,15 +97,15 @@ async function buildHooks() {
     const workerStats = fs.statSync(`${hooksDir}/${WORKER_SERVICE.name}.cjs`);
     console.log(`✓ worker-service built (${(workerStats.size / 1024).toFixed(2)} KB)`);
 
-    // Build search server
-    console.log(`\n🔧 Building search server...`);
+    // Build MCP server
+    console.log(`\n🔧 Building MCP server...`);
     await build({
-      entryPoints: [SEARCH_SERVER.source],
+      entryPoints: [MCP_SERVER.source],
       bundle: true,
       platform: 'node',
       target: 'node18',
       format: 'cjs',
-      outfile: `${hooksDir}/${SEARCH_SERVER.name}.cjs`,
+      outfile: `${hooksDir}/${MCP_SERVER.name}.cjs`,
       minify: true,
       logLevel: 'error',
       external: ['better-sqlite3'],
@@ -117,33 +117,30 @@ async function buildHooks() {
       }
     });
 
-    // Make search server executable
-    fs.chmodSync(`${hooksDir}/${SEARCH_SERVER.name}.cjs`, 0o755);
-    const searchServerStats = fs.statSync(`${hooksDir}/${SEARCH_SERVER.name}.cjs`);
-    console.log(`✓ search-server built (${(searchServerStats.size / 1024).toFixed(2)} KB)`);
+    // Make MCP server executable
+    fs.chmodSync(`${hooksDir}/${MCP_SERVER.name}.cjs`, 0o755);
+    const mcpServerStats = fs.statSync(`${hooksDir}/${MCP_SERVER.name}.cjs`);
+    console.log(`✓ mcp-server built (${(mcpServerStats.size / 1024).toFixed(2)} KB)`);
 
-    // Build runtime launcher
-    console.log(`\n🔧 Building runtime launcher...`);
+    // Build context generator
+    console.log(`\n🔧 Building context generator...`);
     await build({
-      entryPoints: [RUNTIME_LAUNCHER.source],
+      entryPoints: [CONTEXT_GENERATOR.source],
       bundle: true,
       platform: 'node',
       target: 'node18',
-      format: 'esm',
-      outfile: `${hooksDir}/${RUNTIME_LAUNCHER.name}.js`,
+      format: 'cjs',
+      outfile: `${hooksDir}/${CONTEXT_GENERATOR.name}.cjs`,
       minify: true,
+      logLevel: 'error',
+      external: ['better-sqlite3'],
       define: {
         '__DEFAULT_PACKAGE_VERSION__': `"${version}"`
-      },
-      banner: {
-        js: '#!/usr/bin/env node'
       }
     });
 
-    // Make runtime launcher executable
-    fs.chmodSync(`${hooksDir}/${RUNTIME_LAUNCHER.name}.js`, 0o755);
-    const runStats = fs.statSync(`${hooksDir}/${RUNTIME_LAUNCHER.name}.js`);
-    console.log(`✓ runtime launcher built (${(runStats.size / 1024).toFixed(2)} KB)`);
+    const contextGenStats = fs.statSync(`${hooksDir}/${CONTEXT_GENERATOR.name}.cjs`);
+    console.log(`✓ context-generator built (${(contextGenStats.size / 1024).toFixed(2)} KB)`);
 
     // Build each hook
     for (const hook of HOOKS) {
@@ -177,15 +174,29 @@ async function buildHooks() {
       console.log(`✓ ${hook.name} built (${sizeInKB} KB)`);
     }
 
-    console.log('\n✅ All hooks, worker service, and search server built successfully!');
+    // Copy smart-install.js to plugin/scripts for cross-platform path compatibility
+    console.log('\n📋 Copying smart-install.js...');
+    const smartInstallSource = path.join(__dirname, 'smart-install.js');
+    const smartInstallDest = path.join(hooksDir, 'smart-install.js');
+    
+    if (!fs.existsSync(smartInstallSource)) {
+      throw new Error(`smart-install.js not found at ${smartInstallSource}`);
+    }
+    
+    try {
+      fs.copyFileSync(smartInstallSource, smartInstallDest);
+      console.log('✓ smart-install.js copied to plugin/scripts/');
+    } catch (error) {
+      throw new Error(`Failed to copy smart-install.js: ${error.message}`);
+    }
+
+    console.log('\n✅ All hooks, worker service, and MCP server built successfully!');
     console.log(`   Output: ${hooksDir}/`);
     console.log(`   - Hooks: *-hook.js`);
     console.log(`   - Worker: worker-service.cjs`);
-    console.log(`   - Search Server: search-server.cjs`);
-    console.log(`   - Runtime: run.js`);
+    console.log(`   - MCP Server: mcp-server.cjs`);
     console.log(`   - Skills: plugin/skills/`);
     console.log('\n💡 Note: Dependencies will be auto-installed on first hook execution');
-    console.log('💡 Note: Set CLAUDE_MEM_RUNTIME=bun to use Bun instead of Node.js');
 
   } catch (error) {
     console.error('\n❌ Build failed:', error.message);
