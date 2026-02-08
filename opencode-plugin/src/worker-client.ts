@@ -40,20 +40,16 @@ export class WorkerClient {
   }
 
   /**
-   * Initialize a session
+   * Get Context for Injection
    */
-  static async sessionInit(claudeSessionId: string, project: string, prompt: string): Promise<{ sessionDbId: number; promptNumber: number } | null> {
+  static async getContext(project: string): Promise<string> {
     try {
-      const response = await fetch(`${this.BASE_URL}/api/sessions/init`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ claudeSessionId, project, prompt })
-      });
-      if (!response.ok) return null;
-      return (await response.json()) as { sessionDbId: number; promptNumber: number };
-    } catch (error) {
-      console.error("[claude-mem] Failed to init session:", error);
-      return null;
+        const response = await fetch(`${this.BASE_URL}/api/context/inject?project=${encodeURIComponent(project)}`);
+        if (!response.ok) return "";
+        return await response.text();
+    } catch (e) {
+        console.error("[claude-mem] Failed to get context:", e);
+        return "";
     }
   }
 
@@ -115,14 +111,13 @@ export class WorkerClient {
   /**
    * Perform Search
    */
-  static async search(query: string, project: string): Promise<string> {
+  static async search(query: string, project: string): Promise<any> {
       try {
-          const response = await fetch(`${this.BASE_URL}/api/search?q=${encodeURIComponent(query)}&project=${encodeURIComponent(project)}`);
-          if (!response.ok) return "Search failed";
-          const data = await response.json();
-          return JSON.stringify(data, null, 2);
+          const response = await fetch(`${this.BASE_URL}/api/search?q=${encodeURIComponent(query)}&project=${encodeURIComponent(project)}&limit=10`);
+          if (!response.ok) return { error: "Search failed" };
+          return await response.json();
       } catch (e) {
-          return `Error performing search: ${e}`;
+          return { error: `Error performing search: ${e}` };
       }
   }
 }

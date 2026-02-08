@@ -46,6 +46,7 @@ export class DataRoutes extends BaseRouteHandler {
     // Metadata endpoints
     app.get('/api/stats', this.handleGetStats.bind(this));
     app.get('/api/projects', this.handleGetProjects.bind(this));
+    app.get('/api/integrations/status', this.handleGetIntegrationStatus.bind(this));
 
     // Processing status endpoints
     app.get('/api/processing-status', this.handleGetProcessingStatus.bind(this));
@@ -252,6 +253,39 @@ export class DataRoutes extends BaseRouteHandler {
     const projects = rows.map(row => row.project);
 
     res.json({ projects });
+  });
+
+  /**
+   * Get status of integrations (Chroma, etc.)
+   * GET /api/integrations/status
+   */
+  private handleGetIntegrationStatus = this.wrapHandler(async (req: Request, res: Response): Promise<void> => {
+    const chroma = this.dbManager.getChromaSync();
+
+    // Check Chroma status
+    const chromaStatus = {
+      connected: false,
+      collectionName: '',
+      vectorDbDir: '',
+      itemCount: 0,
+      error: undefined as string | undefined
+    };
+
+    try {
+      chromaStatus.connected = chroma.isReady();
+      chromaStatus.collectionName = await chroma.getCollectionName();
+
+      // Get vector count if connected
+      if (chromaStatus.connected) {
+        chromaStatus.itemCount = await chroma.count();
+      }
+    } catch (error) {
+      chromaStatus.error = error instanceof Error ? error.message : String(error);
+    }
+
+    res.json({
+      chroma: chromaStatus
+    });
   });
 
   /**

@@ -36,6 +36,15 @@ export function Header({
   const phBadgeTheme = isDark ? 'dark' : 'light';
   const phBadgeUrl = `https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1045833&theme=${phBadgeTheme}`;
 
+  const [isBeta, setIsBeta] = React.useState(false);
+
+  React.useEffect(() => {
+    fetch('/api/branch/status')
+      .then(res => res.json())
+      .then(data => setIsBeta(data.branch?.includes('beta') || false))
+      .catch(() => {});
+  }, []);
+
   return (
     <div className="header">
       <h1>
@@ -47,7 +56,19 @@ export function Header({
             </div>
           )}
         </div>
-        <span className="logo-text">claude-mem</span>
+        <div style={{ display: 'flex', flexDirection: 'column' }}>
+          <span className="logo-text">claude-mem</span>
+          {isBeta && (
+            <span style={{
+              fontSize: '9px',
+              color: 'var(--color-accent-primary)',
+              fontWeight: 600,
+              textTransform: 'uppercase',
+              letterSpacing: '1px',
+              marginTop: '-4px'
+            }}>Endless Mode</span>
+          )}
+        </div>
       </h1>
       <div className="status">
         <a
