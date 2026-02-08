@@ -17,7 +17,7 @@
     <img src="https://img.shields.io/badge/License-AGPL%203.0-blue.svg" alt="License">
   </a>
   <a href="package.json">
-    <img src="https://img.shields.io/badge/version-6.5.0-green.svg" alt="Version">
+    <img src="https://img.shields.io/badge/version-6.0.0-green.svg" alt="Version">
   </a>
   <a href="package.json">
     <img src="https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen.svg" alt="Node">
@@ -71,11 +71,8 @@ Restart Claude Code. Context from previous sessions will automatically appear in
 - 📊 **Progressive Disclosure** - Layered memory retrieval with token cost visibility
 - 🔍 **Skill-Based Search** - Query your project history with mem-search skill (~2,250 token savings)
 - 🖥️ **Web Viewer UI** - Real-time memory stream at http://localhost:37777
-- 🔒 **Privacy Control** - Use `<private>` tags to exclude sensitive content from storage
-- ⚙️ **Context Configuration** - Fine-grained control over what context gets injected
 - 🤖 **Automatic Operation** - No manual intervention required
 - 🔗 **Citations** - Reference past decisions with `claude-mem://` URIs
-- 🧪 **Beta Channel** - Try experimental features like Endless Mode via version switching
 
 ---
 
@@ -95,7 +92,6 @@ npx mintlify dev
 - **[Installation Guide](https://docs.claude-mem.ai/installation)** - Quick start & advanced installation
 - **[Usage Guide](https://docs.claude-mem.ai/usage/getting-started)** - How Claude-Mem works automatically
 - **[Search Tools](https://docs.claude-mem.ai/usage/search-tools)** - Query your project history with natural language
-- **[Beta Features](https://docs.claude-mem.ai/beta-features)** - Try experimental features like Endless Mode
 
 ### Best Practices
 
@@ -146,7 +142,7 @@ npx mintlify dev
 
 **Core Components:**
 
-1. **5 Lifecycle Hooks** - SessionStart, UserPromptSubmit, PostToolUse, Stop, SessionEnd (6 hook scripts)
+1. **6 Lifecycle Hooks** - context-hook, user-message-hook, new-hook, save-hook, summary-hook, cleanup-hook
 2. **Smart Install** - Cached dependency checker (pre-hook script, not a lifecycle hook)
 3. **Worker Service** - HTTP API on port 37777 with web viewer UI and 10 search endpoints, managed by PM2
 4. **SQLite Database** - Stores sessions, observations, summaries with FTS5 full-text search
@@ -193,65 +189,28 @@ See [Search Tools Guide](https://docs.claude-mem.ai/usage/search-tools) for deta
 
 ---
 
-## Beta Features & Endless Mode
+## What's New in v6.0.0
 
-Claude-Mem offers a **beta channel** with experimental features. Switch between stable and beta versions directly from the web viewer UI.
+**🚀 Major Session Management & Transcript Processing Improvements:**
 
-### How to Try Beta
+- **Enhanced Session Initialization**: Accept userPrompt and promptNumber for better context tracking
+- **Live UserPrompt Updates**: Multi-turn conversation support with real-time prompt tracking
+- **Improved SessionManager**: Better context handling and observation processing
+- **Comprehensive Transcript Processing**: New scripts and utilities for analyzing Claude Code transcripts
+- **Rich Context Extraction**: Advanced parsing utilities for extracting meaningful context from sessions
+- **Refactored Architecture**: Improved hooks and SDKAgent for more reliable observation handling
+- **Silent Debug Logging**: Better debugging capabilities without cluttering output
+- **Enhanced Error Handling**: More robust error recovery and debugging tools
 
-1. Open http://localhost:37777
-2. Click Settings (gear icon)
-3. In **Version Channel**, click "Try Beta (Endless Mode)"
-4. Wait for the worker to restart
-
-Your memory data is preserved when switching versions.
-
-### Endless Mode (Beta)
-
-The flagship beta feature is **Endless Mode** - a biomimetic memory architecture that dramatically extends session length:
-
-**The Problem**: Standard Claude Code sessions hit context limits after ~50 tool uses. Each tool adds 1-10k+ tokens, and Claude re-synthesizes all previous outputs on every response (O(N²) complexity).
-
-**The Solution**: Endless Mode compresses tool outputs into ~500-token observations and transforms the transcript in real-time:
-
-```
-Working Memory (Context):     Compressed observations (~500 tokens each)
-Archive Memory (Disk):        Full tool outputs preserved for recall
-```
-
-**Expected Results**:
-- ~95% token reduction in context window
-- ~20x more tool uses before context exhaustion
-- Linear O(N) scaling instead of quadratic O(N²)
-- Full transcripts preserved for perfect recall
-
-**Caveats**: Adds latency (60-90s per tool for observation generation), still experimental.
-
-See [Beta Features Documentation](https://docs.claude-mem.ai/beta-features) for details.
-
----
-
-## What's New
-
-**v6.4.9 - Context Configuration Settings:**
-- 11 new settings for fine-grained control over context injection
-- Configure token economics display, observation filtering by type/concept
-- Control number of observations and which fields to display
-
-**v6.4.0 - Dual-Tag Privacy System:**
-- `<private>` tags for user-controlled privacy - wrap sensitive content to exclude from storage
-- System-level `<claude-mem-context>` tags prevent recursive observation storage
-- Edge processing ensures private content never reaches database
-
-**v6.3.0 - Version Channel:**
-- Switch between stable and beta versions from the web viewer UI
-- Try experimental features like Endless Mode without manual git operations
+**Breaking Changes**: Significant architectural changes in session management and observation handling. Existing sessions continue to work, but internal APIs have evolved.
 
 **Previous Highlights:**
-- **v6.0.0**: Major session management & transcript processing improvements
+
 - **v5.5.0**: mem-search skill enhancement with 100% effectiveness rate
 - **v5.4.0**: Skill-based search architecture (~2,250 tokens saved per session)
+- **v5.1.2**: Theme toggle for light/dark mode in viewer UI
 - **v5.1.0**: Web-based viewer UI with real-time updates
+- **v5.0.3**: Smart install caching (2-5s → 10ms)
 - **v5.0.0**: Hybrid search with Chroma vector database
 
 See [CHANGELOG.md](CHANGELOG.md) for complete version history.
@@ -260,48 +219,10 @@ See [CHANGELOG.md](CHANGELOG.md) for complete version history.
 
 ## System Requirements
 
-- **Node.js**: 18.0.0 or higher (or **Bun** as alternative runtime)
+- **Node.js**: 18.0.0 or higher
 - **Claude Code**: Latest version with plugin support
 - **PM2**: Process manager (bundled - no global install required)
 - **SQLite 3**: For persistent storage (bundled)
-
-### Using Bun Runtime (Optional)
-
-Claude-mem supports [Bun](https://bun.sh/) as an alternative runtime to Node.js. Bun offers:
-- **Faster startup and execution**
-- **Built-in SQLite** (no native module compilation needed)
-- **Better memory efficiency**
-
-To use Bun instead of Node.js:
-
-1. **Install Bun** (if not already installed):
-   ```bash
-   curl -fsSL https://bun.sh/install | bash
-   ```
-
-2. **Configure claude-mem to use Bun** (choose one method):
-
-   **Option A: Environment variable**
-   ```bash
-   export CLAUDE_MEM_RUNTIME=bun
-   ```
-
-   **Option B: Settings file**
-   Add to `~/.claude-mem/settings.json`:
-   ```json
-   {
-     "env": {
-       "CLAUDE_MEM_RUNTIME": "bun"
-     }
-   }
-   ```
-
-3. **Restart the worker**:
-   ```bash
-   npm run worker:restart
-   ```
-
-Claude-mem will automatically detect and use Bun when configured, falling back to Node.js if Bun is unavailable.
 
 ---
 
@@ -352,9 +273,8 @@ Claude-mem will automatically detect and use Bun when configured, falling back t
 
 **Environment Variables:**
 
-- `CLAUDE_MEM_MODEL` - AI model for processing (default: claude-haiku-4-5)
+- `CLAUDE_MEM_MODEL` - AI model for processing (default: claude-sonnet-4-5)
 - `CLAUDE_MEM_WORKER_PORT` - Worker port (default: 37777)
-- `CLAUDE_MEM_RUNTIME` - Runtime to use: `node` or `bun` (default: node, auto-detects bun if available)
 - `CLAUDE_MEM_DATA_DIR` - Data directory override (dev only)
 
 See [Configuration Guide](https://docs.claude-mem.ai/configuration) for details.
