@@ -1,8 +1,26 @@
-import { Database } from 'bun:sqlite';
-import { TableNameRow } from '../../types/database.js';
 import { DATA_DIR, DB_PATH, ensureDir } from '../../shared/paths.js';
-import { logger } from '../../utils/logger.js';
-import { isDirectChild } from '../../shared/path-utils.js';
+
+// Runtime detection
+const isBun = typeof (globalThis as any).Bun !== 'undefined';
+
+// Get SQLite database class based on runtime
+// Uses dynamic loading to prevent esbuild from statically analyzing imports
+let _sqliteDb: any = null;
+function getSqliteDatabase(): any {
+  if (_sqliteDb) return _sqliteDb;
+
+  if (isBun) {
+    // Bun has native bun:sqlite - access via globalThis.Bun
+    _sqliteDb = (globalThis as any).Bun.require('bun:sqlite').Database;
+  } else {
+    // Node.js - use indirect require to hide from esbuild
+    const dynamicRequire = new Function('m', 'return require(m)');
+    _sqliteDb = dynamicRequire('better-sqlite3');
+  }
+  return _sqliteDb;
+}
+
+const Database = getSqliteDatabase();
 import {
   ObservationSearchResult,
   SessionSummarySearchResult,
@@ -20,7 +38,7 @@ import {
  * Vector search is handled by ChromaDB - this class only supports filtering without query text
  */
 export class SessionSearch {
-  private db: Database;
+  private db: Database.Database;
 
   constructor(dbPath?: string) {
     if (!dbPath) {
@@ -28,7 +46,7 @@ export class SessionSearch {
       dbPath = DB_PATH;
     }
     this.db = new Database(dbPath);
-    this.db.run('PRAGMA journal_mode = WAL');
+    this.db.pragma('journal_mode = WAL');
 
     // Ensure FTS tables exist
     this.ensureFTSTables();
@@ -49,100 +67,104 @@ export class SessionSearch {
    * TODO: Remove FTS5 infrastructure in future major version (v7.0.0)
    */
   private ensureFTSTables(): void {
-    // Check if FTS tables already exist
-    const tables = this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE '%_fts'").all() as TableNameRow[];
-    const hasFTS = tables.some(t => t.name === 'observations_fts' || t.name === 'session_summaries_fts');
+    try {
+      // Check if FTS tables already exist
+      const tables = this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE '%_fts'").all() as any[];
+      const hasFTS = tables.some((t: any) => t.name === 'observations_fts' || t.name === 'session_summaries_fts');
 
-    if (hasFTS) {
-      // Already migrated
-      return;
+      if (hasFTS) {
+        // Already migrated
+        return;
+      }
+
+      console.error('[SessionSearch] Creating FTS5 tables...');
+
+      // Create observations_fts virtual table
+      this.db.exec(`
+        CREATE VIRTUAL TABLE IF NOT EXISTS observations_fts USING fts5(
+          title,
+          subtitle,
+          narrative,
+          text,
+          facts,
+          concepts,
+          content='observations',
+          content_rowid='id'
+        );
+      `);
+
+      // Populate with existing data
+      this.db.exec(`
+        INSERT INTO observations_fts(rowid, title, subtitle, narrative, text, facts, concepts)
+        SELECT id, title, subtitle, narrative, text, facts, concepts
+        FROM observations;
+      `);
+
+      // Create triggers for observations
+      this.db.exec(`
+        CREATE TRIGGER IF NOT EXISTS observations_ai AFTER INSERT ON observations BEGIN
+          INSERT INTO observations_fts(rowid, title, subtitle, narrative, text, facts, concepts)
+          VALUES (new.id, new.title, new.subtitle, new.narrative, new.text, new.facts, new.concepts);
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS observations_ad AFTER DELETE ON observations BEGIN
+          INSERT INTO observations_fts(observations_fts, rowid, title, subtitle, narrative, text, facts, concepts)
+          VALUES('delete', old.id, old.title, old.subtitle, old.narrative, old.text, old.facts, old.concepts);
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS observations_au AFTER UPDATE ON observations BEGIN
+          INSERT INTO observations_fts(observations_fts, rowid, title, subtitle, narrative, text, facts, concepts)
+          VALUES('delete', old.id, old.title, old.subtitle, old.narrative, old.text, old.facts, old.concepts);
+          INSERT INTO observations_fts(rowid, title, subtitle, narrative, text, facts, concepts)
+          VALUES (new.id, new.title, new.subtitle, new.narrative, new.text, new.facts, new.concepts);
+        END;
+      `);
+
+      // Create session_summaries_fts virtual table
+      this.db.exec(`
+        CREATE VIRTUAL TABLE IF NOT EXISTS session_summaries_fts USING fts5(
+          request,
+          investigated,
+          learned,
+          completed,
+          next_steps,
+          notes,
+          content='session_summaries',
+          content_rowid='id'
+        );
+      `);
+
+      // Populate with existing data
+      this.db.exec(`
+        INSERT INTO session_summaries_fts(rowid, request, investigated, learned, completed, next_steps, notes)
+        SELECT id, request, investigated, learned, completed, next_steps, notes
+        FROM session_summaries;
+      `);
+
+      // Create triggers for session_summaries
+      this.db.exec(`
+        CREATE TRIGGER IF NOT EXISTS session_summaries_ai AFTER INSERT ON session_summaries BEGIN
+          INSERT INTO session_summaries_fts(rowid, request, investigated, learned, completed, next_steps, notes)
+          VALUES (new.id, new.request, new.investigated, new.learned, new.completed, new.next_steps, new.notes);
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS session_summaries_ad AFTER DELETE ON session_summaries BEGIN
+          INSERT INTO session_summaries_fts(session_summaries_fts, rowid, request, investigated, learned, completed, next_steps, notes)
+          VALUES('delete', old.id, old.request, old.investigated, old.learned, old.completed, old.next_steps, old.notes);
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS session_summaries_au AFTER UPDATE ON session_summaries BEGIN
+          INSERT INTO session_summaries_fts(session_summaries_fts, rowid, request, investigated, learned, completed, next_steps, notes)
+          VALUES('delete', old.id, old.request, old.investigated, old.learned, old.completed, old.next_steps, old.notes);
+          INSERT INTO session_summaries_fts(rowid, request, investigated, learned, completed, next_steps, notes)
+          VALUES (new.id, new.request, new.investigated, new.learned, new.completed, new.next_steps, new.notes);
+        END;
+      `);
+
+      console.error('[SessionSearch] FTS5 tables created successfully');
+    } catch (error: any) {
+      console.error('[SessionSearch] FTS migration error:', error.message);
     }
-
-    logger.info('DB', 'Creating FTS5 tables');
-
-    // Create observations_fts virtual table
-    this.db.run(`
-      CREATE VIRTUAL TABLE IF NOT EXISTS observations_fts USING fts5(
-        title,
-        subtitle,
-        narrative,
-        text,
-        facts,
-        concepts,
-        content='observations',
-        content_rowid='id'
-      );
-    `);
-
-    // Populate with existing data
-    this.db.run(`
-      INSERT INTO observations_fts(rowid, title, subtitle, narrative, text, facts, concepts)
-      SELECT id, title, subtitle, narrative, text, facts, concepts
-      FROM observations;
-    `);
-
-    // Create triggers for observations
-    this.db.run(`
-      CREATE TRIGGER IF NOT EXISTS observations_ai AFTER INSERT ON observations BEGIN
-        INSERT INTO observations_fts(rowid, title, subtitle, narrative, text, facts, concepts)
-        VALUES (new.id, new.title, new.subtitle, new.narrative, new.text, new.facts, new.concepts);
-      END;
-
-      CREATE TRIGGER IF NOT EXISTS observations_ad AFTER DELETE ON observations BEGIN
-        INSERT INTO observations_fts(observations_fts, rowid, title, subtitle, narrative, text, facts, concepts)
-        VALUES('delete', old.id, old.title, old.subtitle, old.narrative, old.text, old.facts, old.concepts);
-      END;
-
-      CREATE TRIGGER IF NOT EXISTS observations_au AFTER UPDATE ON observations BEGIN
-        INSERT INTO observations_fts(observations_fts, rowid, title, subtitle, narrative, text, facts, concepts)
-        VALUES('delete', old.id, old.title, old.subtitle, old.narrative, old.text, old.facts, old.concepts);
-        INSERT INTO observations_fts(rowid, title, subtitle, narrative, text, facts, concepts)
-        VALUES (new.id, new.title, new.subtitle, new.narrative, new.text, new.facts, new.concepts);
-      END;
-    `);
-
-    // Create session_summaries_fts virtual table
-    this.db.run(`
-      CREATE VIRTUAL TABLE IF NOT EXISTS session_summaries_fts USING fts5(
-        request,
-        investigated,
-        learned,
-        completed,
-        next_steps,
-        notes,
-        content='session_summaries',
-        content_rowid='id'
-      );
-    `);
-
-    // Populate with existing data
-    this.db.run(`
-      INSERT INTO session_summaries_fts(rowid, request, investigated, learned, completed, next_steps, notes)
-      SELECT id, request, investigated, learned, completed, next_steps, notes
-      FROM session_summaries;
-    `);
-
-    // Create triggers for session_summaries
-    this.db.run(`
-      CREATE TRIGGER IF NOT EXISTS session_summaries_ai AFTER INSERT ON session_summaries BEGIN
-        INSERT INTO session_summaries_fts(rowid, request, investigated, learned, completed, next_steps, notes)
-        VALUES (new.id, new.request, new.investigated, new.learned, new.completed, new.next_steps, new.notes);
-      END;
-
-      CREATE TRIGGER IF NOT EXISTS session_summaries_ad AFTER DELETE ON session_summaries BEGIN
-        INSERT INTO session_summaries_fts(session_summaries_fts, rowid, request, investigated, learned, completed, next_steps, notes)
-        VALUES('delete', old.id, old.request, old.investigated, old.learned, old.completed, old.next_steps, old.notes);
-      END;
-
-      CREATE TRIGGER IF NOT EXISTS session_summaries_au AFTER UPDATE ON session_summaries BEGIN
-        INSERT INTO session_summaries_fts(session_summaries_fts, rowid, request, investigated, learned, completed, next_steps, notes)
-        VALUES('delete', old.id, old.request, old.investigated, old.learned, old.completed, old.next_steps, old.notes);
-        INSERT INTO session_summaries_fts(rowid, request, investigated, learned, completed, next_steps, notes)
-        VALUES (new.id, new.request, new.investigated, new.learned, new.completed, new.next_steps, new.notes);
-      END;
-    `);
-
-    logger.info('DB', 'FTS5 tables created successfully');
   }
 
 
@@ -269,7 +291,7 @@ export class SessionSearch {
 
     // Vector search with query text should be handled by ChromaDB
     // This method only supports filter-only queries (query=undefined)
-    logger.warn('DB', 'Text search not supported - use ChromaDB for vector search');
+    console.warn('[SessionSearch] Text search not supported - use ChromaDB for vector search');
     return [];
   }
 
@@ -308,7 +330,7 @@ export class SessionSearch {
 
     // Vector search with query text should be handled by ChromaDB
     // This method only supports filter-only queries (query=undefined)
-    logger.warn('DB', 'Text search not supported - use ChromaDB for vector search');
+    console.warn('[SessionSearch] Text search not supported - use ChromaDB for vector search');
     return [];
   }
 
@@ -338,54 +360,14 @@ export class SessionSearch {
   }
 
   /**
-   * Check if an observation has any files that are direct children of the folder
-   */
-  private hasDirectChildFile(obs: ObservationSearchResult, folderPath: string): boolean {
-    const checkFiles = (filesJson: string | null): boolean => {
-      if (!filesJson) return false;
-      try {
-        const files = JSON.parse(filesJson);
-        if (Array.isArray(files)) {
-          return files.some(f => isDirectChild(f, folderPath));
-        }
-      } catch {}
-      return false;
-    };
-
-    return checkFiles(obs.files_modified) || checkFiles(obs.files_read);
-  }
-
-  /**
-   * Check if a session has any files that are direct children of the folder
-   */
-  private hasDirectChildFileSession(session: SessionSummarySearchResult, folderPath: string): boolean {
-    const checkFiles = (filesJson: string | null): boolean => {
-      if (!filesJson) return false;
-      try {
-        const files = JSON.parse(filesJson);
-        if (Array.isArray(files)) {
-          return files.some(f => isDirectChild(f, folderPath));
-        }
-      } catch {}
-      return false;
-    };
-
-    return checkFiles(session.files_read) || checkFiles(session.files_edited);
-  }
-
-  /**
    * Find observations and summaries by file path
-   * When isFolder=true, only returns results with files directly in the folder (not subfolders)
    */
   findByFile(filePath: string, options: SearchOptions = {}): {
     observations: ObservationSearchResult[];
     sessions: SessionSummarySearchResult[];
   } {
     const params: any[] = [];
-    const { limit = 50, offset = 0, orderBy = 'date_desc', isFolder = false, ...filters } = options;
-
-    // Query more results if we're filtering to direct children
-    const queryLimit = isFolder ? limit * 3 : limit;
+    const { limit = 50, offset = 0, orderBy = 'date_desc', ...filters } = options;
 
     // Add file to filters
     const fileFilters = { ...filters, files: filePath };
@@ -400,14 +382,9 @@ export class SessionSearch {
       LIMIT ? OFFSET ?
     `;
 
-    params.push(queryLimit, offset);
+    params.push(limit, offset);
 
-    let observations = this.db.prepare(observationsSql).all(...params) as ObservationSearchResult[];
-
-    // Post-filter to direct children if isFolder mode
-    if (isFolder) {
-      observations = observations.filter(obs => this.hasDirectChildFile(obs, filePath)).slice(0, limit);
-    }
+    const observations = this.db.prepare(observationsSql).all(...params) as ObservationSearchResult[];
 
     // For session summaries, search files_read and files_edited
     const sessionParams: any[] = [];
@@ -449,14 +426,9 @@ export class SessionSearch {
       LIMIT ? OFFSET ?
     `;
 
-    sessionParams.push(queryLimit, offset);
+    sessionParams.push(limit, offset);
 
-    let sessions = this.db.prepare(sessionsSql).all(...sessionParams) as SessionSummarySearchResult[];
-
-    // Post-filter to direct children if isFolder mode
-    if (isFolder) {
-      sessions = sessions.filter(s => this.hasDirectChildFileSession(s, filePath)).slice(0, limit);
-    }
+    const sessions = this.db.prepare(sessionsSql).all(...sessionParams) as SessionSummarySearchResult[];
 
     return { observations, sessions };
   }
@@ -532,7 +504,7 @@ export class SessionSearch {
       const sql = `
         SELECT up.*
         FROM user_prompts up
-        JOIN sdk_sessions s ON up.content_session_id = s.content_session_id
+        JOIN sdk_sessions s ON up.claude_session_id = s.claude_session_id
         ${whereClause}
         ${orderClause}
         LIMIT ? OFFSET ?
@@ -544,28 +516,28 @@ export class SessionSearch {
 
     // Vector search with query text should be handled by ChromaDB
     // This method only supports filter-only queries (query=undefined)
-    logger.warn('DB', 'Text search not supported - use ChromaDB for vector search');
+    console.warn('[SessionSearch] Text search not supported - use ChromaDB for vector search');
     return [];
   }
 
   /**
-   * Get all prompts for a session by content_session_id
+   * Get all prompts for a session by claude_session_id
    */
-  getUserPromptsBySession(contentSessionId: string): UserPromptRow[] {
+  getUserPromptsBySession(claudeSessionId: string): UserPromptRow[] {
     const stmt = this.db.prepare(`
       SELECT
         id,
-        content_session_id,
+        claude_session_id,
         prompt_number,
         prompt_text,
         created_at,
         created_at_epoch
       FROM user_prompts
-      WHERE content_session_id = ?
+      WHERE claude_session_id = ?
       ORDER BY prompt_number ASC
     `);
 
-    return stmt.all(contentSessionId) as UserPromptRow[];
+    return stmt.all(claudeSessionId) as UserPromptRow[];
   }
 
   /**

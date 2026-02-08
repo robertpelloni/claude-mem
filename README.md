@@ -55,8 +55,6 @@
 
 ## Quick Start
 
-### For Claude Code
-
 Start a new Claude Code session in the terminal and enter the following commands:
 
 ```
@@ -66,29 +64,6 @@ Start a new Claude Code session in the terminal and enter the following commands
 ```
 
 Restart Claude Code. Context from previous sessions will automatically appear in new sessions.
-
-### For VSCode Copilot
-
-A VSCode extension is available that brings claude-mem's persistent memory to GitHub Copilot:
-
-1. Install the claude-mem worker service (required):
-   ```bash
-   npm install -g claude-mem
-   pm2 start claude-mem-worker
-   ```
-
-2. Install the VSCode extension from the marketplace or build from source:
-   ```bash
-   cd vscode-extension
-   npm install
-   npm run build
-   npx @vscode/vsce package
-   code --install-extension claude-mem-vscode-*.vsix
-   ```
-
-3. The extension provides Language Model Tools that Copilot can invoke to capture memory
-
-See [vscode-extension/README.md](vscode-extension/README.md) for details.
 
 **Key Features:**
 
@@ -133,7 +108,7 @@ npx mintlify dev
 - **[Architecture Evolution](https://docs.claude-mem.ai/architecture-evolution)** - The journey from v3 to v5
 - **[Hooks Architecture](https://docs.claude-mem.ai/hooks-architecture)** - How Claude-Mem uses lifecycle hooks
 - **[Hooks Reference](https://docs.claude-mem.ai/architecture/hooks)** - 7 hook scripts explained
-- **[Worker Service](https://docs.claude-mem.ai/architecture/worker-service)** - HTTP API & Bun process management
+- **[Worker Service](https://docs.claude-mem.ai/architecture/worker-service)** - HTTP API & PM2 management
 - **[Database](https://docs.claude-mem.ai/architecture/database)** - SQLite schema & FTS5 search
 - **[Search Architecture](https://docs.claude-mem.ai/architecture/search-architecture)** - Hybrid search with Chroma vector database
 
@@ -173,7 +148,7 @@ npx mintlify dev
 
 1. **5 Lifecycle Hooks** - SessionStart, UserPromptSubmit, PostToolUse, Stop, SessionEnd (6 hook scripts)
 2. **Smart Install** - Cached dependency checker (pre-hook script, not a lifecycle hook)
-3. **Worker Service** - HTTP API on port 37777 with web viewer UI and 10 search endpoints, managed by Bun
+3. **Worker Service** - HTTP API on port 37777 with web viewer UI and 10 search endpoints, managed by PM2
 4. **SQLite Database** - Stores sessions, observations, summaries with FTS5 full-text search
 5. **mem-search Skill** - Natural language queries with progressive disclosure (~2,250 token savings vs MCP)
 6. **Chroma Vector Database** - Hybrid semantic + keyword search for intelligent context retrieval
@@ -285,10 +260,48 @@ See [CHANGELOG.md](CHANGELOG.md) for complete version history.
 
 ## System Requirements
 
-- **Bun**: 1.0 or higher (auto-installed on first run if missing)
-- **Node.js**: 18.0.0 or higher (for build tools)
+- **Node.js**: 18.0.0 or higher (or **Bun** as alternative runtime)
 - **Claude Code**: Latest version with plugin support
-- **SQLite 3**: For persistent storage (via bun:sqlite - zero native dependencies)
+- **PM2**: Process manager (bundled - no global install required)
+- **SQLite 3**: For persistent storage (bundled)
+
+### Using Bun Runtime (Optional)
+
+Claude-mem supports [Bun](https://bun.sh/) as an alternative runtime to Node.js. Bun offers:
+- **Faster startup and execution**
+- **Built-in SQLite** (no native module compilation needed)
+- **Better memory efficiency**
+
+To use Bun instead of Node.js:
+
+1. **Install Bun** (if not already installed):
+   ```bash
+   curl -fsSL https://bun.sh/install | bash
+   ```
+
+2. **Configure claude-mem to use Bun** (choose one method):
+
+   **Option A: Environment variable**
+   ```bash
+   export CLAUDE_MEM_RUNTIME=bun
+   ```
+
+   **Option B: Settings file**
+   Add to `~/.claude-mem/settings.json`:
+   ```json
+   {
+     "env": {
+       "CLAUDE_MEM_RUNTIME": "bun"
+     }
+   }
+   ```
+
+3. **Restart the worker**:
+   ```bash
+   npm run worker:restart
+   ```
+
+Claude-mem will automatically detect and use Bun when configured, falling back to Node.js if Bun is unavailable.
 
 ---
 
@@ -331,42 +344,18 @@ See [CHANGELOG.md](CHANGELOG.md) for complete version history.
 
 ## Configuration
 
-Settings are managed in `~/.claude-mem/settings.json`. The file is auto-created with defaults on first run.
-
-**Available Settings:**
-
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `CLAUDE_MEM_MODEL` | `claude-haiku-4-5` | AI model for observations |
-| `CLAUDE_MEM_WORKER_PORT` | `37777` | Worker service port |
-| `CLAUDE_MEM_DATA_DIR` | `~/.claude-mem` | Data directory location |
-| `CLAUDE_MEM_LOG_LEVEL` | `INFO` | Log verbosity (DEBUG, INFO, WARN, ERROR, SILENT) |
-| `CLAUDE_MEM_PYTHON_VERSION` | `3.13` | Python version for chroma-mcp |
-| `CLAUDE_CODE_PATH` | _(auto-detect)_ | Path to Claude executable |
-| `CLAUDE_MEM_CONTEXT_OBSERVATIONS` | `50` | Number of observations to inject at SessionStart |
-
-**Settings Management:**
+**Model Selection:**
 
 ```bash
-# Edit settings via CLI helper
 ./claude-mem-settings.sh
-
-# Or edit directly
-nano ~/.claude-mem/settings.json
-
-# View current settings
-curl http://localhost:37777/api/settings
 ```
 
-**Settings File Format:**
+**Environment Variables:**
 
-```json
-{
-  "CLAUDE_MEM_MODEL": "claude-haiku-4-5",
-  "CLAUDE_MEM_WORKER_PORT": "37777",
-  "CLAUDE_MEM_CONTEXT_OBSERVATIONS": "50"
-}
-```
+- `CLAUDE_MEM_MODEL` - AI model for processing (default: claude-haiku-4-5)
+- `CLAUDE_MEM_WORKER_PORT` - Worker port (default: 37777)
+- `CLAUDE_MEM_RUNTIME` - Runtime to use: `node` or `bun` (default: node, auto-detects bun if available)
+- `CLAUDE_MEM_DATA_DIR` - Data directory override (dev only)
 
 See [Configuration Guide](https://docs.claude-mem.ai/configuration) for details.
 

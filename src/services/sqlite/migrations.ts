@@ -1,8 +1,7 @@
-import { Database } from 'bun:sqlite';
 import { Migration } from './Database.js';
 
-// Re-export MigrationRunner for SessionStore migration extraction
-export { MigrationRunner } from './migrations/runner.js';
+// Database type - just needs run() method for migrations
+type Database = { run(sql: string, ...params: any[]): any };
 
 /**
  * Initial schema migration - creates all core tables
@@ -173,8 +172,8 @@ export const migration003: Migration = {
     db.run(`
       CREATE TABLE IF NOT EXISTS streaming_sessions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        content_session_id TEXT UNIQUE NOT NULL,
-        memory_session_id TEXT,
+        claude_session_id TEXT UNIQUE NOT NULL,
+        sdk_session_id TEXT,
         project TEXT NOT NULL,
         title TEXT,
         subtitle TEXT,
@@ -188,8 +187,8 @@ export const migration003: Migration = {
         status TEXT NOT NULL DEFAULT 'active'
       );
 
-      CREATE INDEX IF NOT EXISTS idx_streaming_sessions_claude_id ON streaming_sessions(content_session_id);
-      CREATE INDEX IF NOT EXISTS idx_streaming_sessions_sdk_id ON streaming_sessions(memory_session_id);
+      CREATE INDEX IF NOT EXISTS idx_streaming_sessions_claude_id ON streaming_sessions(claude_session_id);
+      CREATE INDEX IF NOT EXISTS idx_streaming_sessions_sdk_id ON streaming_sessions(sdk_session_id);
       CREATE INDEX IF NOT EXISTS idx_streaming_sessions_project ON streaming_sessions(project);
       CREATE INDEX IF NOT EXISTS idx_streaming_sessions_status ON streaming_sessions(status);
       CREATE INDEX IF NOT EXISTS idx_streaming_sessions_started ON streaming_sessions(started_at_epoch DESC);
@@ -216,8 +215,8 @@ export const migration004: Migration = {
     db.run(`
       CREATE TABLE IF NOT EXISTS sdk_sessions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        content_session_id TEXT UNIQUE NOT NULL,
-        memory_session_id TEXT UNIQUE,
+        claude_session_id TEXT UNIQUE NOT NULL,
+        sdk_session_id TEXT UNIQUE,
         project TEXT NOT NULL,
         user_prompt TEXT,
         started_at TEXT NOT NULL,
@@ -227,8 +226,8 @@ export const migration004: Migration = {
         status TEXT CHECK(status IN ('active', 'completed', 'failed')) NOT NULL DEFAULT 'active'
       );
 
-      CREATE INDEX IF NOT EXISTS idx_sdk_sessions_claude_id ON sdk_sessions(content_session_id);
-      CREATE INDEX IF NOT EXISTS idx_sdk_sessions_sdk_id ON sdk_sessions(memory_session_id);
+      CREATE INDEX IF NOT EXISTS idx_sdk_sessions_claude_id ON sdk_sessions(claude_session_id);
+      CREATE INDEX IF NOT EXISTS idx_sdk_sessions_sdk_id ON sdk_sessions(sdk_session_id);
       CREATE INDEX IF NOT EXISTS idx_sdk_sessions_project ON sdk_sessions(project);
       CREATE INDEX IF NOT EXISTS idx_sdk_sessions_status ON sdk_sessions(status);
       CREATE INDEX IF NOT EXISTS idx_sdk_sessions_started ON sdk_sessions(started_at_epoch DESC);
@@ -238,34 +237,34 @@ export const migration004: Migration = {
     db.run(`
       CREATE TABLE IF NOT EXISTS observation_queue (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        memory_session_id TEXT NOT NULL,
+        sdk_session_id TEXT NOT NULL,
         tool_name TEXT NOT NULL,
         tool_input TEXT NOT NULL,
         tool_output TEXT NOT NULL,
         created_at_epoch INTEGER NOT NULL,
         processed_at_epoch INTEGER,
-        FOREIGN KEY(memory_session_id) REFERENCES sdk_sessions(memory_session_id) ON DELETE CASCADE
+        FOREIGN KEY(sdk_session_id) REFERENCES sdk_sessions(sdk_session_id) ON DELETE CASCADE
       );
 
-      CREATE INDEX IF NOT EXISTS idx_observation_queue_sdk_session ON observation_queue(memory_session_id);
+      CREATE INDEX IF NOT EXISTS idx_observation_queue_sdk_session ON observation_queue(sdk_session_id);
       CREATE INDEX IF NOT EXISTS idx_observation_queue_processed ON observation_queue(processed_at_epoch);
-      CREATE INDEX IF NOT EXISTS idx_observation_queue_pending ON observation_queue(memory_session_id, processed_at_epoch);
+      CREATE INDEX IF NOT EXISTS idx_observation_queue_pending ON observation_queue(sdk_session_id, processed_at_epoch);
     `);
 
     // Observations table - stores extracted observations (what SDK decides is important)
     db.run(`
       CREATE TABLE IF NOT EXISTS observations (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        memory_session_id TEXT NOT NULL,
+        sdk_session_id TEXT NOT NULL,
         project TEXT NOT NULL,
         text TEXT NOT NULL,
-        type TEXT NOT NULL,
+        type TEXT NOT NULL CHECK(type IN ('decision', 'bugfix', 'feature', 'refactor', 'discovery')),
         created_at TEXT NOT NULL,
         created_at_epoch INTEGER NOT NULL,
-        FOREIGN KEY(memory_session_id) REFERENCES sdk_sessions(memory_session_id) ON DELETE CASCADE
+        FOREIGN KEY(sdk_session_id) REFERENCES sdk_sessions(sdk_session_id) ON DELETE CASCADE
       );
 
-      CREATE INDEX IF NOT EXISTS idx_observations_sdk_session ON observations(memory_session_id);
+      CREATE INDEX IF NOT EXISTS idx_observations_sdk_session ON observations(sdk_session_id);
       CREATE INDEX IF NOT EXISTS idx_observations_project ON observations(project);
       CREATE INDEX IF NOT EXISTS idx_observations_type ON observations(type);
       CREATE INDEX IF NOT EXISTS idx_observations_created ON observations(created_at_epoch DESC);
@@ -275,7 +274,7 @@ export const migration004: Migration = {
     db.run(`
       CREATE TABLE IF NOT EXISTS session_summaries (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        memory_session_id TEXT UNIQUE NOT NULL,
+        sdk_session_id TEXT UNIQUE NOT NULL,
         project TEXT NOT NULL,
         request TEXT,
         investigated TEXT,
@@ -287,10 +286,10 @@ export const migration004: Migration = {
         notes TEXT,
         created_at TEXT NOT NULL,
         created_at_epoch INTEGER NOT NULL,
-        FOREIGN KEY(memory_session_id) REFERENCES sdk_sessions(memory_session_id) ON DELETE CASCADE
+        FOREIGN KEY(sdk_session_id) REFERENCES sdk_sessions(sdk_session_id) ON DELETE CASCADE
       );
 
-      CREATE INDEX IF NOT EXISTS idx_session_summaries_sdk_session ON session_summaries(memory_session_id);
+      CREATE INDEX IF NOT EXISTS idx_session_summaries_sdk_session ON session_summaries(sdk_session_id);
       CREATE INDEX IF NOT EXISTS idx_session_summaries_project ON session_summaries(project);
       CREATE INDEX IF NOT EXISTS idx_session_summaries_created ON session_summaries(created_at_epoch DESC);
     `);
@@ -332,8 +331,8 @@ export const migration005: Migration = {
     db.run(`
       CREATE TABLE IF NOT EXISTS streaming_sessions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        content_session_id TEXT UNIQUE NOT NULL,
-        memory_session_id TEXT,
+        claude_session_id TEXT UNIQUE NOT NULL,
+        sdk_session_id TEXT,
         project TEXT NOT NULL,
         title TEXT,
         subtitle TEXT,
@@ -351,13 +350,13 @@ export const migration005: Migration = {
     db.run(`
       CREATE TABLE IF NOT EXISTS observation_queue (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        memory_session_id TEXT NOT NULL,
+        sdk_session_id TEXT NOT NULL,
         tool_name TEXT NOT NULL,
         tool_input TEXT NOT NULL,
         tool_output TEXT NOT NULL,
         created_at_epoch INTEGER NOT NULL,
         processed_at_epoch INTEGER,
-        FOREIGN KEY(memory_session_id) REFERENCES sdk_sessions(memory_session_id) ON DELETE CASCADE
+        FOREIGN KEY(sdk_session_id) REFERENCES sdk_sessions(sdk_session_id) ON DELETE CASCADE
       )
     `);
 
@@ -497,7 +496,6 @@ export const migration007: Migration = {
     console.log('⚠️  To rollback, manually recreate the observations and session_summaries tables');
   }
 };
-
 
 /**
  * All migrations in order

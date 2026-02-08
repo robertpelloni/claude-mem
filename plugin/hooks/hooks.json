@@ -1,36 +1,19 @@
 {
   "description": "Claude-mem memory system hooks",
   "hooks": {
-    "Setup": [
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/setup.sh",
-            "timeout": 120
-          }
-        ]
-      }
-    ],
     "SessionStart": [
       {
         "matcher": "startup|clear|compact",
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/smart-install.js\"",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/../scripts/smart-install.js\" && node ${CLAUDE_PLUGIN_ROOT}/scripts/run.js ${CLAUDE_PLUGIN_ROOT}/scripts/context-hook.js",
             "timeout": 300
           },
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/bun-runner.js\" \"${CLAUDE_PLUGIN_ROOT}/scripts/worker-service.cjs\" start",
-            "timeout": 60
-          },
-          {
-            "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/bun-runner.js\" \"${CLAUDE_PLUGIN_ROOT}/scripts/worker-service.cjs\" hook claude-code context",
-            "timeout": 60
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/run.js ${CLAUDE_PLUGIN_ROOT}/scripts/user-message-hook.js",
+            "timeout": 10
           }
         ]
       }
@@ -40,13 +23,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/bun-runner.js\" \"${CLAUDE_PLUGIN_ROOT}/scripts/worker-service.cjs\" start",
-            "timeout": 60
-          },
-          {
-            "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/bun-runner.js\" \"${CLAUDE_PLUGIN_ROOT}/scripts/worker-service.cjs\" hook claude-code session-init",
-            "timeout": 60
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/run.js ${CLAUDE_PLUGIN_ROOT}/scripts/new-hook.js",
+            "timeout": 120
           }
         ]
       }
@@ -57,12 +35,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/bun-runner.js\" \"${CLAUDE_PLUGIN_ROOT}/scripts/worker-service.cjs\" start",
-            "timeout": 60
-          },
-          {
-            "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/bun-runner.js\" \"${CLAUDE_PLUGIN_ROOT}/scripts/worker-service.cjs\" hook claude-code observation",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/run.js ${CLAUDE_PLUGIN_ROOT}/scripts/save-hook.js",
             "timeout": 120
           }
         ]
@@ -73,18 +46,19 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/bun-runner.js\" \"${CLAUDE_PLUGIN_ROOT}/scripts/worker-service.cjs\" start",
-            "timeout": 60
-          },
-          {
-            "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/bun-runner.js\" \"${CLAUDE_PLUGIN_ROOT}/scripts/worker-service.cjs\" hook claude-code summarize",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/run.js ${CLAUDE_PLUGIN_ROOT}/scripts/summary-hook.js",
             "timeout": 120
-          },
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/bun-runner.js\" \"${CLAUDE_PLUGIN_ROOT}/scripts/worker-service.cjs\" hook claude-code session-complete",
-            "timeout": 30
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/run.js ${CLAUDE_PLUGIN_ROOT}/scripts/cleanup-hook.js",
+            "timeout": 120
           }
         ]
       }

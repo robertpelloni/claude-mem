@@ -50,6 +50,7 @@ Settings are managed in `~/.claude-mem/settings.json`. The file is auto-created 
 - `CLAUDE_MEM_MODEL` - Model for observations/summaries (default: claude-haiku-4-5)
 - `CLAUDE_MEM_CONTEXT_OBSERVATIONS` - Observations injected at SessionStart (default: 50)
 - `CLAUDE_MEM_WORKER_PORT` - Worker service port (default: 37777)
+- `CLAUDE_MEM_RUNTIME` - Runtime to use: `node` or `bun` (default: node, auto-detects bun if available)
 
 **System Configuration:**
 - `CLAUDE_MEM_DATA_DIR` - Data directory location (default: ~/.claude-mem)
