@@ -44,20 +44,24 @@ export function useContextPreview(settings: Settings): UseContextPreviewResult {
     setIsLoading(true);
     setError(null);
 
-    const params = new URLSearchParams({
-      project: selectedProject
-    });
+    try {
+      const params = new URLSearchParams({
+        project: selectedProject
+      });
 
-    const response = await fetch(`/api/context/preview?${params}`);
-    const text = await response.text();
+      const response = await fetch(`/api/context/preview?${params}`);
+      const text = await response.text();
 
-    if (response.ok) {
-      setPreview(text);
-    } else {
-      setError('Failed to load preview');
+      if (response.ok) {
+        setPreview(text);
+      } else {
+        setError('Failed to load preview');
+      }
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setIsLoading(false);
     }
-
-    setIsLoading(false);
   }, [selectedProject]);
 
   // Debounced refresh when settings or selectedProject change

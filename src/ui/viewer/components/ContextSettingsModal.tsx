@@ -2,8 +2,6 @@ import React, { useState, useCallback, useEffect } from 'react';
 import type { Settings } from '../types';
 import { TerminalPreview } from './TerminalPreview';
 import { useContextPreview } from '../hooks/useContextPreview';
-import { IntegrationsStatus } from './IntegrationsStatus';
-import { VersionSwitcher } from './VersionSwitcher';
 
 interface ContextSettingsModalProps {
   isOpen: boolean;
@@ -12,6 +10,15 @@ interface ContextSettingsModalProps {
   onSave: (settings: Settings) => void;
   isSaving: boolean;
   saveStatus: string;
+}
+
+// Simple debounce helper
+function debounce<T extends (...args: any[]) => any>(fn: T, ms: number): T {
+  let timeoutId: NodeJS.Timeout;
+  return ((...args: any[]) => {
+    clearTimeout(timeoutId);
+    timeoutId = setTimeout(() => fn(...args), ms);
+  }) as T;
 }
 
 // Collapsible section component
@@ -188,10 +195,31 @@ export function ContextSettingsModal({
 }: ContextSettingsModalProps) {
   const [formState, setFormState] = useState<Settings>(settings);
 
+  // MCP toggle state
+  const [mcpEnabled, setMcpEnabled] = useState(true);
+  const [mcpToggling, setMcpToggling] = useState(false);
+  const [mcpStatus, setMcpStatus] = useState('');
+
+  // Create debounced save function
+  const debouncedSave = useCallback(
+    debounce((newSettings: Settings) => {
+      onSave(newSettings);
+    }, 300),
+    [onSave]
+  );
+
   // Update form state when settings prop changes
   useEffect(() => {
     setFormState(settings);
   }, [settings]);
+
+  // Fetch MCP status on mount
+  useEffect(() => {
+    fetch('/api/mcp/status')
+      .then(res => res.json())
+      .then(data => setMcpEnabled(data.enabled))
+      .catch(error => console.error('Failed to load MCP status:', error));
+  }, []);
 
   // Get context preview based on current form state
   const { preview, isLoading, error, projects, selectedProject, setSelectedProject } = useContextPreview(formState);
@@ -199,11 +227,8 @@ export function ContextSettingsModal({
   const updateSetting = useCallback((key: keyof Settings, value: string) => {
     const newState = { ...formState, [key]: value };
     setFormState(newState);
-  }, [formState]);
-
-  const handleSave = useCallback(() => {
-    onSave(formState);
-  }, [formState, onSave]);
+    debouncedSave(newState);
+  }, [formState, debouncedSave]);
 
   const toggleBoolean = useCallback((key: keyof Settings) => {
     const currentValue = formState[key];
@@ -229,6 +254,36 @@ export function ContextSettingsModal({
     updateSetting(key, values.join(','));
   }, [updateSetting]);
 
+  // Handle MCP toggle
+  const handleMcpToggle = async (enabled: boolean) => {
+    setMcpToggling(true);
+    setMcpStatus('Toggling...');
+
+    try {
+      const response = await fetch('/api/mcp/toggle', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled })
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        setMcpEnabled(result.enabled);
+        setMcpStatus('Updated (restart to apply)');
+        setTimeout(() => setMcpStatus(''), 3000);
+      } else {
+        setMcpStatus(`Error: ${result.error}`);
+        setTimeout(() => setMcpStatus(''), 3000);
+      }
+    } catch (err) {
+      setMcpStatus(`Error: ${err instanceof Error ? err.message : 'Unknown error'}`);
+      setTimeout(() => setMcpStatus(''), 3000);
+    } finally {
+      setMcpToggling(false);
+    }
+  };
+
   // Handle ESC key
   useEffect(() => {
     const handleEsc = (e: KeyboardEvent) => {
@@ -252,6 +307,29 @@ export function ContextSettingsModal({
         <div className="modal-header">
           <h2>Settings</h2>
           <div className="header-controls">
+            <a
+              href="https://docs.claude-mem.ai"
+              target="_blank"
+              rel="noopener noreferrer"
+              title="Documentation"
+              className="modal-icon-link"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+                <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
+              </svg>
+            </a>
+            <a
+              href="https://x.com/Claude_Memory"
+              target="_blank"
+              rel="noopener noreferrer"
+              title="X (Twitter)"
+              className="modal-icon-link"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
+              </svg>
+            </a>
             <label className="preview-selector">
               Preview for:
               <select
@@ -411,163 +489,20 @@ export function ContextSettingsModal({
             {/* Section 4: Advanced */}
             <CollapsibleSection
               title="Advanced"
-              description="AI provider and model selection"
+              description="Model selection and integrations"
               defaultOpen={false}
             >
               <FormField
-                label="AI Provider"
-                tooltip="Choose between Claude (via Agent SDK) or Gemini (via REST API)"
+                label="Model"
+                tooltip="AI model used for generating observations"
               >
                 <select
-                  value={formState.CLAUDE_MEM_PROVIDER || 'claude'}
-                  onChange={(e) => updateSetting('CLAUDE_MEM_PROVIDER', e.target.value)}
+                  value={formState.CLAUDE_MEM_MODEL || 'claude-haiku-4-5'}
+                  onChange={(e) => updateSetting('CLAUDE_MEM_MODEL', e.target.value)}
                 >
-                  <option value="claude">Claude (uses your Claude account)</option>
-                  <option value="gemini">Gemini (uses API key)</option>
-                  <option value="openrouter">OpenRouter (multi-model)</option>
-                </select>
-              </FormField>
-
-              {formState.CLAUDE_MEM_PROVIDER === 'claude' && (
-                <FormField
-                  label="Claude Model"
-                  tooltip="Claude model used for generating observations"
-                >
-                  <select
-                    value={formState.CLAUDE_MEM_MODEL || 'haiku'}
-                    onChange={(e) => updateSetting('CLAUDE_MEM_MODEL', e.target.value)}
-                  >
-                    <option value="haiku">haiku (fastest)</option>
-                    <option value="sonnet">sonnet (balanced)</option>
-                    <option value="opus">opus (highest quality)</option>
-                  </select>
-                </FormField>
-              )}
-
-              {formState.CLAUDE_MEM_PROVIDER === 'gemini' && (
-                <>
-                  <FormField
-                    label="Gemini API Key"
-                    tooltip="Your Google AI Studio API key (or set GEMINI_API_KEY env var)"
-                  >
-                    <input
-                      type="password"
-                      value={formState.CLAUDE_MEM_GEMINI_API_KEY || ''}
-                      onChange={(e) => updateSetting('CLAUDE_MEM_GEMINI_API_KEY', e.target.value)}
-                      placeholder="Enter Gemini API key..."
-                    />
-                  </FormField>
-                  <FormField
-                    label="Gemini Model"
-                    tooltip="Gemini model used for generating observations"
-                  >
-                    <select
-                      value={formState.CLAUDE_MEM_GEMINI_MODEL || 'gemini-2.5-flash-lite'}
-                      onChange={(e) => updateSetting('CLAUDE_MEM_GEMINI_MODEL', e.target.value)}
-                    >
-                      <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite (10 RPM free)</option>
-                      <option value="gemini-2.5-flash">gemini-2.5-flash (5 RPM free)</option>
-                      <option value="gemini-3-flash-preview">gemini-3-flash-preview (5 RPM free)</option>
-                    </select>
-                  </FormField>
-                  <div className="toggle-group" style={{ marginTop: '8px' }}>
-                    <ToggleSwitch
-                      id="gemini-rate-limiting"
-                      label="Rate Limiting"
-                      description="Enable for free tier (10-30 RPM). Disable if you have billing set up (1000+ RPM)."
-                      checked={formState.CLAUDE_MEM_GEMINI_RATE_LIMITING_ENABLED === 'true'}
-                      onChange={(checked) => updateSetting('CLAUDE_MEM_GEMINI_RATE_LIMITING_ENABLED', checked ? 'true' : 'false')}
-                    />
-                  </div>
-                </>
-              )}
-
-              {formState.CLAUDE_MEM_PROVIDER === 'openrouter' && (
-                <>
-                  <FormField
-                    label="OpenRouter API Key"
-                    tooltip="Your OpenRouter API key from openrouter.ai (or set OPENROUTER_API_KEY env var)"
-                  >
-                    <input
-                      type="password"
-                      value={formState.CLAUDE_MEM_OPENROUTER_API_KEY || ''}
-                      onChange={(e) => updateSetting('CLAUDE_MEM_OPENROUTER_API_KEY', e.target.value)}
-                      placeholder="Enter OpenRouter API key..."
-                    />
-                  </FormField>
-                  <FormField
-                    label="OpenRouter Model"
-                    tooltip="Model identifier from OpenRouter (e.g., anthropic/claude-3.5-sonnet, google/gemini-2.0-flash-thinking-exp)"
-                  >
-                    <input
-                      type="text"
-                      value={formState.CLAUDE_MEM_OPENROUTER_MODEL || 'xiaomi/mimo-v2-flash:free'}
-                      onChange={(e) => updateSetting('CLAUDE_MEM_OPENROUTER_MODEL', e.target.value)}
-                      placeholder="e.g., xiaomi/mimo-v2-flash:free"
-                    />
-                  </FormField>
-                  <FormField
-                    label="Site URL (Optional)"
-                    tooltip="Your site URL for OpenRouter analytics (optional)"
-                  >
-                    <input
-                      type="text"
-                      value={formState.CLAUDE_MEM_OPENROUTER_SITE_URL || ''}
-                      onChange={(e) => updateSetting('CLAUDE_MEM_OPENROUTER_SITE_URL', e.target.value)}
-                      placeholder="https://yoursite.com"
-                    />
-                  </FormField>
-                  <FormField
-                    label="App Name (Optional)"
-                    tooltip="Your app name for OpenRouter analytics (optional)"
-                  >
-                    <input
-                      type="text"
-                      value={formState.CLAUDE_MEM_OPENROUTER_APP_NAME || 'claude-mem'}
-                      onChange={(e) => updateSetting('CLAUDE_MEM_OPENROUTER_APP_NAME', e.target.value)}
-                      placeholder="claude-mem"
-                    />
-                  </FormField>
-                </>
-              )}
-
-              <div className="toggle-group" style={{ marginTop: '12px' }}>
-                <ToggleSwitch
-                  id="show-last-summary"
-                  label="Include last summary"
-                  description="Add previous session's summary to context"
-                  checked={formState.CLAUDE_MEM_CONTEXT_SHOW_LAST_SUMMARY === 'true'}
-                  onChange={() => toggleBoolean('CLAUDE_MEM_CONTEXT_SHOW_LAST_SUMMARY')}
-                />
-                <ToggleSwitch
-                  id="show-last-message"
-                  label="Include last message"
-                  description="Add previous session's final message"
-                  checked={formState.CLAUDE_MEM_CONTEXT_SHOW_LAST_MESSAGE === 'true'}
-                  onChange={() => toggleBoolean('CLAUDE_MEM_CONTEXT_SHOW_LAST_MESSAGE')}
-                />
-              </div>
-            </CollapsibleSection>
-
-            {/* Section 5: System Configuration */}
-            <CollapsibleSection
-              title="System"
-              description="Core configuration (requires restart)"
-              defaultOpen={false}
-            >
-              <FormField
-                label="Log Level"
-                tooltip="Verbosity of worker logs"
-              >
-                <select
-                  value={formState.CLAUDE_MEM_LOG_LEVEL || 'INFO'}
-                  onChange={(e) => updateSetting('CLAUDE_MEM_LOG_LEVEL', e.target.value)}
-                >
-                  <option value="DEBUG">DEBUG</option>
-                  <option value="INFO">INFO</option>
-                  <option value="WARN">WARN</option>
-                  <option value="ERROR">ERROR</option>
-                  <option value="SILENT">SILENT</option>
+                  <option value="claude-haiku-4-5">claude-haiku-4-5 (fastest)</option>
+                  <option value="claude-sonnet-4-5">claude-sonnet-4-5 (balanced)</option>
+                  <option value="claude-opus-4">claude-opus-4 (highest quality)</option>
                 </select>
               </FormField>
 
@@ -584,55 +519,32 @@ export function ContextSettingsModal({
                 />
               </FormField>
 
-              <FormField
-                label="Data Directory"
-                tooltip="Path to store database and logs"
-              >
-                <input
-                  type="text"
-                  value={formState.CLAUDE_MEM_DATA_DIR || ''}
-                  onChange={(e) => updateSetting('CLAUDE_MEM_DATA_DIR', e.target.value)}
+              <div className="toggle-group" style={{ marginTop: '12px' }}>
+                <ToggleSwitch
+                  id="mcp-enabled"
+                  label="MCP search server"
+                  description={mcpStatus || "Enable Model Context Protocol search"}
+                  checked={mcpEnabled}
+                  onChange={handleMcpToggle}
+                  disabled={mcpToggling}
                 />
-              </FormField>
-
-              <FormField
-                label="Python Version"
-                tooltip="Python version for Chroma integration (e.g. 3.13)"
-              >
-                <input
-                  type="text"
-                  value={formState.CLAUDE_MEM_PYTHON_VERSION || '3.13'}
-                  placeholder="3.13"
-                  onChange={(e) => updateSetting('CLAUDE_MEM_PYTHON_VERSION', e.target.value)}
+                <ToggleSwitch
+                  id="show-last-summary"
+                  label="Include last summary"
+                  description="Add previous session's summary to context"
+                  checked={formState.CLAUDE_MEM_CONTEXT_SHOW_LAST_SUMMARY === 'true'}
+                  onChange={() => toggleBoolean('CLAUDE_MEM_CONTEXT_SHOW_LAST_SUMMARY')}
                 />
-              </FormField>
-            </CollapsibleSection>
-
-            {/* Section 6: Integrations & Updates */}
-            <CollapsibleSection
-              title="Integrations & Updates"
-              description="Manage external systems and versions"
-              defaultOpen={false}
-            >
-              <VersionSwitcher />
-              <div style={{ height: '20px' }} />
-              <IntegrationsStatus />
+                <ToggleSwitch
+                  id="show-last-message"
+                  label="Include last message"
+                  description="Add previous session's final message"
+                  checked={formState.CLAUDE_MEM_CONTEXT_SHOW_LAST_MESSAGE === 'true'}
+                  onChange={() => toggleBoolean('CLAUDE_MEM_CONTEXT_SHOW_LAST_MESSAGE')}
+                />
+              </div>
             </CollapsibleSection>
           </div>
-        </div>
-
-        {/* Footer with Save button */}
-        <div className="modal-footer">
-          <div className="save-status">
-            {saveStatus && <span className={saveStatus.includes('✓') ? 'success' : saveStatus.includes('✗') ? 'error' : ''}>{saveStatus}</span>}
-          </div>
-          <button
-            className="save-btn"
-            onClick={handleSave}
-            disabled={isSaving}
-          >
-            {isSaving ? 'Saving...' : 'Save'}
-          </button>
         </div>
       </div>
     </div>
