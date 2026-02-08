@@ -21,23 +21,19 @@ export interface ActiveSession {
   startTime: number;
   cumulativeInputTokens: number;   // Track input tokens for discovery cost
   cumulativeOutputTokens: number;  // Track output tokens for discovery cost
-  currentToolUseId: string | null; // Endless Mode: currently processing tool_use_id
-  pendingObservationResolvers: Map<string, (observation: any) => void>; // Endless Mode: wait for observations
-  lastObservationToolUseId: string | null; // Rolling replacement: tool_use_id of most recent observation
-  toolUsesInCurrentCycle: string[]; // Rolling replacement: tool_use_ids since last observation
+  currentToolUseId: string | null; // For Endless Mode v7.1: track tool_use_id for current observation
 }
 
 export interface PendingMessage {
-  type: 'observation' | 'summarize' | 'continuation';
+  type: 'observation' | 'summarize';
   tool_name?: string;
   tool_input?: any;
   tool_response?: any;
   prompt_number?: number;
   cwd?: string;
-  tool_use_id?: string; // Endless Mode: link observation to transcript tool use
+  tool_use_id?: string;  // For Endless Mode v7.1 observation correlation
   last_user_message?: string;
   last_assistant_message?: string;
-  user_prompt?: string; // For continuation messages
 }
 
 export interface ObservationData {
@@ -46,7 +42,7 @@ export interface ObservationData {
   tool_response: any;
   prompt_number: number;
   cwd?: string;
-  tool_use_id?: string; // Endless Mode: link observation to transcript tool use
+  tool_use_id?: string;  // For Endless Mode v7.1 observation correlation
 }
 
 // ============================================================================
@@ -161,7 +157,6 @@ export interface ParsedObservation {
   text: string;
   concepts: string[];
   files: string[];
-  tool_use_id?: string | null; // Endless Mode: link observation to transcript tool use
 }
 
 export interface ParsedSummary {

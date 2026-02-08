@@ -8,8 +8,7 @@
 import express, { Request, Response } from 'express';
 import { getWorkerPort } from '../../../../shared/worker-utils.js';
 import { logger } from '../../../../utils/logger.js';
-import { stripMemoryTagsFromJson, stripMemoryTagsFromPrompt } from '../../../../utils/tag-stripping.js';
-import { happy_path_error__with_fallback } from '../../../../utils/silent-debug.js';
+import { stripMemoryTagsFromJson } from '../../../../utils/tag-stripping.js';
 import { SessionManager } from '../../SessionManager.js';
 import { DatabaseManager } from '../../DatabaseManager.js';
 import { SDKAgent } from '../../SDKAgent.js';
@@ -18,8 +17,6 @@ import { BaseRouteHandler } from '../BaseRouteHandler.js';
 import { SessionEventBroadcaster } from '../../events/SessionEventBroadcaster.js';
 import { SessionCompletionHandler } from '../../session/SessionCompletionHandler.js';
 import { PrivacyCheckValidator } from '../../validation/PrivacyCheckValidator.js';
-import { SettingsDefaultsManager } from '../../../../shared/SettingsDefaultsManager.js';
-import { USER_SETTINGS_PATH } from '../../../../shared/paths.js';
 
 export class SessionRoutes extends BaseRouteHandler {
   private completionHandler: SessionCompletionHandler;
@@ -73,7 +70,8 @@ export class SessionRoutes extends BaseRouteHandler {
     app.post('/sessions/:sessionDbId/complete', this.handleSessionComplete.bind(this));
 
     // New session endpoints (use claudeSessionId)
-    app.post('/api/sessions/init', this.handleSessionInitByClaudeId.bind(this));
+    app.post('/api/sessions/pre-tool-use', this.handlePreToolUse.bind(this));
+    app.get('/api/sessions/observations-for-tool-use/:toolUseId', this.handleGetObservationsForToolUse.bind(this));
     app.post('/api/sessions/observations', this.handleObservationsByClaudeId.bind(this));
     app.post('/api/sessions/summarize', this.handleSummarizeByClaudeId.bind(this));
     app.post('/api/sessions/complete', this.handleSessionCompleteByClaudeId.bind(this));
@@ -253,45 +251,72 @@ export class SessionRoutes extends BaseRouteHandler {
   });
 
   /**
+   * Track tool execution start timestamp (pre-tool-use-hook uses this)
+   * POST /api/sessions/pre-tool-use
+   * Body: { claudeSessionId, toolUseId, timestamp }
+   *
+   * Phase 1: Just log for now - will be used in Phase 2 for observation correlation
+   */
+  private handlePreToolUse = this.wrapHandler((req: Request, res: Response): void => {
+    const { claudeSessionId, toolUseId, timestamp } = req.body;
+
+    if (!claudeSessionId || !toolUseId) {
+      return this.badRequest(res, 'Missing claudeSessionId or toolUseId');
+    }
+
+    logger.debug('HOOK', 'PreToolUse tracking received', {
+      claudeSessionId,
+      toolUseId,
+      timestamp
+    });
+
+    // Phase 1: Just acknowledge - Phase 2 will store this for observation correlation
+    res.json({ status: 'tracked' });
+  });
+
+  /**
+   * Get observations for a specific tool_use_id (Endless Mode v7.1)
+   * GET /api/sessions/observations-for-tool-use/:toolUseId
+   *
+   * Returns all observations created for this tool execution
+   */
+  private handleGetObservationsForToolUse = this.wrapHandler((req: Request, res: Response): void => {
+    const { toolUseId } = req.params;
+
+    if (!toolUseId) {
+      return this.badRequest(res, 'Missing toolUseId');
+    }
+
+    const store = this.dbManager.getSessionStore();
+    const observations = store.getObservationsByToolUseId(toolUseId);
+
+    logger.debug('HOOK', 'Observations retrieved for tool_use_id', {
+      toolUseId,
+      count: observations.length
+    });
+
+    res.json({ observations });
+  });
+
+  /**
    * Queue observations by claudeSessionId (post-tool-use-hook uses this)
    * POST /api/sessions/observations
-   * Body: { claudeSessionId, tool_name, tool_input, tool_response, cwd }
+   * Body: { claudeSessionId, tool_name, tool_input, tool_response, cwd, toolUseId }
+   * Query: ?wait_until_obs_is_saved=true (optional, for Endless Mode v7.1)
    */
-  private handleObservationsByClaudeId = this.wrapHandler((req: Request, res: Response): void => {
-    const { claudeSessionId, tool_name, tool_input, tool_response, cwd } = req.body;
+  private handleObservationsByClaudeId = this.wrapHandler(async (req: Request, res: Response): Promise<void> => {
+    const { claudeSessionId, tool_name, tool_input, tool_response, cwd, toolUseId } = req.body;
+    const waitForCompletion = req.query.wait_until_obs_is_saved === 'true';
+
+    logger.info('HTTP', 'Observation request received', {
+      claudeSessionId,
+      tool_name,
+      waitForCompletion,
+      queryParam: req.query.wait_until_obs_is_saved
+    });
 
     if (!claudeSessionId) {
       return this.badRequest(res, 'Missing claudeSessionId');
-    }
-
-    // Load skip tools from settings
-    const settings = SettingsDefaultsManager.loadFromFile(USER_SETTINGS_PATH);
-    const skipTools = new Set(settings.CLAUDE_MEM_SKIP_TOOLS.split(',').map(t => t.trim()).filter(Boolean));
-
-    // Skip low-value or meta tools
-    if (skipTools.has(tool_name)) {
-      logger.debug('SESSION', 'Skipping observation for tool', { tool_name });
-      res.json({ status: 'skipped', reason: 'tool_excluded' });
-      return;
-    }
-
-    // Skip meta-observations: file operations on session-memory files
-    const fileOperationTools = new Set(['Edit', 'Write', 'Read', 'NotebookEdit']);
-    if (fileOperationTools.has(tool_name) && tool_input) {
-      try {
-        const filePath = tool_input.file_path || tool_input.notebook_path;
-        if (filePath && filePath.includes('session-memory')) {
-          logger.debug('SESSION', 'Skipping meta-observation for session-memory file', {
-            tool_name,
-            file_path: filePath
-          });
-          res.json({ status: 'skipped', reason: 'session_memory_meta' });
-          return;
-        }
-      } catch (error) {
-        // If we can't parse tool_input, continue normally
-        logger.debug('SESSION', 'Could not check file_path for session-memory filter', { tool_name }, error);
-      }
     }
 
     const store = this.dbManager.getSessionStore();
@@ -323,7 +348,6 @@ export class SessionRoutes extends BaseRouteHandler {
         ? stripMemoryTagsFromJson(JSON.stringify(tool_input))
         : '{}';
     } catch (error) {
-      logger.debug('SESSION', 'Failed to serialize tool_input', { sessionDbId }, error);
       cleanedToolInput = '{"error": "Failed to serialize tool_input"}';
     }
 
@@ -332,7 +356,6 @@ export class SessionRoutes extends BaseRouteHandler {
         ? stripMemoryTagsFromJson(JSON.stringify(tool_response))
         : '{}';
     } catch (error) {
-      logger.debug('SESSION', 'Failed to serialize tool_result', { sessionDbId }, error);
       cleanedToolResponse = '{"error": "Failed to serialize tool_response"}';
     }
 
@@ -342,20 +365,69 @@ export class SessionRoutes extends BaseRouteHandler {
       tool_input: cleanedToolInput,
       tool_response: cleanedToolResponse,
       prompt_number: promptNumber,
-      cwd: happy_path_error__with_fallback(
-        'Missing cwd when queueing observation in SessionRoutes',
-        { sessionDbId, tool_name },
-        cwd || ''
-      )
+      cwd: cwd || '',
+      tool_use_id: toolUseId  // Pass tool_use_id for Endless Mode correlation
     });
 
     // Ensure SDK agent is running
     this.ensureGeneratorRunning(sessionDbId, 'observation');
 
-    // Broadcast observation queued event
-    this.eventBroadcaster.broadcastObservationQueued(sessionDbId);
+    if (!waitForCompletion) {
+      // Async mode (current behavior)
+      logger.info('HTTP', 'Using async mode (not waiting)', {
+        sessionId: sessionDbId
+      });
+      this.eventBroadcaster.broadcastObservationQueued(sessionDbId);
+      res.json({ status: 'queued' });
+      return;
+    }
 
-    res.json({ status: 'queued' });
+    // SYNCHRONOUS MODE: Wait for SDK response to be processed (Endless Mode v7.1)
+    logger.info('HTTP', 'Entering synchronous wait mode', {
+      sessionId: sessionDbId
+    });
+    try {
+      const observation = await this.sessionManager.waitForNextObservation(
+        sessionDbId,
+        90000  // 90 second timeout (safety margin within 120s hook timeout)
+      );
+      logger.info('HTTP', 'Wait completed, sending response', {
+        sessionId: sessionDbId,
+        hasObservation: observation !== null
+      });
+
+      // Handle both observation and no-observation responses
+      if (observation === null) {
+        // SDK returned <no_observation> or plain text - not stored
+        res.json({
+          status: 'completed',
+          observation: null,
+          message: 'SDK response received but no observation was created'
+        });
+      } else {
+        // Observation was created and stored
+        res.json({
+          status: 'completed',
+          observation: {
+            id: observation.id,
+            type: observation.type,
+            title: observation.title,
+            subtitle: observation.subtitle,
+            narrative: observation.narrative,
+            concepts: observation.concepts,
+            files_read: observation.files_read,
+            files_modified: observation.files_modified,
+            created_at_epoch: observation.created_at_epoch
+          }
+        });
+      }
+    } catch (error: any) {
+      // Timeout or processing error
+      res.status(408).json({
+        status: 'timeout',
+        error: error.message
+      });
+    }
   });
 
   /**
@@ -392,15 +464,7 @@ export class SessionRoutes extends BaseRouteHandler {
     }
 
     // Queue summarize
-    this.sessionManager.queueSummarize(
-      sessionDbId,
-      happy_path_error__with_fallback(
-        'Missing last_user_message when queueing summary in SessionRoutes',
-        { sessionDbId },
-        last_user_message || ''
-      ),
-      last_assistant_message
-    );
+    this.sessionManager.queueSummarize(sessionDbId, last_user_message || '', last_assistant_message);
 
     // Ensure SDK agent is running
     this.ensureGeneratorRunning(sessionDbId, 'summarize');
@@ -434,69 +498,5 @@ export class SessionRoutes extends BaseRouteHandler {
     }
 
     res.json({ success: true });
-  });
-
-  /**
-   * Initialize session by claudeSessionId (new-hook uses this)
-   * POST /api/sessions/init
-   * Body: { claudeSessionId, project, prompt }
-   *
-   * Performs all session initialization DB operations:
-   * - Creates/gets SDK session (idempotent)
-   * - Increments prompt counter
-   * - Saves user prompt (with privacy tag stripping)
-   *
-   * Returns: { sessionDbId, promptNumber, skipped: boolean, reason?: string }
-   */
-  private handleSessionInitByClaudeId = this.wrapHandler((req: Request, res: Response): void => {
-    const { claudeSessionId, project, prompt } = req.body;
-
-    // Validate required parameters
-    if (!this.validateRequired(req, res, ['claudeSessionId', 'project', 'prompt'])) {
-      return;
-    }
-
-    const store = this.dbManager.getSessionStore();
-
-    // Step 1: Create/get SDK session (idempotent INSERT OR IGNORE)
-    const sessionDbId = store.createSDKSession(claudeSessionId, project, prompt);
-
-    // Step 2: Increment prompt counter
-    const promptNumber = store.incrementPromptCounter(sessionDbId);
-
-    // Step 3: Strip privacy tags from prompt
-    const cleanedPrompt = stripMemoryTagsFromPrompt(prompt);
-
-    // Step 4: Check if prompt is entirely private
-    if (!cleanedPrompt || cleanedPrompt.trim() === '') {
-      logger.debug('HOOK', 'Session init - prompt entirely private', {
-        sessionId: sessionDbId,
-        promptNumber,
-        originalLength: prompt.length
-      });
-
-      res.json({
-        sessionDbId,
-        promptNumber,
-        skipped: true,
-        reason: 'private'
-      });
-      return;
-    }
-
-    // Step 5: Save cleaned user prompt
-    store.saveUserPrompt(claudeSessionId, promptNumber, cleanedPrompt);
-
-    logger.info('SESSION', 'Session initialized via HTTP', {
-      sessionId: sessionDbId,
-      promptNumber,
-      project
-    });
-
-    res.json({
-      sessionDbId,
-      promptNumber,
-      skipped: false
-    });
   });
 }

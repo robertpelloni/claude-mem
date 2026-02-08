@@ -92,7 +92,8 @@ export class SessionManager {
       lastPromptNumber: promptNumber || this.dbManager.getSessionStore().getPromptCounter(sessionDbId),
       startTime: Date.now(),
       cumulativeInputTokens: 0,
-      cumulativeOutputTokens: 0
+      cumulativeOutputTokens: 0,
+      currentToolUseId: null  // For Endless Mode v7.1
     };
 
     this.sessions.set(sessionDbId, session);
@@ -138,7 +139,8 @@ export class SessionManager {
       tool_input: data.tool_input,
       tool_response: data.tool_response,
       prompt_number: data.prompt_number,
-      cwd: data.cwd
+      cwd: data.cwd,
+      tool_use_id: data.tool_use_id  // Pass tool_use_id for Endless Mode correlation
     });
 
     const afterDepth = session.pendingMessages.length;
@@ -292,6 +294,69 @@ export class SessionManager {
       }
     }
     return false;
+  }
+
+  /**
+   * Get session emitter for event listening
+   */
+  getSessionEmitter(sessionDbId: number): EventEmitter | undefined {
+    return this.sessionQueues.get(sessionDbId);
+  }
+
+  /**
+   * Wait for the next SDK response to be processed
+   * Returns the observation (or null if no observation was created)
+   * Throws on timeout
+   *
+   * CRITICAL: Waits for 'sdk_response_complete' event which fires for ALL responses,
+   * including <no_observation> responses. This prevents blocking when SDK skips storage.
+   */
+  async waitForNextObservation(
+    sessionDbId: number,
+    timeoutMs: number
+  ): Promise<any> {
+    return new Promise((resolve, reject) => {
+      const emitter = this.sessionQueues.get(sessionDbId);
+      if (!emitter) {
+        logger.error('SESSION', 'No emitter found - cannot wait for observation', {
+          sessionId: sessionDbId
+        });
+        reject(new Error('Session not found'));
+        return;
+      }
+
+      logger.debug('SESSION', 'Waiting for sdk_response_complete event', {
+        sessionId: sessionDbId,
+        timeoutMs
+      });
+
+      const timeoutId = setTimeout(() => {
+        emitter.off('sdk_response_complete', handler);
+        logger.warn('SESSION', 'Timeout waiting for SDK response', {
+          sessionId: sessionDbId,
+          timeoutMs
+        });
+        reject(new Error('Timeout waiting for SDK response'));
+      }, timeoutMs);
+
+      const handler = (response: any) => {
+        clearTimeout(timeoutId);
+        emitter.off('sdk_response_complete', handler);
+
+        // Response format: { observations: [...], isEmpty: boolean }
+        const observation = response?.observations?.[0] ?? null;
+
+        logger.debug('SESSION', 'Received sdk_response_complete event', {
+          sessionId: sessionDbId,
+          hasObservation: observation !== null,
+          obsId: observation?.id,
+          type: observation?.type
+        });
+        resolve(observation);
+      };
+
+      emitter.once('sdk_response_complete', handler);
+    });
   }
 
   /**

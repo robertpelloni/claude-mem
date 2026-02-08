@@ -222,6 +222,7 @@ export interface ObservationRow {
   tool_use_id: string | null; // Endless Mode: Agent SDK tool use ID for context compression
   created_at: string;
   created_at_epoch: number;
+  tool_use_id: string | null;
 }
 
 export interface SessionSummaryRow {
