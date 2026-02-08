@@ -4,7 +4,6 @@
  */
 
 import { readFileSync } from 'fs';
-import { happy_path_error__with_fallback } from './silent-debug.js';
 import type {
   TranscriptEntry,
   UserTranscriptEntry,
@@ -202,10 +201,10 @@ export class TranscriptParser {
       (acc, entry) => {
         const usage = entry.message.usage;
         if (usage) {
-          acc.inputTokens += usage.input_tokens || happy_path_error__with_fallback('TranscriptParser.getTotalTokenUsage: usage.input_tokens is null', { timestamp: entry.timestamp }, 0);
-          acc.outputTokens += usage.output_tokens || happy_path_error__with_fallback('TranscriptParser.getTotalTokenUsage: usage.output_tokens is null', { timestamp: entry.timestamp }, 0);
-          acc.cacheCreationTokens += usage.cache_creation_input_tokens || happy_path_error__with_fallback('TranscriptParser.getTotalTokenUsage: usage.cache_creation_input_tokens is null', { timestamp: entry.timestamp }, 0);
-          acc.cacheReadTokens += usage.cache_read_input_tokens || happy_path_error__with_fallback('TranscriptParser.getTotalTokenUsage: usage.cache_read_input_tokens is null', { timestamp: entry.timestamp }, 0);
+          acc.inputTokens += usage.input_tokens || 0;
+          acc.outputTokens += usage.output_tokens || 0;
+          acc.cacheCreationTokens += usage.cache_creation_input_tokens || 0;
+          acc.cacheReadTokens += usage.cache_read_input_tokens || 0;
         }
         return acc;
       },
@@ -225,7 +224,7 @@ export class TranscriptParser {
     const entriesByType: Record<string, number> = {};
 
     for (const entry of this.entries) {
-      entriesByType[entry.type] = (entriesByType[entry.type] || happy_path_error__with_fallback('TranscriptParser.getParseStats: entriesByType[entry.type] is undefined', { entryType: entry.type }, 0)) + 1;
+      entriesByType[entry.type] = (entriesByType[entry.type] || 0) + 1;
     }
 
     const totalLines = this.entries.length + this.parseErrors.length;

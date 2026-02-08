@@ -11,13 +11,13 @@
 import { execSync } from 'child_process';
 import { homedir } from 'os';
 import path from 'path';
+import { existsSync, readFileSync } from 'fs';
 import { DatabaseManager } from './DatabaseManager.js';
 import { SessionManager } from './SessionManager.js';
 import { logger } from '../../utils/logger.js';
 import { silentDebug } from '../../utils/silent-debug.js';
 import { parseObservations, parseSummary } from '../../sdk/parser.js';
 import { buildInitPrompt, buildObservationPrompt, buildSummaryPrompt, buildContinuationPrompt } from '../../sdk/prompts.js';
-import { SettingsDefaultsManager } from './settings/SettingsDefaultsManager.js';
 import type { ActiveSession, SDKUserMessage, PendingMessage } from '../worker-types.js';
 
 // Import Agent SDK (assumes it's installed)
@@ -44,21 +44,7 @@ export class SDKAgent {
 
       // Get model ID and disallowed tools
       const modelId = this.getModelId();
-      // Memory agent is OBSERVER ONLY - no tools allowed
-      const disallowedTools = [
-        'Bash',           // Prevent infinite loops
-        'Read',           // No file reading
-        'Write',          // No file writing
-        'Edit',           // No file editing
-        'Grep',           // No code searching
-        'Glob',           // No file pattern matching
-        'WebFetch',       // No web fetching
-        'WebSearch',      // No web searching
-        'Task',           // No spawning sub-agents
-        'NotebookEdit',   // No notebook editing
-        'AskUserQuestion',// No asking questions
-        'TodoWrite'       // No todo management
-      ];
+      const disallowedTools = ['Bash']; // Prevent infinite loops
 
       // Create message generator (event-driven)
       const messageGenerator = this.createMessageGenerator(session);
@@ -85,34 +71,6 @@ export class SDKAgent {
 
           const responseSize = textContent.length;
 
-          // Capture token state BEFORE updating (for delta calculation)
-          const tokensBeforeResponse = session.cumulativeInputTokens + session.cumulativeOutputTokens;
-
-          // Extract and track token usage
-          const usage = message.message.usage;
-          if (usage) {
-            session.cumulativeInputTokens += usage.input_tokens || 0;
-            session.cumulativeOutputTokens += usage.output_tokens || 0;
-
-            // Cache creation counts as discovery, cache read doesn't
-            if (usage.cache_creation_input_tokens) {
-              session.cumulativeInputTokens += usage.cache_creation_input_tokens;
-            }
-
-            logger.debug('SDK', 'Token usage captured', {
-              sessionId: session.sessionDbId,
-              inputTokens: usage.input_tokens,
-              outputTokens: usage.output_tokens,
-              cacheCreation: usage.cache_creation_input_tokens || 0,
-              cacheRead: usage.cache_read_input_tokens || 0,
-              cumulativeInput: session.cumulativeInputTokens,
-              cumulativeOutput: session.cumulativeOutputTokens
-            });
-          }
-
-          // Calculate discovery tokens (delta for this response only)
-          const discoveryTokens = (session.cumulativeInputTokens + session.cumulativeOutputTokens) - tokensBeforeResponse;
-
           // Only log non-empty responses (filter out noise)
           if (responseSize > 0) {
             const truncatedResponse = responseSize > 100
@@ -123,8 +81,8 @@ export class SDKAgent {
               promptNumber: session.lastPromptNumber
             }, truncatedResponse);
 
-            // Parse and process response with discovery token delta
-            await this.processSDKResponse(session, textContent, worker, discoveryTokens);
+            // Parse and process response
+            await this.processSDKResponse(session, textContent, worker);
           }
         }
 
@@ -205,9 +163,6 @@ export class SDKAgent {
           session.lastPromptNumber = message.prompt_number;
         }
 
-        // Track current tool_use_id for Endless Mode observation correlation
-        session.currentToolUseId = message.tool_use_id || null;
-
         yield {
           type: 'user',
           message: {
@@ -249,14 +204,10 @@ export class SDKAgent {
 
   /**
    * Process SDK response text (parse XML, save to database, sync to Chroma)
-   * @param discoveryTokens - Token cost for discovering this response (delta, not cumulative)
    */
-  private async processSDKResponse(session: ActiveSession, text: string, worker: any | undefined, discoveryTokens: number): Promise<void> {
+  private async processSDKResponse(session: ActiveSession, text: string, worker?: any): Promise<void> {
     // Parse observations
     const observations = parseObservations(text, session.claudeSessionId);
-
-    // Track saved observations for Endless Mode event
-    const savedObservations: any[] = [];
 
     // Store observations
     for (const obs of observations) {
@@ -264,9 +215,7 @@ export class SDKAgent {
         session.claudeSessionId,
         session.project,
         obs,
-        session.lastPromptNumber,
-        discoveryTokens,
-        session.currentToolUseId  // Pass tool_use_id for Endless Mode correlation
+        session.lastPromptNumber
       );
 
       // Log observation details
@@ -275,22 +224,9 @@ export class SDKAgent {
         obsId,
         type: obs.type,
         title: obs.title || silentDebug('obs.title is null', { obsId, type: obs.type }, '(untitled)'),
-        filesRead: obs.files_read?.length ?? (silentDebug('obs.files_read is null/undefined', { obsId }), 0),
-        filesModified: obs.files_modified?.length ?? (silentDebug('obs.files_modified is null/undefined', { obsId }), 0),
-        concepts: obs.concepts?.length ?? (silentDebug('obs.concepts is null/undefined', { obsId }), 0)
-      });
-
-      // Track for Endless Mode event
-      savedObservations.push({
-        id: obsId,
-        type: obs.type,
-        title: obs.title,
-        subtitle: obs.subtitle,
-        narrative: obs.narrative,
-        concepts: obs.concepts,
-        files_read: obs.files_read,
-        files_modified: obs.files_modified,
-        created_at_epoch: createdAtEpoch
+        filesRead: obs.files_read?.length ?? silentDebug('obs.files_read is null/undefined', { obsId }, '0'),
+        filesModified: obs.files_modified?.length ?? silentDebug('obs.files_modified is null/undefined', { obsId }, '0'),
+        concepts: obs.concepts?.length ?? silentDebug('obs.concepts is null/undefined', { obsId }, '0')
       });
 
       // Sync to Chroma with error logging
@@ -303,8 +239,7 @@ export class SDKAgent {
         session.project,
         obs,
         session.lastPromptNumber,
-        createdAtEpoch,
-        discoveryTokens
+        createdAtEpoch
       ).then(() => {
         const chromaDuration = Date.now() - chromaStart;
         logger.debug('CHROMA', 'Observation synced', {
@@ -347,9 +282,6 @@ export class SDKAgent {
       }
     }
 
-    // Clear current tool_use_id after processing (prevent leaking to next message)
-    session.currentToolUseId = null;
-
     // Parse summary
     const summary = parseSummary(text, session.sessionDbId);
 
@@ -359,8 +291,7 @@ export class SDKAgent {
         session.claudeSessionId,
         session.project,
         summary,
-        session.lastPromptNumber,
-        discoveryTokens
+        session.lastPromptNumber
       );
 
       // Log summary details
@@ -381,8 +312,7 @@ export class SDKAgent {
         session.project,
         summary,
         session.lastPromptNumber,
-        createdAtEpoch,
-        discoveryTokens
+        createdAtEpoch
       ).then(() => {
         const chromaDuration = Date.now() - chromaStart;
         logger.debug('CHROMA', 'Summary synced', {
@@ -423,26 +353,6 @@ export class SDKAgent {
     if (worker && typeof worker.broadcastProcessingStatus === 'function') {
       worker.broadcastProcessingStatus();
     }
-
-    // CRITICAL: Always emit SDK response completion event for Endless Mode v7.1
-    // This unblocks synchronous waiting even when no observations were created
-    const emitter = this.sessionManager.getSessionEmitter(session.sessionDbId);
-    if (emitter) {
-      logger.debug('SDK', 'Emitting sdk_response_complete', {
-        sessionId: session.sessionDbId,
-        observationCount: savedObservations.length
-      });
-
-      // Emit once per SDK response with all observations (or empty array)
-      emitter.emit('sdk_response_complete', {
-        observations: savedObservations,
-        isEmpty: savedObservations.length === 0
-      });
-    } else {
-      logger.error('SDK', 'No emitter found for session - cannot emit sdk_response_complete', {
-        sessionId: session.sessionDbId
-      });
-    }
   }
 
   // ============================================================================
@@ -454,7 +364,7 @@ export class SDKAgent {
    */
   private findClaudeExecutable(): string {
     const claudePath = process.env.CLAUDE_CODE_PATH ||
-      execSync(process.platform === 'win32' ? 'where claude' : 'which claude', { encoding: 'utf8', windowsHide: true })
+      execSync(process.platform === 'win32' ? 'where claude' : 'which claude', { encoding: 'utf8' })
         .trim().split('\n')[0].trim();
 
     if (!claudePath) {
@@ -468,8 +378,17 @@ export class SDKAgent {
    * Get model ID from settings or environment
    */
   private getModelId(): string {
-    const settingsPath = path.join(homedir(), '.claude-mem', 'settings.json');
-    const settings = SettingsDefaultsManager.loadFromFile(settingsPath);
-    return settings.CLAUDE_MEM_MODEL;
+    try {
+      const settingsPath = path.join(homedir(), '.claude-mem', 'settings.json');
+      if (existsSync(settingsPath)) {
+        const settings = JSON.parse(readFileSync(settingsPath, 'utf-8'));
+        const modelId = settings.env?.CLAUDE_MEM_MODEL;
+        if (modelId) return modelId;
+      }
+    } catch {
+      // Fall through to env var or default
+    }
+
+    return process.env.CLAUDE_MEM_MODEL || 'claude-haiku-4-5';
   }
 }

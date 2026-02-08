@@ -23,26 +23,11 @@
  *   }
  */
 
-import { appendFileSync, existsSync, mkdirSync } from 'fs';
+import { appendFileSync } from 'fs';
 import { homedir } from 'os';
-import { join, dirname } from 'path';
+import { join } from 'path';
 
-const LOG_DIR = join(homedir(), '.claude-mem');
-const LOG_FILE = join(LOG_DIR, 'silent.log');
-
-/**
- * Ensure the .claude-mem directory exists
- */
-function ensureLogDir(): void {
-  try {
-    if (!existsSync(LOG_DIR)) {
-      mkdirSync(LOG_DIR, { recursive: true });
-    }
-  } catch (error) {
-    // If we can't create the directory, fail silently
-    console.error('[silent-debug] Failed to create log directory:', error);
-  }
-}
+const LOG_FILE = join(homedir(), '.claude-mem', 'silent.log');
 
 /**
  * Write a debug message to silent.log and return fallback value
@@ -79,7 +64,6 @@ export function silentDebug(message: string, data?: any, fallback: string = ''):
   logLine += '\n';
 
   try {
-    ensureLogDir();
     appendFileSync(LOG_FILE, logLine);
   } catch (error) {
     // If we can't write to the log file, fail silently (it's a debug utility after all)
@@ -95,7 +79,6 @@ export function silentDebug(message: string, data?: any, fallback: string = ''):
  */
 export function clearSilentLog(): void {
   try {
-    ensureLogDir();
     appendFileSync(LOG_FILE, `\n${'='.repeat(80)}\n[${new Date().toISOString()}] Log cleared\n${'='.repeat(80)}\n\n`);
   } catch (error) {
     // Ignore errors
