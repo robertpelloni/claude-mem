@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Header } from './components/Header';
 import { Feed } from './components/Feed';
-import { ContextSettingsModal } from './components/ContextSettingsModal';
+import { Sidebar } from './components/Sidebar';
 import { useSSE } from './hooks/useSSE';
 import { useSettings } from './hooks/useSettings';
 import { useStats } from './hooks/useStats';
@@ -12,7 +12,7 @@ import { mergeAndDeduplicateByProject } from './utils/data';
 
 export function App() {
   const [currentFilter, setCurrentFilter] = useState('');
-  const [contextPreviewOpen, setContextPreviewOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [paginatedObservations, setPaginatedObservations] = useState<Observation[]>([]);
   const [paginatedSummaries, setPaginatedSummaries] = useState<Summary[]>([]);
   const [paginatedPrompts, setPaginatedPrompts] = useState<UserPrompt[]>([]);
@@ -48,9 +48,9 @@ export function App() {
     return mergeAndDeduplicateByProject(prompts, paginatedPrompts);
   }, [prompts, paginatedPrompts, currentFilter]);
 
-  // Toggle context preview modal
-  const toggleContextPreview = useCallback(() => {
-    setContextPreviewOpen(prev => !prev);
+  // Toggle sidebar
+  const toggleSidebar = useCallback(() => {
+    setSidebarOpen(prev => !prev);
   }, []);
 
   // Handle loading more data
@@ -86,36 +86,41 @@ export function App() {
   }, [currentFilter]);
 
   return (
-    <>
-      <Header
-        isConnected={isConnected}
-        projects={projects}
-        currentFilter={currentFilter}
-        onFilterChange={setCurrentFilter}
-        isProcessing={isProcessing}
-        queueDepth={queueDepth}
-        themePreference={preference}
-        onThemeChange={setThemePreference}
-        onContextPreviewToggle={toggleContextPreview}
-      />
+    <div className="container">
+      <div className="main-col">
+        <Header
+          isConnected={isConnected}
+          projects={projects}
+          currentFilter={currentFilter}
+          onFilterChange={setCurrentFilter}
+          onSettingsToggle={toggleSidebar}
+          sidebarOpen={sidebarOpen}
+          isProcessing={isProcessing}
+          queueDepth={queueDepth}
+          themePreference={preference}
+          onThemeChange={setThemePreference}
+        />
+        <Feed
+          observations={allObservations}
+          summaries={allSummaries}
+          prompts={allPrompts}
+          onLoadMore={handleLoadMore}
+          isLoading={pagination.observations.isLoading || pagination.summaries.isLoading || pagination.prompts.isLoading}
+          hasMore={pagination.observations.hasMore || pagination.summaries.hasMore || pagination.prompts.hasMore}
+        />
+      </div>
 
-      <Feed
-        observations={allObservations}
-        summaries={allSummaries}
-        prompts={allPrompts}
-        onLoadMore={handleLoadMore}
-        isLoading={pagination.observations.isLoading || pagination.summaries.isLoading || pagination.prompts.isLoading}
-        hasMore={pagination.observations.hasMore || pagination.summaries.hasMore || pagination.prompts.hasMore}
-      />
-
-      <ContextSettingsModal
-        isOpen={contextPreviewOpen}
-        onClose={toggleContextPreview}
+      <Sidebar
+        isOpen={sidebarOpen}
         settings={settings}
-        onSave={saveSettings}
+        stats={stats}
         isSaving={isSaving}
         saveStatus={saveStatus}
+        isConnected={isConnected}
+        onSave={saveSettings}
+        onClose={toggleSidebar}
+        onRefreshStats={refreshStats}
       />
-    </>
+    </div>
   );
 }

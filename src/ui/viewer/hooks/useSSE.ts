@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Observation, Summary, UserPrompt, StreamEvent, LogEntry } from '../types';
+import { Observation, Summary, UserPrompt, StreamEvent } from '../types';
 import { API_ENDPOINTS } from '../constants/api';
 import { TIMING } from '../constants/timing';
 
@@ -8,7 +8,6 @@ export function useSSE() {
   const [summaries, setSummaries] = useState<Summary[]>([]);
   const [prompts, setPrompts] = useState<UserPrompt[]>([]);
   const [projects, setProjects] = useState<string[]>([]);
-  const [logs, setLogs] = useState<LogEntry[]>([]);
   const [isConnected, setIsConnected] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [queueDepth, setQueueDepth] = useState(0);
@@ -90,12 +89,6 @@ export function useSSE() {
                 setQueueDepth(data.queueDepth || 0);
               }
               break;
-
-            case 'log':
-              if (data.log) {
-                setLogs(prev => [data.log!, ...prev].slice(0, 500));
-              }
-              break;
           }
         } catch (error) {
           console.error('[SSE] Failed to parse message:', error);
@@ -116,5 +109,5 @@ export function useSSE() {
     };
   }, []);
 
-  return { observations, summaries, prompts, projects, logs, isProcessing, queueDepth, isConnected };
+  return { observations, summaries, prompts, projects, isProcessing, queueDepth, isConnected };
 }
