@@ -79,10 +79,102 @@ export class ChromaSync {
   private readonly VECTOR_DB_DIR: string;
   private readonly BATCH_SIZE = 100;
 
+<<<<<<< HEAD
+=======
+  // Windows popup concern resolved: the worker daemon starts with -WindowStyle Hidden,
+  // so child processes (uvx/chroma-mcp) inherit the hidden console and don't create new windows.
+  // MCP SDK's StdioClientTransport uses shell:false and no detached flag, so console is inherited.
+  private readonly disabled: boolean = false;
+
+>>>>>>> upstream/main
   constructor(project: string) {
     this.project = project;
     this.collectionName = `cm__${project}`;
     this.VECTOR_DB_DIR = path.join(os.homedir(), '.claude-mem', 'vector-db');
+<<<<<<< HEAD
+=======
+  }
+
+  /**
+   * Get or create combined SSL certificate bundle for Zscaler/corporate proxy environments
+   * Combines standard certifi certificates with enterprise security certificates (e.g., Zscaler)
+   */
+  private getCombinedCertPath(): string | undefined {
+    const combinedCertPath = path.join(os.homedir(), '.claude-mem', 'combined_certs.pem');
+
+    // If combined certs already exist and are recent (less than 24 hours old), use them
+    if (fs.existsSync(combinedCertPath)) {
+      const stats = fs.statSync(combinedCertPath);
+      const ageMs = Date.now() - stats.mtimeMs;
+      if (ageMs < 24 * 60 * 60 * 1000) {
+        return combinedCertPath;
+      }
+    }
+
+    // Only create on macOS (Zscaler certificate extraction uses macOS security command)
+    if (process.platform !== 'darwin') {
+      return undefined;
+    }
+
+    try {
+      // Use uvx to resolve the correct certifi path for the exact Python environment it uses
+      // This is more reliable than scanning the uv cache directory structure
+      let certifiPath: string | undefined;
+      try {
+        certifiPath = execSync(
+          'uvx --with certifi python -c "import certifi; print(certifi.where())"',
+          { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 10000 }
+        ).trim();
+      } catch {
+        // uvx or certifi not available
+        return undefined;
+      }
+
+      if (!certifiPath || !fs.existsSync(certifiPath)) {
+        return undefined;
+      }
+
+      // Try to extract Zscaler certificate from macOS keychain
+      let zscalerCert = '';
+      try {
+        zscalerCert = execSync(
+          'security find-certificate -a -c "Zscaler" -p /Library/Keychains/System.keychain',
+          { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 5000 }
+        );
+      } catch {
+        // Zscaler not found, which is fine - not all environments have it
+        return undefined;
+      }
+
+      // Validate PEM certificate format (must have both BEGIN and END markers)
+      if (!zscalerCert ||
+          !zscalerCert.includes('-----BEGIN CERTIFICATE-----') ||
+          !zscalerCert.includes('-----END CERTIFICATE-----')) {
+        return undefined;
+      }
+
+      // Create combined certificate bundle with atomic write (write to temp, then rename)
+      const certifiContent = fs.readFileSync(certifiPath, 'utf8');
+      const tempPath = combinedCertPath + '.tmp';
+      fs.writeFileSync(tempPath, certifiContent + '\n' + zscalerCert);
+      fs.renameSync(tempPath, combinedCertPath);
+      logger.info('CHROMA_SYNC', 'Created combined SSL certificate bundle for Zscaler', {
+        path: combinedCertPath
+      });
+
+      return combinedCertPath;
+    } catch (error) {
+      logger.debug('CHROMA_SYNC', 'Could not create combined cert bundle', {}, error as Error);
+      return undefined;
+    }
+  }
+
+  /**
+   * Check if Chroma is disabled (Windows)
+   */
+  isDisabled(): boolean {
+    return this.disabled;
+>>>>>>> upstream/main
   }
 
   /**
@@ -101,7 +193,6 @@ export class ChromaSync {
       // See: https://github.com/thedotmack/claude-mem/issues/170 (Python 3.14 incompatibility)
       const settings = SettingsDefaultsManager.loadFromFile(USER_SETTINGS_PATH);
       const pythonVersion = settings.CLAUDE_MEM_PYTHON_VERSION;
-      const isWindows = process.platform === 'win32';
 
       const transportOptions: any = {
         command: 'uvx',
@@ -114,12 +205,31 @@ export class ChromaSync {
         stderr: 'ignore'
       };
 
+<<<<<<< HEAD
       // CRITICAL: On Windows, try to hide console window to prevent PowerShell popups
       // Note: windowsHide may not be supported by MCP SDK's StdioClientTransport
       if (isWindows) {
         transportOptions.windowsHide = true;
         logger.debug('CHROMA_SYNC', 'Windows detected, attempting to hide console window', { project: this.project });
       }
+=======
+      // Add SSL certificate environment variables for corporate proxy/Zscaler environments
+      if (combinedCertPath) {
+        transportOptions.env = {
+          ...process.env,
+          SSL_CERT_FILE: combinedCertPath,
+          REQUESTS_CA_BUNDLE: combinedCertPath,
+          CURL_CA_BUNDLE: combinedCertPath
+        };
+        logger.info('CHROMA_SYNC', 'Using combined SSL certificates for Zscaler compatibility', {
+          certPath: combinedCertPath
+        });
+      }
+
+      // Note: windowsHide is not needed here because the worker daemon starts with
+      // -WindowStyle Hidden, so child processes inherit the hidden console.
+      // The MCP SDK ignores custom windowsHide anyway (overridden internally).
+>>>>>>> upstream/main
 
       this.transport = new StdioClientTransport(transportOptions);
 

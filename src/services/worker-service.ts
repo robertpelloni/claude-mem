@@ -14,6 +14,7 @@ import express, { Request, Response } from 'express';
 import cors from 'cors';
 import http from 'http';
 import path from 'path';
+<<<<<<< HEAD
 import { readFileSync, writeFileSync, statSync, existsSync } from 'fs';
 import { homedir } from 'os';
 import { getPackageRoot } from '../shared/paths.js';
@@ -21,6 +22,88 @@ import { getWorkerPort } from '../shared/worker-utils.js';
 import { logger } from '../utils/logger.js';
 
 // Import composed services
+=======
+import { existsSync, writeFileSync, unlinkSync, statSync } from 'fs';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { getWorkerPort, getWorkerHost } from '../shared/worker-utils.js';
+import { HOOK_TIMEOUTS } from '../shared/hook-constants.js';
+import { SettingsDefaultsManager } from '../shared/SettingsDefaultsManager.js';
+import { logger } from '../utils/logger.js';
+
+// Windows: avoid repeated spawn popups when startup fails (issue #921)
+const WINDOWS_SPAWN_COOLDOWN_MS = 2 * 60 * 1000;
+
+function getWorkerSpawnLockPath(): string {
+  return path.join(SettingsDefaultsManager.get('CLAUDE_MEM_DATA_DIR'), '.worker-start-attempted');
+}
+
+function shouldSkipSpawnOnWindows(): boolean {
+  if (process.platform !== 'win32') return false;
+  const lockPath = getWorkerSpawnLockPath();
+  if (!existsSync(lockPath)) return false;
+  try {
+    const modifiedTimeMs = statSync(lockPath).mtimeMs;
+    return Date.now() - modifiedTimeMs < WINDOWS_SPAWN_COOLDOWN_MS;
+  } catch {
+    return false;
+  }
+}
+
+function markWorkerSpawnAttempted(): void {
+  if (process.platform !== 'win32') return;
+  try {
+    writeFileSync(getWorkerSpawnLockPath(), '', 'utf-8');
+  } catch {
+    // Best-effort lock file — failure to write shouldn't block startup
+  }
+}
+
+function clearWorkerSpawnAttempted(): void {
+  if (process.platform !== 'win32') return;
+  try {
+    const lockPath = getWorkerSpawnLockPath();
+    if (existsSync(lockPath)) unlinkSync(lockPath);
+  } catch {
+    // Best-effort cleanup
+  }
+}
+
+// Version injected at build time by esbuild define
+declare const __DEFAULT_PACKAGE_VERSION__: string;
+const packageVersion = typeof __DEFAULT_PACKAGE_VERSION__ !== 'undefined' ? __DEFAULT_PACKAGE_VERSION__ : '0.0.0-dev';
+
+// Infrastructure imports
+import {
+  writePidFile,
+  readPidFile,
+  removePidFile,
+  getPlatformTimeout,
+  cleanupOrphanedProcesses,
+  cleanStalePidFile,
+  spawnDaemon,
+  createSignalHandler
+} from './infrastructure/ProcessManager.js';
+import {
+  isPortInUse,
+  waitForHealth,
+  waitForPortFree,
+  httpShutdown,
+  checkVersionMatch
+} from './infrastructure/HealthMonitor.js';
+import { performGracefulShutdown } from './infrastructure/GracefulShutdown.js';
+
+// Server imports
+import { Server } from './server/Server.js';
+
+// Integration imports
+import {
+  updateCursorContextForProject,
+  handleCursorCommand
+} from './integrations/CursorHooksInstaller.js';
+
+// Service layer imports
+>>>>>>> upstream/main
 import { DatabaseManager } from './worker/DatabaseManager.js';
 import { SessionManager } from './worker/SessionManager.js';
 import { SSEBroadcaster } from './worker/SSEBroadcaster.js';
@@ -66,10 +149,37 @@ export class WorkerService {
     this.app.use(express.json({ limit: '50mb' }));
     this.app.use(cors());
 
+<<<<<<< HEAD
     // Serve static files for web UI (viewer-bundle.js, logos, fonts, etc.)
     const packageRoot = getPackageRoot();
     const uiDir = path.join(packageRoot, 'plugin', 'ui');
     this.app.use(express.static(uiDir));
+=======
+    process.on('SIGTERM', () => {
+      this.isShuttingDown = shutdownRef.value;
+      handler('SIGTERM');
+    });
+    process.on('SIGINT', () => {
+      this.isShuttingDown = shutdownRef.value;
+      handler('SIGINT');
+    });
+
+    // SIGHUP: sent by kernel when controlling terminal closes.
+    // Daemon mode: ignore it (survive parent shell exit).
+    // Interactive mode: treat like SIGTERM (graceful shutdown).
+    if (process.platform !== 'win32') {
+      if (process.argv.includes('--daemon')) {
+        process.on('SIGHUP', () => {
+          logger.debug('SYSTEM', 'Ignoring SIGHUP in daemon mode');
+        });
+      } else {
+        process.on('SIGHUP', () => {
+          this.isShuttingDown = shutdownRef.value;
+          handler('SIGHUP');
+        });
+      }
+    }
+>>>>>>> upstream/main
   }
 
   /**
@@ -1308,12 +1418,82 @@ export class WorkerService {
 /**
  * Parse pagination parameters from request
  */
+<<<<<<< HEAD
 function parsePaginationParams(req: Request): { offset: number; limit: number; project?: string } {
   const offset = parseInt(req.query.offset as string, 10) || 0;
   const limit = Math.min(parseInt(req.query.limit as string, 10) || 20, 100); // Max 100
   const project = req.query.project as string | undefined;
 
   return { offset, limit, project };
+=======
+async function ensureWorkerStarted(port: number): Promise<boolean> {
+  // Clean stale PID file first (cheap: 1 fs read + 1 signal-0 check)
+  cleanStalePidFile();
+
+  // Check if worker is already running and healthy
+  if (await waitForHealth(port, 1000)) {
+    const versionCheck = await checkVersionMatch(port);
+    if (!versionCheck.matches) {
+      logger.info('SYSTEM', 'Worker version mismatch detected - auto-restarting', {
+        pluginVersion: versionCheck.pluginVersion,
+        workerVersion: versionCheck.workerVersion
+      });
+
+      await httpShutdown(port);
+      const freed = await waitForPortFree(port, getPlatformTimeout(HOOK_TIMEOUTS.PORT_IN_USE_WAIT));
+      if (!freed) {
+        logger.error('SYSTEM', 'Port did not free up after shutdown for version mismatch restart', { port });
+        return false;
+      }
+      removePidFile();
+    } else {
+      logger.info('SYSTEM', 'Worker already running and healthy');
+      return true;
+    }
+  }
+
+  // Check if port is in use by something else
+  const portInUse = await isPortInUse(port);
+  if (portInUse) {
+    logger.info('SYSTEM', 'Port in use, waiting for worker to become healthy');
+    const healthy = await waitForHealth(port, getPlatformTimeout(HOOK_TIMEOUTS.PORT_IN_USE_WAIT));
+    if (healthy) {
+      logger.info('SYSTEM', 'Worker is now healthy');
+      return true;
+    }
+    logger.error('SYSTEM', 'Port in use but worker not responding to health checks');
+    return false;
+  }
+
+  // Windows: skip spawn if a recent attempt already failed (prevents repeated bun.exe popups, issue #921)
+  if (shouldSkipSpawnOnWindows()) {
+    logger.warn('SYSTEM', 'Worker unavailable on Windows — skipping spawn (recent attempt failed within cooldown)');
+    return false;
+  }
+
+  // Spawn new worker daemon
+  logger.info('SYSTEM', 'Starting worker daemon');
+  markWorkerSpawnAttempted();
+  const pid = spawnDaemon(__filename, port);
+  if (pid === undefined) {
+    logger.error('SYSTEM', 'Failed to spawn worker daemon');
+    return false;
+  }
+
+  // PID file is written by the worker itself after listen() succeeds
+  // This is race-free and works correctly on Windows where cmd.exe PID is useless
+
+  const healthy = await waitForHealth(port, getPlatformTimeout(HOOK_TIMEOUTS.POST_SPAWN_WAIT));
+  if (!healthy) {
+    removePidFile();
+    logger.error('SYSTEM', 'Worker failed to start (health check timeout)');
+    return false;
+  }
+
+  clearWorkerSpawnAttempted();
+  logger.info('SYSTEM', 'Worker started successfully');
+  return true;
+>>>>>>> upstream/main
 }
 
 // ============================================================================
@@ -1340,11 +1520,165 @@ if (require.main === module || !module.parent) {
     process.exit(0);
   });
 
+<<<<<<< HEAD
   // Start the worker
   worker.start().catch(error => {
     logger.failure('SYSTEM', 'Worker startup failed', {}, error);
     process.exit(1);
   });
+=======
+    case 'stop': {
+      await httpShutdown(port);
+      const freed = await waitForPortFree(port, getPlatformTimeout(15000));
+      if (!freed) {
+        logger.warn('SYSTEM', 'Port did not free up after shutdown', { port });
+      }
+      removePidFile();
+      logger.info('SYSTEM', 'Worker stopped successfully');
+      process.exit(0);
+    }
+
+    case 'restart': {
+      logger.info('SYSTEM', 'Restarting worker');
+      await httpShutdown(port);
+      const freed = await waitForPortFree(port, getPlatformTimeout(15000));
+      if (!freed) {
+        logger.error('SYSTEM', 'Port did not free up after shutdown, aborting restart', { port });
+        // Exit gracefully: Windows Terminal won't keep tab open on exit 0
+        // The wrapper/plugin will handle restart logic if needed
+        process.exit(0);
+      }
+      removePidFile();
+
+      const pid = spawnDaemon(__filename, port);
+      if (pid === undefined) {
+        logger.error('SYSTEM', 'Failed to spawn worker daemon during restart');
+        // Exit gracefully: Windows Terminal won't keep tab open on exit 0
+        // The wrapper/plugin will handle restart logic if needed
+        process.exit(0);
+      }
+
+      // PID file is written by the worker itself after listen() succeeds
+      // This is race-free and works correctly on Windows where cmd.exe PID is useless
+
+      const healthy = await waitForHealth(port, getPlatformTimeout(HOOK_TIMEOUTS.POST_SPAWN_WAIT));
+      if (!healthy) {
+        removePidFile();
+        logger.error('SYSTEM', 'Worker failed to restart');
+        // Exit gracefully: Windows Terminal won't keep tab open on exit 0
+        // The wrapper/plugin will handle restart logic if needed
+        process.exit(0);
+      }
+
+      logger.info('SYSTEM', 'Worker restarted successfully');
+      process.exit(0);
+    }
+
+    case 'status': {
+      const running = await isPortInUse(port);
+      const pidInfo = readPidFile();
+      if (running && pidInfo) {
+        console.log('Worker is running');
+        console.log(`  PID: ${pidInfo.pid}`);
+        console.log(`  Port: ${pidInfo.port}`);
+        console.log(`  Started: ${pidInfo.startedAt}`);
+      } else {
+        console.log('Worker is not running');
+      }
+      process.exit(0);
+    }
+
+    case 'cursor': {
+      const subcommand = process.argv[3];
+      const cursorResult = await handleCursorCommand(subcommand, process.argv.slice(4));
+      process.exit(cursorResult);
+    }
+
+    case 'hook': {
+      // Auto-start worker if not running
+      const workerReady = await ensureWorkerStarted(port);
+      if (!workerReady) {
+        logger.warn('SYSTEM', 'Worker failed to start before hook, handler will retry');
+      }
+
+      // Existing logic unchanged
+      const platform = process.argv[3];
+      const event = process.argv[4];
+      if (!platform || !event) {
+        console.error('Usage: claude-mem hook <platform> <event>');
+        console.error('Platforms: claude-code, cursor, raw');
+        console.error('Events: context, session-init, observation, summarize, session-complete');
+        process.exit(1);
+      }
+
+      // Check if worker is already running on port
+      const portInUse = await isPortInUse(port);
+      let startedWorkerInProcess = false;
+
+      if (!portInUse) {
+        // Port free - start worker IN THIS PROCESS (no spawn!)
+        // This process becomes the worker and stays alive
+        try {
+          logger.info('SYSTEM', 'Starting worker in-process for hook', { event });
+          const worker = new WorkerService();
+          await worker.start();
+          startedWorkerInProcess = true;
+          // Worker is now running in this process on the port
+        } catch (error) {
+          logger.failure('SYSTEM', 'Worker failed to start in hook', {}, error as Error);
+          removePidFile();
+          process.exit(0);
+        }
+      }
+      // If port in use, we'll use HTTP to the existing worker
+
+      const { hookCommand } = await import('../cli/hook-command.js');
+      // If we started the worker in this process, skip process.exit() so we stay alive as the worker
+      await hookCommand(platform, event, { skipExit: startedWorkerInProcess });
+      // Note: if we started worker in-process, this process stays alive as the worker
+      // The break allows the event loop to continue serving requests
+      break;
+    }
+
+    case 'generate': {
+      const dryRun = process.argv.includes('--dry-run');
+      const { generateClaudeMd } = await import('../cli/claude-md-commands.js');
+      const result = await generateClaudeMd(dryRun);
+      process.exit(result);
+    }
+
+    case 'clean': {
+      const dryRun = process.argv.includes('--dry-run');
+      const { cleanClaudeMd } = await import('../cli/claude-md-commands.js');
+      const result = await cleanClaudeMd(dryRun);
+      process.exit(result);
+    }
+
+    case '--daemon':
+    default: {
+      // Prevent daemon from dying silently on unhandled errors.
+      // The HTTP server can continue serving even if a background task throws.
+      process.on('unhandledRejection', (reason) => {
+        logger.error('SYSTEM', 'Unhandled rejection in daemon', {
+          reason: reason instanceof Error ? reason.message : String(reason)
+        });
+      });
+      process.on('uncaughtException', (error) => {
+        logger.error('SYSTEM', 'Uncaught exception in daemon', {}, error as Error);
+        // Don't exit — keep the HTTP server running
+      });
+
+      const worker = new WorkerService();
+      worker.start().catch((error) => {
+        logger.failure('SYSTEM', 'Worker failed to start', {}, error as Error);
+        removePidFile();
+        // Exit gracefully: Windows Terminal won't keep tab open on exit 0
+        // The wrapper/plugin will handle restart logic if needed
+        process.exit(0);
+      });
+    }
+  }
+>>>>>>> upstream/main
 }
 
 export default WorkerService;
