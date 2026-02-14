@@ -104,6 +104,33 @@ export class SDKAgent {
         if (message.type === 'result' && message.subtype === 'success') {
           // Usage telemetry is captured at SDK level
         }
+<<<<<<< HEAD
+=======
+
+        // Detect fatal context overflow and terminate gracefully (issue #870)
+        if (typeof textContent === 'string' && textContent.includes('Prompt is too long')) {
+          throw new Error('Claude session context overflow: prompt is too long');
+        }
+
+        // Detect invalid API key — SDK returns this as response text, not an error.
+        // Throw so it surfaces in health endpoint and prevents silent failures.
+        if (typeof textContent === 'string' && textContent.includes('Invalid API key')) {
+          throw new Error('Invalid API key: check your API key configuration in ~/.claude-mem/settings.json or ~/.claude-mem/.env');
+        }
+
+        // Parse and process response using shared ResponseProcessor
+        await processAgentResponse(
+          textContent,
+          session,
+          this.dbManager,
+          this.sessionManager,
+          worker,
+          discoveryTokens,
+          originalTimestamp,
+          'SDK',
+          cwdTracker.lastCwd
+        );
+>>>>>>> upstream/main
       }
 
       // Mark session complete

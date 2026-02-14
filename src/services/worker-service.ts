@@ -29,6 +29,7 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { getWorkerPort, getWorkerHost } from '../shared/worker-utils.js';
 import { HOOK_TIMEOUTS } from '../shared/hook-constants.js';
 import { SettingsDefaultsManager } from '../shared/SettingsDefaultsManager.js';
+import { getAuthMethodDescription } from '../shared/EnvManager.js';
 import { logger } from '../utils/logger.js';
 
 // Windows: avoid repeated spawn popups when startup fails (issue #921)
@@ -127,6 +128,14 @@ export class WorkerService {
   // Processing status tracking for viewer UI spinner
   private isProcessing: boolean = false;
 
+  // AI interaction tracking for health endpoint
+  private lastAiInteraction: {
+    timestamp: number;
+    success: boolean;
+    provider: string;
+    error?: string;
+  } | null = null;
+
   constructor() {
     this.app = express();
 
@@ -138,8 +147,54 @@ export class WorkerService {
     this.paginationHelper = new PaginationHelper(this.dbManager);
     this.settingsManager = new SettingsManager(this.dbManager);
 
+<<<<<<< HEAD
     this.setupMiddleware();
     this.setupRoutes();
+=======
+    // Set callback for when sessions are deleted
+    this.sessionManager.setOnSessionDeleted(() => {
+      this.broadcastProcessingStatus();
+    });
+
+
+    // Initialize MCP client
+    // Empty capabilities object: this client only calls tools, doesn't expose any
+    this.mcpClient = new Client({
+      name: 'worker-search-proxy',
+      version: packageVersion
+    }, { capabilities: {} });
+
+    // Initialize HTTP server with core routes
+    this.server = new Server({
+      getInitializationComplete: () => this.initializationCompleteFlag,
+      getMcpReady: () => this.mcpReady,
+      onShutdown: () => this.shutdown(),
+      onRestart: () => this.shutdown(),
+      workerPath: __filename,
+      getAiStatus: () => {
+        let provider = 'claude';
+        if (isOpenRouterSelected() && isOpenRouterAvailable()) provider = 'openrouter';
+        else if (isGeminiSelected() && isGeminiAvailable()) provider = 'gemini';
+        return {
+          provider,
+          authMethod: getAuthMethodDescription(),
+          lastInteraction: this.lastAiInteraction
+            ? {
+                timestamp: this.lastAiInteraction.timestamp,
+                success: this.lastAiInteraction.success,
+                ...(this.lastAiInteraction.error && { error: this.lastAiInteraction.error }),
+              }
+            : null,
+        };
+      },
+    });
+
+    // Register route handlers
+    this.registerRoutes();
+
+    // Register signal handlers early to ensure cleanup even if start() hasn't completed
+    this.registerSignalHandlers();
+>>>>>>> upstream/main
   }
 
   /**
@@ -239,7 +294,424 @@ export class WorkerService {
       srv.on('error', reject);
     });
 
+<<<<<<< HEAD
     logger.info('SYSTEM', 'Worker started', { port, pid: process.pid });
+=======
+    logger.info('SYSTEM', 'Worker started', { host, port, pid: process.pid });
+
+    // Do slow initialization in background (non-blocking)
+    this.initializeBackground().catch((error) => {
+      logger.error('SYSTEM', 'Background initialization failed', {}, error as Error);
+    });
+  }
+
+  /**
+   * Background initialization - runs after HTTP server is listening
+   */
+  private async initializeBackground(): Promise<void> {
+    try {
+      await cleanupOrphanedProcesses();
+
+      // Load mode configuration
+      const { ModeManager } = await import('./domain/ModeManager.js');
+      const { SettingsDefaultsManager } = await import('../shared/SettingsDefaultsManager.js');
+      const { USER_SETTINGS_PATH } = await import('../shared/paths.js');
+
+      const settings = SettingsDefaultsManager.loadFromFile(USER_SETTINGS_PATH);
+      const modeId = settings.CLAUDE_MEM_MODE;
+      ModeManager.getInstance().loadMode(modeId);
+      logger.info('SYSTEM', `Mode loaded: ${modeId}`);
+
+      await this.dbManager.initialize();
+
+      // Reset any messages that were processing when worker died
+      const { PendingMessageStore } = await import('./sqlite/PendingMessageStore.js');
+      const pendingStore = new PendingMessageStore(this.dbManager.getSessionStore().db, 3);
+      const resetCount = pendingStore.resetStaleProcessingMessages(0); // 0 = reset ALL processing
+      if (resetCount > 0) {
+        logger.info('SYSTEM', `Reset ${resetCount} stale processing messages to pending`);
+      }
+
+      // Initialize search services
+      const formattingService = new FormattingService();
+      const timelineService = new TimelineService();
+      const searchManager = new SearchManager(
+        this.dbManager.getSessionSearch(),
+        this.dbManager.getSessionStore(),
+        this.dbManager.getChromaSync(),
+        formattingService,
+        timelineService
+      );
+      this.searchRoutes = new SearchRoutes(searchManager);
+      this.server.registerRoutes(this.searchRoutes);
+      logger.info('WORKER', 'SearchManager initialized and search routes registered');
+
+      // Connect to MCP server
+      const mcpServerPath = path.join(__dirname, 'mcp-server.cjs');
+      const transport = new StdioClientTransport({
+        command: 'node',
+        args: [mcpServerPath],
+        env: process.env
+      });
+
+      const MCP_INIT_TIMEOUT_MS = 300000;
+      const mcpConnectionPromise = this.mcpClient.connect(transport);
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('MCP connection timeout after 5 minutes')), MCP_INIT_TIMEOUT_MS)
+      );
+
+      await Promise.race([mcpConnectionPromise, timeoutPromise]);
+      this.mcpReady = true;
+      logger.success('WORKER', 'Connected to MCP server');
+
+      this.initializationCompleteFlag = true;
+      this.resolveInitialization();
+      logger.info('SYSTEM', 'Background initialization complete');
+
+      // Start orphan reaper to clean up zombie processes (Issue #737)
+      this.stopOrphanReaper = startOrphanReaper(() => {
+        const activeIds = new Set<number>();
+        for (const [id] of this.sessionManager['sessions']) {
+          activeIds.add(id);
+        }
+        return activeIds;
+      });
+      logger.info('SYSTEM', 'Started orphan reaper (runs every 5 minutes)');
+
+      // Auto-recover orphaned queues (fire-and-forget with error logging)
+      this.processPendingQueues(50).then(result => {
+        if (result.sessionsStarted > 0) {
+          logger.info('SYSTEM', `Auto-recovered ${result.sessionsStarted} sessions with pending work`, {
+            totalPending: result.totalPendingSessions,
+            started: result.sessionsStarted,
+            sessionIds: result.startedSessionIds
+          });
+        }
+      }).catch(error => {
+        logger.error('SYSTEM', 'Auto-recovery of pending queues failed', {}, error as Error);
+      });
+    } catch (error) {
+      logger.error('SYSTEM', 'Background initialization failed', {}, error as Error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get the appropriate agent based on provider settings.
+   * Same logic as SessionRoutes.getActiveAgent() for consistency.
+   */
+  private getActiveAgent(): SDKAgent | GeminiAgent | OpenRouterAgent {
+    if (isOpenRouterSelected() && isOpenRouterAvailable()) {
+      return this.openRouterAgent;
+    }
+    if (isGeminiSelected() && isGeminiAvailable()) {
+      return this.geminiAgent;
+    }
+    return this.sdkAgent;
+  }
+
+  /**
+   * Start a session processor
+   * On SDK resume failure (terminated session), falls back to Gemini/OpenRouter if available,
+   * otherwise marks messages abandoned and removes session so queue does not grow unbounded.
+   */
+  private startSessionProcessor(
+    session: ReturnType<typeof this.sessionManager.getSession>,
+    source: string
+  ): void {
+    if (!session) return;
+
+    const sid = session.sessionDbId;
+    const agent = this.getActiveAgent();
+    const providerName = agent.constructor.name;
+
+    // Before starting generator, check if AbortController is already aborted
+    // This can happen after a previous generator was aborted but the session still has pending work
+    if (session.abortController.signal.aborted) {
+      logger.debug('SYSTEM', 'Replacing aborted AbortController before starting generator', {
+        sessionId: session.sessionDbId
+      });
+      session.abortController = new AbortController();
+    }
+
+    // Track whether generator failed with an unrecoverable error to prevent infinite restart loops
+    let hadUnrecoverableError = false;
+    let sessionFailed = false;
+
+    logger.info('SYSTEM', `Starting generator (${source}) using ${providerName}`, { sessionId: sid });
+
+    session.generatorPromise = agent.startSession(session, this)
+      .catch(async (error: unknown) => {
+        const errorMessage = (error as Error)?.message || '';
+
+        // Detect unrecoverable errors that should NOT trigger restart
+        // These errors will fail immediately on retry, causing infinite loops
+        const unrecoverablePatterns = [
+          'Claude executable not found',
+          'CLAUDE_CODE_PATH',
+          'ENOENT',
+          'spawn',
+          'Invalid API key',
+        ];
+        if (unrecoverablePatterns.some(pattern => errorMessage.includes(pattern))) {
+          hadUnrecoverableError = true;
+          this.lastAiInteraction = {
+            timestamp: Date.now(),
+            success: false,
+            provider: providerName,
+            error: errorMessage,
+          };
+          logger.error('SDK', 'Unrecoverable generator error - will NOT restart', {
+            sessionId: session.sessionDbId,
+            project: session.project,
+            errorMessage
+          });
+          return;
+        }
+
+        // Fallback for terminated SDK sessions (provider abstraction)
+        if (this.isSessionTerminatedError(error)) {
+          logger.warn('SDK', 'SDK resume failed, falling back to standalone processing', {
+            sessionId: session.sessionDbId,
+            project: session.project,
+            reason: error instanceof Error ? error.message : String(error)
+          });
+          return this.runFallbackForTerminatedSession(session, error);
+        }
+
+        // Detect stale resume failures - SDK session context was lost
+        if ((errorMessage.includes('aborted by user') || errorMessage.includes('No conversation found'))
+            && session.memorySessionId) {
+          logger.warn('SDK', 'Detected stale resume failure, clearing memorySessionId for fresh start', {
+            sessionId: session.sessionDbId,
+            memorySessionId: session.memorySessionId,
+            errorMessage
+          });
+          // Clear stale memorySessionId and force fresh init on next attempt
+          this.dbManager.getSessionStore().updateMemorySessionId(session.sessionDbId, null);
+          session.memorySessionId = null;
+          session.forceInit = true;
+        }
+        logger.error('SDK', 'Session generator failed', {
+          sessionId: session.sessionDbId,
+          project: session.project,
+          provider: providerName
+        }, error as Error);
+        sessionFailed = true;
+        this.lastAiInteraction = {
+          timestamp: Date.now(),
+          success: false,
+          provider: providerName,
+          error: errorMessage,
+        };
+        throw error;
+      })
+      .finally(() => {
+        session.generatorPromise = null;
+
+        // Record successful AI interaction if no error occurred
+        if (!sessionFailed && !hadUnrecoverableError) {
+          this.lastAiInteraction = {
+            timestamp: Date.now(),
+            success: true,
+            provider: providerName,
+          };
+        }
+
+        // Do NOT restart after unrecoverable errors - prevents infinite loops
+        if (hadUnrecoverableError) {
+          logger.warn('SYSTEM', 'Skipping restart due to unrecoverable error', {
+            sessionId: session.sessionDbId
+          });
+          this.broadcastProcessingStatus();
+          return;
+        }
+
+        // Check if there's pending work that needs processing with a fresh AbortController
+        const { PendingMessageStore } = require('./sqlite/PendingMessageStore.js');
+        const pendingStore = new PendingMessageStore(this.dbManager.getSessionStore().db, 3);
+        const pendingCount = pendingStore.getPendingCount(session.sessionDbId);
+
+        if (pendingCount > 0) {
+          logger.info('SYSTEM', 'Pending work remains after generator exit, restarting with fresh AbortController', {
+            sessionId: session.sessionDbId,
+            pendingCount
+          });
+          // Reset AbortController for restart
+          session.abortController = new AbortController();
+          // Restart processor
+          this.startSessionProcessor(session, 'pending-work-restart');
+        }
+
+        this.broadcastProcessingStatus();
+      });
+  }
+
+  /**
+   * Match errors that indicate the Claude Code process/session is gone (resume impossible).
+   * Used to trigger graceful fallback instead of leaving pending messages stuck forever.
+   */
+  private isSessionTerminatedError(error: unknown): boolean {
+    const msg = error instanceof Error ? error.message : String(error);
+    const normalized = msg.toLowerCase();
+    return (
+      normalized.includes('process aborted by user') ||
+      normalized.includes('processtransport') ||
+      normalized.includes('not ready for writing') ||
+      normalized.includes('session generator failed') ||
+      normalized.includes('claude code process')
+    );
+  }
+
+  /**
+   * When SDK resume fails due to terminated session: try Gemini then OpenRouter to drain
+   * pending messages; if no fallback available, mark messages abandoned and remove session.
+   */
+  private async runFallbackForTerminatedSession(
+    session: ReturnType<typeof this.sessionManager.getSession>,
+    _originalError: unknown
+  ): Promise<void> {
+    if (!session) return;
+
+    const sessionDbId = session.sessionDbId;
+
+    // Fallback agents need memorySessionId for storeObservations
+    if (!session.memorySessionId) {
+      const syntheticId = `fallback-${sessionDbId}-${Date.now()}`;
+      session.memorySessionId = syntheticId;
+      this.dbManager.getSessionStore().updateMemorySessionId(sessionDbId, syntheticId);
+    }
+
+    if (isGeminiAvailable()) {
+      try {
+        await this.geminiAgent.startSession(session, this);
+        return;
+      } catch (e) {
+        logger.warn('SDK', 'Fallback Gemini failed, trying OpenRouter', {
+          sessionId: sessionDbId,
+          error: e instanceof Error ? e.message : String(e)
+        });
+      }
+    }
+
+    if (isOpenRouterAvailable()) {
+      try {
+        await this.openRouterAgent.startSession(session, this);
+        return;
+      } catch (e) {
+        logger.warn('SDK', 'Fallback OpenRouter failed', {
+          sessionId: sessionDbId,
+          error: e instanceof Error ? e.message : String(e)
+        });
+      }
+    }
+
+    // No fallback or both failed: mark messages abandoned and remove session so queue doesn't grow
+    const pendingStore = this.sessionManager.getPendingMessageStore();
+    const abandoned = pendingStore.markAllSessionMessagesAbandoned(sessionDbId);
+    if (abandoned > 0) {
+      logger.warn('SDK', 'No fallback available; marked pending messages abandoned', {
+        sessionId: sessionDbId,
+        abandoned
+      });
+    }
+    this.sessionManager.removeSessionImmediate(sessionDbId);
+    this.sessionEventBroadcaster.broadcastSessionCompleted(sessionDbId);
+  }
+
+  /**
+   * Process pending session queues
+   */
+  async processPendingQueues(sessionLimit: number = 10): Promise<{
+    totalPendingSessions: number;
+    sessionsStarted: number;
+    sessionsSkipped: number;
+    startedSessionIds: number[];
+  }> {
+    const { PendingMessageStore } = await import('./sqlite/PendingMessageStore.js');
+    const pendingStore = new PendingMessageStore(this.dbManager.getSessionStore().db, 3);
+    const sessionStore = this.dbManager.getSessionStore();
+
+    // Clean up stale 'active' sessions before processing
+    // Sessions older than 6 hours without activity are likely orphaned
+    const STALE_SESSION_THRESHOLD_MS = 6 * 60 * 60 * 1000;
+    const staleThreshold = Date.now() - STALE_SESSION_THRESHOLD_MS;
+
+    try {
+      const staleSessionIds = sessionStore.db.prepare(`
+        SELECT id FROM sdk_sessions
+        WHERE status = 'active' AND started_at_epoch < ?
+      `).all(staleThreshold) as { id: number }[];
+
+      if (staleSessionIds.length > 0) {
+        const ids = staleSessionIds.map(r => r.id);
+        const placeholders = ids.map(() => '?').join(',');
+
+        sessionStore.db.prepare(`
+          UPDATE sdk_sessions
+          SET status = 'failed', completed_at_epoch = ?
+          WHERE id IN (${placeholders})
+        `).run(Date.now(), ...ids);
+
+        logger.info('SYSTEM', `Marked ${ids.length} stale sessions as failed`);
+
+        const msgResult = sessionStore.db.prepare(`
+          UPDATE pending_messages
+          SET status = 'failed', failed_at_epoch = ?
+          WHERE status = 'pending'
+          AND session_db_id IN (${placeholders})
+        `).run(Date.now(), ...ids);
+
+        if (msgResult.changes > 0) {
+          logger.info('SYSTEM', `Marked ${msgResult.changes} pending messages from stale sessions as failed`);
+        }
+      }
+    } catch (error) {
+      logger.error('SYSTEM', 'Failed to clean up stale sessions', {}, error as Error);
+    }
+
+    const orphanedSessionIds = pendingStore.getSessionsWithPendingMessages();
+
+    const result = {
+      totalPendingSessions: orphanedSessionIds.length,
+      sessionsStarted: 0,
+      sessionsSkipped: 0,
+      startedSessionIds: [] as number[]
+    };
+
+    if (orphanedSessionIds.length === 0) return result;
+
+    logger.info('SYSTEM', `Processing up to ${sessionLimit} of ${orphanedSessionIds.length} pending session queues`);
+
+    for (const sessionDbId of orphanedSessionIds) {
+      if (result.sessionsStarted >= sessionLimit) break;
+
+      try {
+        const existingSession = this.sessionManager.getSession(sessionDbId);
+        if (existingSession?.generatorPromise) {
+          result.sessionsSkipped++;
+          continue;
+        }
+
+        const session = this.sessionManager.initializeSession(sessionDbId);
+        logger.info('SYSTEM', `Starting processor for session ${sessionDbId}`, {
+          project: session.project,
+          pendingCount: pendingStore.getPendingCount(sessionDbId)
+        });
+
+        this.startSessionProcessor(session, 'startup-recovery');
+        result.sessionsStarted++;
+        result.startedSessionIds.push(sessionDbId);
+
+        await new Promise(resolve => setTimeout(resolve, 100));
+      } catch (error) {
+        logger.error('SYSTEM', `Failed to process session ${sessionDbId}`, {}, error as Error);
+        result.sessionsSkipped++;
+      }
+    }
+
+    return result;
+>>>>>>> upstream/main
   }
 
   /**
