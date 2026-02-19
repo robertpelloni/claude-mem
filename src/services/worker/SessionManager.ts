@@ -153,6 +153,39 @@ export class SessionManager {
     logger.info('WORKER', 'Session completed and cleaned up', { sessionDbId });
   }
 
+  private static readonly MAX_SESSION_IDLE_MS = 15 * 60 * 1000; // 15 minutes
+
+  /**
+   * Reap sessions with no active generator and no pending work that have been idle too long.
+   * This unblocks the orphan reaper which skips processes for "active" sessions. (Issue #1168)
+   */
+  async reapStaleSessions(): Promise<number> {
+    const now = Date.now();
+    const staleSessionIds: number[] = [];
+
+    for (const [sessionDbId, session] of this.sessions) {
+      // Skip sessions with active generators
+      if (session.generatorPromise) continue;
+
+      // Skip sessions with pending work
+      const pendingCount = this.getPendingStore().getPendingCount(sessionDbId);
+      if (pendingCount > 0) continue;
+
+      // No generator + no pending work + old enough = stale
+      const sessionAge = now - session.startTime;
+      if (sessionAge > SessionManager.MAX_SESSION_IDLE_MS) {
+        staleSessionIds.push(sessionDbId);
+      }
+    }
+
+    for (const sessionDbId of staleSessionIds) {
+      logger.warn('SESSION', `Reaping stale session ${sessionDbId} (no activity for >${Math.round(SessionManager.MAX_SESSION_IDLE_MS / 60000)}m)`, { sessionDbId });
+      await this.deleteSession(sessionDbId);
+    }
+
+    return staleSessionIds.length;
+  }
+
   /**
    * Shutdown all active sessions
    */
@@ -200,12 +233,33 @@ export class SessionManager {
           const handler = () => resolve();
           emitter.once('message', handler);
 
+<<<<<<< HEAD
           // Also listen for abort
           session.abortController.signal.addEventListener('abort', () => {
             emitter.off('message', handler);
             resolve();
           }, { once: true });
         });
+=======
+    // Use the robust iterator - messages are deleted on claim (no tracking needed)
+    // CRITICAL: Pass onIdleTimeout callback that triggers abort to kill the subprocess
+    // Without this, the iterator returns but the Claude subprocess stays alive as a zombie
+    for await (const message of processor.createIterator({
+      sessionDbId,
+      signal: session.abortController.signal,
+      onIdleTimeout: () => {
+        logger.info('SESSION', 'Triggering abort due to idle timeout to kill subprocess', { sessionDbId });
+        session.idleTimedOut = true;
+        session.abortController.abort();
+      }
+    })) {
+      // Track earliest timestamp for accurate observation timestamps
+      // This ensures backlog messages get their original timestamps, not current time
+      if (session.earliestPendingTimestamp === null) {
+        session.earliestPendingTimestamp = message._originalTimestamp;
+      } else {
+        session.earliestPendingTimestamp = Math.min(session.earliestPendingTimestamp, message._originalTimestamp);
+>>>>>>> upstream/main
       }
 
       // Yield all pending messages

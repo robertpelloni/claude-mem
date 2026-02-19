@@ -5,6 +5,211 @@
 
 All notable changes to claude-mem.
 
+## [v10.3.1] - 2026-02-19
+
+## Fix: Prevent Duplicate Worker Daemons and Zombie Processes
+
+Three root causes of chroma-mcp timeouts identified and fixed:
+
+### PID-based daemon guard
+Exit immediately on startup if PID file points to a live process. Prevents the race condition where hooks firing simultaneously could start multiple daemons before either wrote a PID file.
+
+### Port-based daemon guard
+Exit if port 37777 is already bound — runs before WorkerService constructor registers keepalive signal handlers that previously prevented exit on EADDRINUSE.
+
+### Guaranteed process.exit() after HTTP shutdown
+HTTP shutdown (POST /api/admin/shutdown) now calls `process.exit(0)` in a `try/finally` block. Previously, zombie workers stayed alive after shutdown, and background tasks reconnected to chroma-mcp, spawning duplicate subprocesses contending for the same data directory.
+
+## [v10.3.0] - 2026-02-18
+
+## Replace WASM Embeddings with Persistent chroma-mcp MCP Connection
+
+### Highlights
+
+- **New: ChromaMcpManager** — Singleton stdio MCP client communicating with chroma-mcp via `uvx`, replacing the previous ChromaServerManager (`npx chroma run` + `chromadb` npm + ONNX/WASM)
+- **Eliminates native binary issues** — No more segfaults, WASM embedding failures, or cross-platform install headaches
+- **Graceful subprocess lifecycle** — Wired into GracefulShutdown for clean teardown; zombie process prevention with kill-on-failure and stale `onclose` handler guards
+- **Connection backoff** — 10-second reconnect backoff prevents chroma-mcp spawn storms
+- **SQL injection guards** — Added parameterization to ChromaSync ID exclusion queries
+- **Simplified ChromaSync** — Reduced complexity by delegating embedding concerns to chroma-mcp
+
+### Breaking Changes
+
+None — backward compatible. ChromaDB data is preserved; only the connection mechanism changed.
+
+### Files Changed
+
+- `src/services/sync/ChromaMcpManager.ts` (new) — MCP client singleton
+- `src/services/sync/ChromaServerManager.ts` (deleted) — Old WASM/native approach
+- `src/services/sync/ChromaSync.ts` — Simplified to use MCP client
+- `src/services/worker-service.ts` — Updated startup sequence
+- `src/services/infrastructure/GracefulShutdown.ts` — Subprocess cleanup integration
+
+## [v10.2.6] - 2026-02-18
+
+## Bug Fixes
+
+### Zombie Process Prevention (#1168, #1175)
+
+Observer Claude CLI subprocesses were accumulating as zombies — processes that never exited after their session ended, causing massive resource leaks on long-running systems.
+
+**Root cause:** When observer sessions ended (via idle timeout, abort, or error), the spawned Claude CLI subprocesses were not being reliably killed. The existing `ensureProcessExit()` in `SDKAgent` only covered the happy path; sessions terminated through `SessionRoutes` or `worker-service` bypassed process cleanup entirely.
+
+**Fix — dual-layer approach:**
+
+1. **Immediate cleanup:** Added `ensureProcessExit()` calls to the `finally` blocks in both `SessionRoutes.ts` and `worker-service.ts`, ensuring every session exit path kills its subprocess
+2. **Periodic reaping:** Added `reapStaleSessions()` to `SessionManager` — a background interval that scans `~/.claude-mem/observer-sessions/` for stale PID files, verifies the process is still running, and kills any orphans with SIGKILL escalation
+
+This ensures no observer subprocess survives beyond its session lifetime, even in crash scenarios.
+
+## [v10.2.5] - 2026-02-18
+
+### Bug Fixes
+
+- **Self-healing message queue**: Renamed `claimAndDelete` → `claimNextMessage` with atomic self-healing — automatically resets stale processing messages (>60s) back to pending before claiming, eliminating stuck messages from generator crashes without external timers
+- **Removed redundant idle-timeout reset**: The `resetStaleProcessingMessages()` call during idle timeout in worker-service was removed (startup reset kept), since the atomic self-healing in `claimNextMessage` now handles recovery inline
+- **TypeScript diagnostic fix**: Added `QUEUE` to logger `Component` type
+
+### Tests
+
+- 5 new tests for self-healing behavior (stuck recovery, active protection, atomicity, empty queue, session isolation)
+- 1 new integration test for stuck recovery in zombie-prevention suite
+- All existing queue tests updated for renamed method
+
+## [v10.2.4] - 2026-02-18
+
+## Chroma Vector DB Backfill Fix
+
+Fixes the Chroma backfill system to correctly sync all SQLite observations into the vector database on worker startup.
+
+### Bug Fixes
+
+- **Backfill all projects on startup** — `backfillAllProjects()` now runs on worker startup, iterating all projects in SQLite and syncing missing observations to Chroma. Previously `ensureBackfilled()` existed but was never called, leaving Chroma with incomplete data after cache clears.
+
+- **Fixed critical collection routing bug** — Backfill now uses the shared `cm__claude-mem` collection (matching how DatabaseManager and SearchManager operate) instead of creating per-project orphan collections that no search path reads from.
+
+- **Hardened collection name sanitization** — Project names with special characters (e.g., "YC Stuff") are sanitized for Chroma's naming constraints, including stripping trailing non-alphanumeric characters.
+
+- **Eliminated shared mutable state** — `ensureBackfilled()` and `getExistingChromaIds()` now accept project as a parameter instead of mutating instance state, keeping a single Chroma connection while avoiding fragile property mutation across iterations.
+
+- **Chroma readiness guard** — Backfill waits for Chroma server readiness before running, preventing spurious error logs when Chroma fails to start.
+
+### Changed Files
+
+- `src/services/sync/ChromaSync.ts` — Core backfill logic, sanitization, parameter passing
+- `src/services/worker-service.ts` — Startup backfill trigger + readiness guard
+- `src/utils/logger.ts` — Added `CHROMA_SYNC` log component
+
+## [v10.2.3] - 2026-02-17
+
+## Fix Chroma ONNX Model Cache Corruption
+
+Addresses the persistent embedding pipeline failures reported across #1104, #1105, #1110, and subsequent sessions. Three root causes identified and fixed:
+
+### Changes
+
+- **Removed nuclear `bun pm cache rm`** from both `smart-install.js` and `sync-marketplace.cjs`. This was added in v10.2.2 for the now-removed sharp dependency but destroyed all cached packages, breaking the ONNX resolution chain.
+- **Added `bun install` in plugin cache directory** after marketplace sync. The cache directory had a `package.json` with `@chroma-core/default-embed` as a dependency but never ran install, so the worker couldn't resolve it at runtime.
+- **Moved HuggingFace model cache to `~/.claude-mem/models/`** outside `node_modules`. The ~23MB ONNX model was stored inside `node_modules/@huggingface/transformers/.cache/`, so any reinstall or cache clear corrupted it.
+- **Added self-healing retry** for Protobuf parsing failures. If the downloaded model is corrupted, the cache is cleared and re-downloaded automatically on next use.
+
+### Files Changed
+
+- `scripts/smart-install.js` — removed `bun pm cache rm`
+- `scripts/sync-marketplace.cjs` — removed `bun pm cache rm`, added `bun install` in cache dir
+- `src/services/sync/ChromaSync.ts` — moved model cache, added corruption recovery
+
+## [v10.2.2] - 2026-02-17
+
+## Bug Fixes
+
+- **Removed `node-addon-api` dev dependency** — was only needed for `sharp`, which was already removed in v10.2.1
+- **Simplified native module cache clearing** in `smart-install.js` and `sync-marketplace.cjs` — replaced targeted `@img/sharp` directory deletion and lockfile removal with `bun pm cache rm`
+- Reduced ~30 lines of brittle file system manipulation to a clean Bun CLI command
+
+## [v10.2.1] - 2026-02-16
+
+## Bug Fixes
+
+- **Bun install & sharp native modules**: Fixed stale native module cache issues on Bun updates, added `node-addon-api` as a dev dependency required by sharp (#1140)
+- **PendingMessageStore consolidation**: Deduplicated PendingMessageStore initialization in worker-service; added session-scoped filtering to `resetStaleProcessingMessages` to prevent cross-session message resets (#1140)
+- **Gemini empty response handling**: Fixed silent message deletion when Gemini returns empty summary responses — now logs a warning and preserves the original message (#1138)
+- **Idle timeout session scoping**: Fixed idle timeout handler to only reset messages for the timed-out session instead of globally resetting all sessions (#1138)
+- **Shell injection in sync-marketplace**: Replaced `execSync` with `spawnSync` for rsync calls to eliminate command injection via gitignore patterns (#1138)
+- **Sharp cache invalidation**: Added cache clearing for sharp's native bindings when Bun version changes (#1138)
+- **Marketplace install**: Switched marketplace sync from npm to bun for package installation consistency (#1140)
+
+## [v10.1.0] - 2026-02-16
+
+## SessionStart System Message & Cleaner Defaults
+
+### New Features
+
+- **SessionStart `systemMessage` support** — Hooks can now display user-visible ANSI-colored messages directly in the CLI via a new `systemMessage` field on `HookResult`. The SessionStart hook uses this to render a colored timeline summary (separate from the markdown context injected for Claude), giving users an at-a-glance view of recent activity every time they start a session.
+
+- **"View Observations Live" link** — Each session start now appends a clickable `http://localhost:{port}` URL so users can jump straight to the live observation viewer.
+
+### Performance
+
+- **Truly parallel context fetching** — The SessionStart handler now uses `Promise.all` to fetch both the markdown context (for Claude) and the ANSI-colored timeline (for user display) simultaneously, eliminating the serial fetch overhead.
+
+### Defaults Changes
+
+- **Cleaner out-of-box experience** — New installs now default to a streamlined context display:
+  - Read tokens column: hidden (`CLAUDE_MEM_CONTEXT_SHOW_READ_TOKENS: false`)
+  - Work tokens column: hidden (`CLAUDE_MEM_CONTEXT_SHOW_WORK_TOKENS: false`)
+  - Savings amount: hidden (`CLAUDE_MEM_CONTEXT_SHOW_SAVINGS_AMOUNT: false`)
+  - Full observation expansion: disabled (`CLAUDE_MEM_CONTEXT_FULL_COUNT: 0`)
+  - Savings percentage remains visible by default
+
+  Existing users are unaffected — your `~/.claude-mem/settings.json` overrides these defaults.
+
+### Technical Details
+
+- Added `systemMessage?: string` to `HookResult` interface (`src/cli/types.ts`)
+- Claude Code adapter now forwards `systemMessage` in hook output (`src/cli/adapters/claude-code.ts`)
+- Context handler refactored for parallel fetch with graceful fallback (`src/cli/handlers/context.ts`)
+- Default settings tuned in `SettingsDefaultsManager` (`src/shared/SettingsDefaultsManager.ts`)
+
+## [v10.0.8] - 2026-02-16
+
+## Bug Fixes
+
+### Orphaned Subprocess Cleanup
+- Add explicit subprocess cleanup after SDK query loop using existing `ProcessRegistry` infrastructure (`getProcessBySession` + `ensureProcessExit`), preventing orphaned Claude subprocesses from accumulating
+- Closes #1010, #1089, #1090, #1068
+
+### Chroma Binary Resolution
+- Replace `npx chroma run` with absolute binary path resolution via `require.resolve`, falling back to `npx` with explicit `cwd` when the binary isn't found directly
+- Closes #1120
+
+### Cross-Platform Embedding Fix
+- Remove `@chroma-core/default-embed` which pulled in `onnxruntime` + `sharp` native binaries that fail on many platforms
+- Use WASM backend for Chroma embeddings, eliminating native binary compilation issues
+- Closes #1104, #1105, #1110
+
+## [v10.0.7] - 2026-02-14
+
+## Chroma HTTP Server Architecture
+
+- **Persistent HTTP server**: Switched from in-process Chroma to a persistent HTTP server managed by the new `ChromaServerManager` for better reliability and performance
+- **Local embeddings**: Added `DefaultEmbeddingFunction` for local vector embeddings — no external API required
+- **Pinned chromadb v3.2.2**: Fixed compatibility with v2 API heartbeat endpoint
+- **Server lifecycle improvements**: Addressed PR review feedback for proper start/stop/health check handling
+
+## Bug Fixes
+
+- Fixed SDK spawn failures and sharp native binary crashes
+- Added `plugin.json` to root `.claude-plugin` directory for proper plugin structure
+- Removed duplicate else block from merge artifact
+
+## Infrastructure
+
+- Added multi-tenancy support for claude-mem Pro
+- Updated OpenClaw install URLs to `install.cmem.ai`
+- Added Vercel deploy workflow for install scripts
+- Added `.claude/plans` and `.claude/worktrees` to `.gitignore`
+
 ## [v10.0.6] - 2026-02-13
 
 ## Bug Fixes
@@ -1249,6 +1454,7 @@ Thanks @yungweng for the detailed bug report!
 - Updated worker CLI scripts to reference worker-service.cjs directly
 - Simplified hook command configurations
 
+<<<<<<< HEAD
 ## [v8.2.8] - 2025-12-29
 
 ## Bug Fixes
@@ -1831,6 +2037,8 @@ Refactored context loading logic to differentiate between code and non-code mode
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
 
+>>>>>>> upstream/main
+=======
 >>>>>>> upstream/main
 =======
 >>>>>>> upstream/main

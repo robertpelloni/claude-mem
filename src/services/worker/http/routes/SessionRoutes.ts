@@ -17,6 +17,12 @@ import { BaseRouteHandler } from '../BaseRouteHandler.js';
 import { SessionEventBroadcaster } from '../../events/SessionEventBroadcaster.js';
 import { SessionCompletionHandler } from '../../session/SessionCompletionHandler.js';
 import { PrivacyCheckValidator } from '../../validation/PrivacyCheckValidator.js';
+<<<<<<< HEAD
+=======
+import { SettingsDefaultsManager } from '../../../../shared/SettingsDefaultsManager.js';
+import { USER_SETTINGS_PATH } from '../../../../shared/paths.js';
+import { getProcessBySession, ensureProcessExit } from '../../ProcessRegistry.js';
+>>>>>>> upstream/main
 
 export class SessionRoutes extends BaseRouteHandler {
   private completionHandler: SessionCompletionHandler;
@@ -60,6 +66,171 @@ export class SessionRoutes extends BaseRouteHandler {
     }
   }
 
+<<<<<<< HEAD
+=======
+  /**
+   * Start a generator with the specified provider
+   */
+  private startGeneratorWithProvider(
+    session: ReturnType<typeof this.sessionManager.getSession>,
+    provider: 'claude' | 'gemini' | 'openrouter',
+    source: string
+  ): void {
+    if (!session) return;
+
+    // Reset AbortController if it was previously aborted
+    // This fixes the bug where a session gets stuck in an infinite "Generator aborted" loop
+    // after its AbortController was aborted (e.g., from a previous generator exit)
+    if (session.abortController.signal.aborted) {
+      logger.debug('SESSION', 'Resetting aborted AbortController before starting generator', {
+        sessionId: session.sessionDbId
+      });
+      session.abortController = new AbortController();
+    }
+
+    const agent = provider === 'openrouter' ? this.openRouterAgent : (provider === 'gemini' ? this.geminiAgent : this.sdkAgent);
+    const agentName = provider === 'openrouter' ? 'OpenRouter' : (provider === 'gemini' ? 'Gemini' : 'Claude SDK');
+
+    // Use database count for accurate telemetry (in-memory array is always empty due to FK constraint fix)
+    const pendingStore = this.sessionManager.getPendingMessageStore();
+    const actualQueueDepth = pendingStore.getPendingCount(session.sessionDbId);
+
+    logger.info('SESSION', `Generator auto-starting (${source}) using ${agentName}`, {
+      sessionId: session.sessionDbId,
+      queueDepth: actualQueueDepth,
+      historyLength: session.conversationHistory.length
+    });
+
+    // Track which provider is running
+    session.currentProvider = provider;
+
+    session.generatorPromise = agent.startSession(session, this.workerService)
+      .catch(error => {
+        // Only log non-abort errors
+        if (session.abortController.signal.aborted) return;
+        
+        logger.error('SESSION', `Generator failed`, {
+          sessionId: session.sessionDbId,
+          provider: provider,
+          error: error.message
+        }, error);
+
+        // Mark all processing messages as failed so they can be retried or abandoned
+        const pendingStore = this.sessionManager.getPendingMessageStore();
+        try {
+          const failedCount = pendingStore.markSessionMessagesFailed(session.sessionDbId);
+          if (failedCount > 0) {
+            logger.error('SESSION', `Marked messages as failed after generator error`, {
+              sessionId: session.sessionDbId,
+              failedCount
+            });
+          }
+        } catch (dbError) {
+          logger.error('SESSION', 'Failed to mark messages as failed', {
+            sessionId: session.sessionDbId
+          }, dbError as Error);
+        }
+      })
+      .finally(async () => {
+        // CRITICAL: Verify subprocess exit to prevent zombie accumulation (Issue #1168)
+        const tracked = getProcessBySession(session.sessionDbId);
+        if (tracked && !tracked.process.killed && tracked.process.exitCode === null) {
+          await ensureProcessExit(tracked, 5000);
+        }
+
+        const sessionDbId = session.sessionDbId;
+        this.spawnInProgress.delete(sessionDbId);
+        const wasAborted = session.abortController.signal.aborted;
+
+        if (wasAborted) {
+          logger.info('SESSION', `Generator aborted`, { sessionId: sessionDbId });
+        } else {
+          logger.error('SESSION', `Generator exited unexpectedly`, { sessionId: sessionDbId });
+        }
+
+        session.generatorPromise = null;
+        session.currentProvider = null;
+        this.workerService.broadcastProcessingStatus();
+
+        // Crash recovery: If not aborted and still has work, restart (with limit)
+        if (!wasAborted) {
+          try {
+            const pendingStore = this.sessionManager.getPendingMessageStore();
+            const pendingCount = pendingStore.getPendingCount(sessionDbId);
+
+            // CRITICAL: Limit consecutive restarts to prevent infinite loops
+            // This prevents runaway API costs when there's a persistent error (e.g., memorySessionId not captured)
+            const MAX_CONSECUTIVE_RESTARTS = 3;
+
+            if (pendingCount > 0) {
+              // GUARD: Prevent duplicate crash recovery spawns
+              if (this.crashRecoveryScheduled.has(sessionDbId)) {
+                logger.debug('SESSION', 'Crash recovery already scheduled', { sessionDbId });
+                return;
+              }
+
+              session.consecutiveRestarts = (session.consecutiveRestarts || 0) + 1;
+
+              if (session.consecutiveRestarts > MAX_CONSECUTIVE_RESTARTS) {
+                logger.error('SESSION', `CRITICAL: Generator restart limit exceeded - stopping to prevent runaway costs`, {
+                  sessionId: sessionDbId,
+                  pendingCount,
+                  consecutiveRestarts: session.consecutiveRestarts,
+                  maxRestarts: MAX_CONSECUTIVE_RESTARTS,
+                  action: 'Generator will NOT restart. Check logs for root cause. Messages remain in pending state.'
+                });
+                // Don't restart - abort to prevent further API calls
+                session.abortController.abort();
+                return;
+              }
+
+              logger.info('SESSION', `Restarting generator after crash/exit with pending work`, {
+                sessionId: sessionDbId,
+                pendingCount,
+                consecutiveRestarts: session.consecutiveRestarts,
+                maxRestarts: MAX_CONSECUTIVE_RESTARTS
+              });
+
+              // Abort OLD controller before replacing to prevent child process leaks
+              const oldController = session.abortController;
+              session.abortController = new AbortController();
+              oldController.abort();
+
+              this.crashRecoveryScheduled.add(sessionDbId);
+
+              // Exponential backoff: 1s, 2s, 4s for subsequent restarts
+              const backoffMs = Math.min(1000 * Math.pow(2, session.consecutiveRestarts - 1), 8000);
+
+              // Delay before restart with exponential backoff
+              setTimeout(() => {
+                this.crashRecoveryScheduled.delete(sessionDbId);
+                const stillExists = this.sessionManager.getSession(sessionDbId);
+                if (stillExists && !stillExists.generatorPromise) {
+                  this.startGeneratorWithProvider(stillExists, this.getSelectedProvider(), 'crash-recovery');
+                }
+              }, backoffMs);
+            } else {
+              // No pending work - abort to kill the child process
+              session.abortController.abort();
+              // Reset restart counter on successful completion
+              session.consecutiveRestarts = 0;
+              logger.debug('SESSION', 'Aborted controller after natural completion', {
+                sessionId: sessionDbId
+              });
+            }
+          } catch (e) {
+            // Ignore errors during recovery check, but still abort to prevent leaks
+            logger.debug('SESSION', 'Error during recovery check, aborting to prevent leaks', { sessionId: sessionDbId, error: e instanceof Error ? e.message : String(e) });
+            session.abortController.abort();
+          }
+        }
+        // NOTE: We do NOT delete the session here anymore.
+        // The generator waits for events, so if it exited, it's either aborted or crashed.
+        // Idle sessions stay in memory (ActiveSession is small) to listen for future events.
+      });
+  }
+
+>>>>>>> upstream/main
   setupRoutes(app: express.Application): void {
     // Legacy session endpoints (use sessionDbId)
     app.post('/sessions/:sessionDbId/init', this.handleSessionInit.bind(this));

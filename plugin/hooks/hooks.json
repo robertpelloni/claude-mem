@@ -1,6 +1,21 @@
 {
   "description": "Claude-mem memory system hooks",
   "hooks": {
+<<<<<<< HEAD
+=======
+    "Setup": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/setup.sh",
+            "timeout": 300
+          }
+        ]
+      }
+    ],
+>>>>>>> upstream/main
     "SessionStart": [
       {
         "matcher": "startup|clear|compact",

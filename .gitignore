@@ -6,6 +6,13 @@ node_modules/
 *.tmp
 *.temp
 .claude/settings.local.json
+<<<<<<< HEAD
+=======
+.claude/agents/
+.claude/skills/
+.claude/plans/
+.claude/worktrees/
+>>>>>>> upstream/main
 plugin/data/
 plugin/data.backup/
 private/

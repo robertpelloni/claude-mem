@@ -59,6 +59,30 @@ async function buildHooks() {
     }
     console.log('✓ Output directories ready');
 
+<<<<<<< HEAD
+=======
+    // Generate plugin/package.json for cache directory dependency installation
+    // Note: bun:sqlite is a Bun built-in, no external dependencies needed for SQLite
+    console.log('\n📦 Generating plugin package.json...');
+    const pluginPackageJson = {
+      name: 'claude-mem-plugin',
+      version: version,
+      private: true,
+      description: 'Runtime dependencies for claude-mem bundled hooks',
+      type: 'module',
+      dependencies: {
+        // Chroma embedding function with native ONNX binaries (can't be bundled)
+        '@chroma-core/default-embed': '^0.1.9'
+      },
+      engines: {
+        node: '>=18.0.0',
+        bun: '>=1.0.0'
+      }
+    };
+    fs.writeFileSync('plugin/package.json', JSON.stringify(pluginPackageJson, null, 2) + '\n');
+    console.log('✓ plugin/package.json generated');
+
+>>>>>>> upstream/main
     // Build React viewer
     console.log('\n📋 Building React viewer...');
     const { spawn } = await import('child_process');
@@ -84,7 +108,19 @@ async function buildHooks() {
       outfile: `${hooksDir}/${WORKER_SERVICE.name}.cjs`,
       minify: true,
       logLevel: 'error', // Suppress warnings (import.meta warning is benign)
+<<<<<<< HEAD
       external: ['better-sqlite3'],
+=======
+      external: [
+        'bun:sqlite',
+        // Optional chromadb embedding providers
+        'cohere-ai',
+        'ollama',
+        // Default embedding function with native binaries
+        '@chroma-core/default-embed',
+        'onnxruntime-node'
+      ],
+>>>>>>> upstream/main
       define: {
         '__DEFAULT_PACKAGE_VERSION__': `"${version}"`
       },
