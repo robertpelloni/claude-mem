@@ -13,8 +13,8 @@ interface HeaderProps {
   themePreference: ThemePreference;
   onThemeChange: (theme: ThemePreference) => void;
   onContextPreviewToggle: () => void;
-  currentView: 'feed' | 'help' | 'status' | 'search' | 'dashboard';
-  onViewChange: (view: 'feed' | 'help' | 'status' | 'search' | 'dashboard') => void;
+  currentView: 'feed' | 'help' | 'status' | 'search' | 'dashboard' | 'pro';
+  onViewChange: (view: 'feed' | 'help' | 'status' | 'search' | 'dashboard' | 'pro') => void;
 }
 
 export function Header({
@@ -138,6 +138,16 @@ export function Header({
         >
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+          </svg>
+        </button>
+
+        <button
+          className={`settings-btn ${currentView === 'pro' ? 'active' : ''}`}
+          onClick={() => onViewChange('pro')}
+          title="Pro Features"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 2L15 9L22 12L15 15L12 22L9 15L2 12L9 9L12 2Z" />
           </svg>
         </button>
 

@@ -1822,6 +1822,35 @@ export class SessionStore {
   /**
    * Close the database connection
    */
+  /**
+   * Get stats for Endless Mode visualization
+   * Returns total tokens stored in archive (savings) and session counts
+   */
+  getEndlessModeStats(): { totalArchivedTokens: number; totalSessions: number; totalObservations: number } {
+    try {
+      const obsStats = this.db.prepare('SELECT SUM(discovery_tokens) as tokens, COUNT(*) as count FROM observations').get() as { tokens: number; count: number };
+      const sumStats = this.db.prepare('SELECT SUM(discovery_tokens) as tokens FROM session_summaries').get() as { tokens: number };
+      const sessionStats = this.db.prepare('SELECT COUNT(*) as count FROM sdk_sessions').get() as { count: number };
+
+      // Fallback: if tokens are 0 but we have items, estimate them
+      // Estimate: 200 tokens per observation, 500 per summary
+      let totalTokens = (obsStats?.tokens || 0) + (sumStats?.tokens || 0);
+
+      if (totalTokens === 0 && obsStats?.count > 0) {
+        totalTokens = (obsStats.count * 200);
+      }
+
+      return {
+        totalArchivedTokens: totalTokens,
+        totalSessions: sessionStats?.count || 0,
+        totalObservations: obsStats?.count || 0
+      };
+    } catch (error) {
+      console.error('[SessionStore] Failed to get endless mode stats:', error);
+      return { totalArchivedTokens: 0, totalSessions: 0, totalObservations: 0 };
+    }
+  }
+
   close(): void {
     this.db.close();
   }

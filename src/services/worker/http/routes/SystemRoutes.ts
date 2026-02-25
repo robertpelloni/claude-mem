@@ -10,9 +10,10 @@ import fs from 'fs';
 import { getPackageRoot } from '../../../../shared/paths.js';
 import { BaseRouteHandler } from '../BaseRouteHandler.js';
 import { getBranchInfo } from '../../BranchManager.js';
+import { DatabaseManager } from '../../DatabaseManager.js';
 
 export class SystemRoutes extends BaseRouteHandler {
-  constructor() {
+  constructor(private dbManager?: DatabaseManager) {
     super();
   }
 
@@ -47,10 +48,27 @@ export class SystemRoutes extends BaseRouteHandler {
     // 3. Project Structure (Simplified)
     const structure = this.scanDirectory(packageRoot, 0, 2); // Max depth 2
 
+    // 4. Endless Mode Stats (if DB available)
+    let endlessMode = null;
+    if (this.dbManager) {
+      try {
+        const stats = this.dbManager.getSessionStore().getEndlessModeStats();
+        endlessMode = {
+          active: true, // Always active if DB is connected
+          savings: stats.totalArchivedTokens,
+          sessions: stats.totalSessions,
+          observations: stats.totalObservations
+        };
+      } catch (e) {
+        // Ignore stats errors
+      }
+    }
+
     res.json({
       dependencies,
       git: gitInfo,
-      structure
+      structure,
+      endlessMode
     });
   });
 

@@ -12,6 +12,12 @@ interface SystemInfo {
     type: 'directory' | 'file';
     children: any[];
   } | null;
+  endlessMode?: {
+    active: boolean;
+    savings: number;
+    sessions: number;
+    observations: number;
+  };
 }
 
 export function DashboardPage() {
@@ -59,7 +65,7 @@ export function DashboardPage() {
   if (error) return <div style={{ padding: '40px', textAlign: 'center', color: 'var(--color-accent-error)' }}>{error}</div>;
   if (!info) return null;
 
-  const isEndlessMode = info.git.branch?.includes('beta');
+  const isEndlessMode = info.git.branch?.includes('beta') || (info.endlessMode && info.endlessMode.active);
 
   return (
     <div style={{ padding: '40px', maxWidth: '1000px', margin: '0 auto' }}>
@@ -87,7 +93,7 @@ export function DashboardPage() {
             padding: '4px 8px',
             borderBottomLeftRadius: '8px'
           }}>
-            BETA FEATURE
+            {info.endlessMode ? 'ACTIVE' : 'BETA FEATURE'}
           </div>
           <h3 style={{ fontSize: '14px', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', marginBottom: '16px' }}>
             Endless Mode Simulation
@@ -106,11 +112,16 @@ export function DashboardPage() {
               <div style={{ height: '8px', background: 'var(--color-bg-tertiary)', borderRadius: '4px', overflow: 'hidden' }}>
                 <div style={{ width: '85%', height: '100%', background: 'var(--color-accent-primary)' }}></div>
               </div>
-              <div style={{ fontSize: '10px', color: 'var(--color-text-muted)', marginTop: '4px' }}>Unlimited (Disk)</div>
+              <div style={{ fontSize: '10px', color: 'var(--color-text-muted)', marginTop: '4px' }}>
+                {info.endlessMode
+                  ? `${info.endlessMode.savings.toLocaleString()} tokens (Saved) • ${info.endlessMode.observations.toLocaleString()} items`
+                  : 'Unlimited (Disk)'}
+              </div>
             </div>
           </div>
           <p style={{ marginTop: '16px', fontSize: '12px', color: 'var(--color-text-secondary)', lineHeight: 1.5 }}>
             Endless Mode is active. Tool outputs are being compressed in real-time to preserve context window space.
+            {info.endlessMode && ` Total sessions: ${info.endlessMode.sessions}`}
           </p>
         </div>
       )}

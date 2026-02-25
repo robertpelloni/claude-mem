@@ -4,15 +4,14 @@
 - [ ] Create `HANDOFF.md` for next session.
 - [ ] Update `AGENTS.md` with strict instructions.
 
-## UI / UX
-- [ ] Implement `DashboardPage.tsx` with project structure visualization.
-- [ ] Add tooltips to `IntegrationsStatus.tsx`.
-- [ ] Add "Clear Logs" button to `SystemStatus.tsx`.
-
 ## Backend
-- [ ] Implement `/api/system/info` endpoint for the dashboard.
-- [ ] Add "Endless Mode" simulation stats to `/api/stats` if active.
+- [ ] Implement robust token counting for accurate Endless Mode stats.
+- [ ] Add `GraphRoutes.ts` for knowledge graph visualization.
+
+## UI / UX
+- [ ] Implement Graph View using `react-force-graph` or similar.
+- [ ] Add search capability to `HelpPage`.
 
 ## Robustness
-- [ ] Add error boundary to `SearchPage`.
-- [ ] Verify `gemini-cli-extension` build in CI pipeline.
+- [ ] Add E2E tests for the full worker lifecycle.
+- [ ] Implement automated rollback for failed migrations.

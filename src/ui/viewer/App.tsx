@@ -5,6 +5,8 @@ import { HelpPage } from './components/HelpPage';
 import { SystemStatus } from './components/SystemStatus';
 import { SearchPage } from './components/SearchPage';
 import { DashboardPage } from './components/DashboardPage';
+import { ProFeaturesPage } from './components/ProFeaturesPage';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { ContextSettingsModal } from './components/ContextSettingsModal';
 import { useSSE } from './hooks/useSSE';
 import { useSettings } from './hooks/useSettings';
@@ -16,7 +18,7 @@ import { mergeAndDeduplicateByProject } from './utils/data';
 
 export function App() {
   const [currentFilter, setCurrentFilter] = useState('');
-  const [currentView, setCurrentView] = useState<'feed' | 'help' | 'status' | 'search' | 'dashboard'>('feed');
+  const [currentView, setCurrentView] = useState<'feed' | 'help' | 'status' | 'search' | 'dashboard' | 'pro'>('feed');
   const [contextPreviewOpen, setContextPreviewOpen] = useState(false);
   const [paginatedObservations, setPaginatedObservations] = useState<Observation[]>([]);
   const [paginatedSummaries, setPaginatedSummaries] = useState<Summary[]>([]);
@@ -148,32 +150,54 @@ export function App() {
 
       <div className="main-content">
         {currentView === 'feed' && (
-          <Feed
-            observations={allObservations}
-            summaries={allSummaries}
-            prompts={allPrompts}
-            onLoadMore={handleLoadMore}
-            isLoading={pagination.observations.isLoading || pagination.summaries.isLoading || pagination.prompts.isLoading}
-            hasMore={pagination.observations.hasMore || pagination.summaries.hasMore || pagination.prompts.hasMore}
-          />
+          <ErrorBoundary>
+            <Feed
+              observations={allObservations}
+              summaries={allSummaries}
+              prompts={allPrompts}
+              onLoadMore={handleLoadMore}
+              isLoading={pagination.observations.isLoading || pagination.summaries.isLoading || pagination.prompts.isLoading}
+              hasMore={pagination.observations.hasMore || pagination.summaries.hasMore || pagination.prompts.hasMore}
+            />
+          </ErrorBoundary>
         )}
 
-        {currentView === 'help' && <HelpPage />}
+        {currentView === 'help' && (
+          <ErrorBoundary>
+            <HelpPage />
+          </ErrorBoundary>
+        )}
 
-        {currentView === 'search' && <SearchPage />}
+        {currentView === 'search' && (
+          <ErrorBoundary>
+            <SearchPage />
+          </ErrorBoundary>
+        )}
 
-        {currentView === 'dashboard' && <DashboardPage />}
+        {currentView === 'dashboard' && (
+          <ErrorBoundary>
+            <DashboardPage />
+          </ErrorBoundary>
+        )}
+
+        {currentView === 'pro' && (
+          <ErrorBoundary>
+            <ProFeaturesPage />
+          </ErrorBoundary>
+        )}
 
         {currentView === 'status' && (
-          <div className="container mx-auto p-4">
-            <SystemStatus
-              isConnected={isConnected}
-              mcpReady={readiness.mcpReady}
-              initialized={readiness.initialized}
-              logs={logs}
-              onClearLogs={clearLogs}
-            />
-          </div>
+          <ErrorBoundary>
+            <div className="container mx-auto p-4">
+              <SystemStatus
+                isConnected={isConnected}
+                mcpReady={readiness.mcpReady}
+                initialized={readiness.initialized}
+                logs={logs}
+                onClearLogs={clearLogs}
+              />
+            </div>
+          </ErrorBoundary>
         )}
       </div>
 

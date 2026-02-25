@@ -41,8 +41,14 @@ export function IntegrationsStatus() {
         backgroundColor: 'var(--color-bg-tertiary)'
       }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-          <span style={{ fontWeight: 600, fontSize: '13px' }}>Chroma Vector DB</span>
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span style={{ fontWeight: 600, fontSize: '13px' }}>Chroma Vector DB</span>
+            <span
+              title="Chroma is the vector database used for semantic search. It stores embeddings of your memories."
+              style={{ cursor: 'help', fontSize: '12px', color: 'var(--color-text-muted)' }}
+            >ⓘ</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }} title={status.chroma.connected ? "Connection active" : "Connection failed"}>
             <span style={{ fontSize: '11px', color: status.chroma.connected ? 'var(--color-accent-success)' : 'var(--color-accent-error)' }}>
               {status.chroma.connected ? 'Connected' : 'Disconnected'}
             </span>
@@ -78,8 +84,14 @@ export function IntegrationsStatus() {
         backgroundColor: 'var(--color-bg-tertiary)'
       }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-          <span style={{ fontWeight: 600, fontSize: '13px' }}>OpenCode Plugin</span>
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span style={{ fontWeight: 600, fontSize: '13px' }}>OpenCode Plugin</span>
+             <span
+              title="The OpenCode plugin allows AI agents to read/write memories via the MCP protocol."
+              style={{ cursor: 'help', fontSize: '12px', color: 'var(--color-text-muted)' }}
+            >ⓘ</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }} title="Status reported by client-side integration">
             <span style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>Client-Side</span>
             <div className="status-dot" style={{ backgroundColor: 'var(--color-text-muted)', animation: 'none' }} />
           </div>

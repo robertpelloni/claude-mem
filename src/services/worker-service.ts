@@ -117,7 +117,7 @@ export class WorkerService {
     this.searchRoutes = null;
     this.settingsRoutes = new SettingsRoutes(this.settingsManager);
     this.integrationsRoutes = new IntegrationsRoutes(this.dbManager);
-    this.systemRoutes = new SystemRoutes();
+    this.systemRoutes = new SystemRoutes(this.dbManager);
 
     this.setupMiddleware();
     this.setupRoutes();

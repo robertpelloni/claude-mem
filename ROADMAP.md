@@ -11,14 +11,17 @@
     - [x] System Status Dashboard (Logs, Health)
     - [x] Integrated Help/Documentation
     - [x] System Dashboard (Dependencies, Project Structure, Git Info)
+    - [x] Pro Features UI Framework (Placeholder)
 - [x] **Endless Mode Support**:
     - [x] Basic infrastructure and UI visibility.
     - [x] Visualization of "Working vs Archive" memory simulation.
+    - [x] Real-time stats calculation in backend.
 
 ## Short Term (Next Steps)
-- [ ] **Pro Features UI**: Placeholder/Framework for licensed features.
-
-## Long Term
 - [ ] **Remote Sync**: Cloud synchronization for team memory.
 - [ ] **Graph View**: Interactive node-graph of concepts and files.
 - [ ] **IDE Native Widgets**: WebView widgets for VSCode/JetBrains.
+
+## Long Term
+- [ ] **Advanced Analytics**: Deeper insights into coding patterns.
+- [ ] **Multi-Agent Orchestration**: Coordinating multiple specialized agents.
