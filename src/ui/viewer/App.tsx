@@ -5,6 +5,7 @@ import { HelpPage } from './components/HelpPage';
 import { SystemStatus } from './components/SystemStatus';
 import { SearchPage } from './components/SearchPage';
 import { DashboardPage } from './components/DashboardPage';
+import { GraphPage } from './components/GraphPage';
 import { ProFeaturesPage } from './components/ProFeaturesPage';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { ContextSettingsModal } from './components/ContextSettingsModal';
@@ -18,7 +19,7 @@ import { mergeAndDeduplicateByProject } from './utils/data';
 
 export function App() {
   const [currentFilter, setCurrentFilter] = useState('');
-  const [currentView, setCurrentView] = useState<'feed' | 'help' | 'status' | 'search' | 'dashboard' | 'pro'>('feed');
+  const [currentView, setCurrentView] = useState<'feed' | 'help' | 'status' | 'search' | 'dashboard' | 'pro' | 'graph'>('feed');
   const [contextPreviewOpen, setContextPreviewOpen] = useState(false);
   const [paginatedObservations, setPaginatedObservations] = useState<Observation[]>([]);
   const [paginatedSummaries, setPaginatedSummaries] = useState<Summary[]>([]);
@@ -177,6 +178,12 @@ export function App() {
         {currentView === 'dashboard' && (
           <ErrorBoundary>
             <DashboardPage />
+          </ErrorBoundary>
+        )}
+
+        {currentView === 'graph' && (
+          <ErrorBoundary>
+            <GraphPage />
           </ErrorBoundary>
         )}
 

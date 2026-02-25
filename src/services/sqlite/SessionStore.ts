@@ -1851,6 +1851,117 @@ export class SessionStore {
     }
   }
 
+  /**
+   * Get knowledge graph data (nodes and edges)
+   */
+  getKnowledgeGraph(limit: number = 50): { nodes: any[]; edges: any[] } {
+    const nodes = new Map<string, any>();
+    const edges = new Set<string>();
+
+    try {
+      // 1. Get recent sessions
+      const sessions = this.db.prepare(`
+        SELECT id, sdk_session_id, project, started_at_epoch
+        FROM sdk_sessions
+        WHERE status != 'failed'
+        ORDER BY started_at_epoch DESC
+        LIMIT ?
+      `).all(limit) as any[];
+
+      for (const session of sessions) {
+        const sessionId = `session-${session.id}`;
+        nodes.set(sessionId, {
+          id: sessionId,
+          label: `Session ${session.id}`,
+          type: 'session',
+          val: 8,
+          data: session
+        });
+
+        // 2. Get concepts for this session
+        const concepts = this.db.prepare(`
+          SELECT concepts
+          FROM observations
+          WHERE sdk_session_id = ?
+        `).all(session.sdk_session_id) as { concepts: string }[];
+
+        for (const row of concepts) {
+          if (!row.concepts) continue;
+          try {
+            const tags = JSON.parse(row.concepts);
+            if (Array.isArray(tags)) {
+              for (const tag of tags) {
+                const tagId = `concept-${tag}`;
+                if (!nodes.has(tagId)) {
+                  nodes.set(tagId, {
+                    id: tagId,
+                    label: tag,
+                    type: 'concept',
+                    val: 5
+                  });
+                }
+                const edgeId = `${sessionId}->${tagId}`;
+                if (!edges.has(edgeId)) {
+                  edges.add(JSON.stringify({ source: sessionId, target: tagId, type: 'HAS_CONCEPT' }));
+                }
+              }
+            }
+          } catch (e) {}
+        }
+
+        // 3. Get files for this session
+        const files = this.db.prepare(`
+          SELECT files_read, files_modified
+          FROM observations
+          WHERE sdk_session_id = ?
+        `).all(session.sdk_session_id) as { files_read: string, files_modified: string }[];
+
+        for (const row of files) {
+          const processFiles = (json: string, type: 'READ' | 'MODIFIED') => {
+            if (!json) return;
+            try {
+              const fileList = JSON.parse(json);
+              if (Array.isArray(fileList)) {
+                for (const file of fileList) {
+                  const fileId = `file-${file}`;
+                  const fileName = file.split('/').pop() || file;
+
+                  if (!nodes.has(fileId)) {
+                    nodes.set(fileId, {
+                      id: fileId,
+                      label: fileName,
+                      type: 'file',
+                      val: type === 'MODIFIED' ? 6 : 3,
+                      path: file
+                    });
+                  } else if (type === 'MODIFIED') {
+                    // Upgrade value if modified
+                    const existing = nodes.get(fileId);
+                    existing.val = Math.max(existing.val, 6);
+                  }
+
+                  // Edges
+                  edges.add(JSON.stringify({ source: sessionId, target: fileId, type }));
+                }
+              }
+            } catch (e) {}
+          };
+
+          processFiles(row.files_read, 'READ');
+          processFiles(row.files_modified, 'MODIFIED');
+        }
+      }
+
+      return {
+        nodes: Array.from(nodes.values()),
+        edges: Array.from(edges).map(e => JSON.parse(e))
+      };
+    } catch (error) {
+      console.error('[SessionStore] Failed to get knowledge graph:', error);
+      return { nodes: [], edges: [] };
+    }
+  }
+
   close(): void {
     this.db.close();
   }
