@@ -13,8 +13,8 @@ interface HeaderProps {
   themePreference: ThemePreference;
   onThemeChange: (theme: ThemePreference) => void;
   onContextPreviewToggle: () => void;
-  currentView: 'feed' | 'help' | 'status' | 'search';
-  onViewChange: (view: 'feed' | 'help' | 'status' | 'search') => void;
+  currentView: 'feed' | 'help' | 'status' | 'search' | 'dashboard';
+  onViewChange: (view: 'feed' | 'help' | 'status' | 'search' | 'dashboard') => void;
 }
 
 export function Header({
@@ -119,9 +119,22 @@ export function Header({
         </button>
 
         <button
+          className={`settings-btn ${currentView === 'dashboard' ? 'active' : ''}`}
+          onClick={() => onViewChange('dashboard')}
+          title="System Dashboard"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="3" y="3" width="7" height="7"></rect>
+            <rect x="14" y="3" width="7" height="7"></rect>
+            <rect x="14" y="14" width="7" height="7"></rect>
+            <rect x="3" y="14" width="7" height="7"></rect>
+          </svg>
+        </button>
+
+        <button
           className={`settings-btn ${currentView === 'status' ? 'active' : ''}`}
           onClick={() => onViewChange('status')}
-          title="System Status"
+          title="Live Logs & Status"
         >
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>

@@ -116,5 +116,7 @@ export function useSSE() {
     };
   }, []);
 
-  return { observations, summaries, prompts, projects, logs, isProcessing, queueDepth, isConnected };
+  const clearLogs = () => setLogs([]);
+
+  return { observations, summaries, prompts, projects, logs, clearLogs, isProcessing, queueDepth, isConnected };
 }

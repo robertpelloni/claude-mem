@@ -8,9 +8,10 @@ interface SystemStatusProps {
   initialized: boolean;
   version?: string;
   logs?: LogEntry[];
+  onClearLogs?: () => void;
 }
 
-export const SystemStatus: React.FC<SystemStatusProps> = ({ isConnected, mcpReady, initialized, version, logs = [] }) => {
+export const SystemStatus: React.FC<SystemStatusProps> = ({ isConnected, mcpReady, initialized, version, logs = [], onClearLogs }) => {
   const { stats } = useStats();
   const [workerVersion, setWorkerVersion] = useState<string | null>(null);
   const [logFilter, setLogFilter] = useState<'ALL' | 'INFO' | 'WARN' | 'ERROR'>('ALL');
@@ -115,6 +116,22 @@ export const SystemStatus: React.FC<SystemStatusProps> = ({ isConnected, mcpRead
               <option value="WARN">Warn+</option>
               <option value="ERROR">Error only</option>
             </select>
+
+            <button
+              onClick={onClearLogs}
+              style={{
+                background: 'transparent',
+                border: '1px solid var(--color-border-primary)',
+                borderRadius: '4px',
+                padding: '4px 8px',
+                fontSize: '12px',
+                color: 'var(--color-text-secondary)',
+                cursor: 'pointer'
+              }}
+              title="Clear logs"
+            >
+              Clear
+            </button>
           </div>
         </div>
 

@@ -4,6 +4,7 @@ import { Feed } from './components/Feed';
 import { HelpPage } from './components/HelpPage';
 import { SystemStatus } from './components/SystemStatus';
 import { SearchPage } from './components/SearchPage';
+import { DashboardPage } from './components/DashboardPage';
 import { ContextSettingsModal } from './components/ContextSettingsModal';
 import { useSSE } from './hooks/useSSE';
 import { useSettings } from './hooks/useSettings';
@@ -15,7 +16,7 @@ import { mergeAndDeduplicateByProject } from './utils/data';
 
 export function App() {
   const [currentFilter, setCurrentFilter] = useState('');
-  const [currentView, setCurrentView] = useState<'feed' | 'help' | 'status' | 'search'>('feed');
+  const [currentView, setCurrentView] = useState<'feed' | 'help' | 'status' | 'search' | 'dashboard'>('feed');
   const [contextPreviewOpen, setContextPreviewOpen] = useState(false);
   const [paginatedObservations, setPaginatedObservations] = useState<Observation[]>([]);
   const [paginatedSummaries, setPaginatedSummaries] = useState<Summary[]>([]);
@@ -24,7 +25,7 @@ export function App() {
   // System readiness state
   const [readiness, setReadiness] = useState({ mcpReady: false, initialized: false });
 
-  const { observations, summaries, prompts, projects, logs, isProcessing, queueDepth, isConnected } = useSSE();
+  const { observations, summaries, prompts, projects, logs, clearLogs, isProcessing, queueDepth, isConnected } = useSSE();
   const { settings, saveSettings, isSaving, saveStatus } = useSettings();
   const { stats, refreshStats } = useStats();
 
@@ -161,6 +162,8 @@ export function App() {
 
         {currentView === 'search' && <SearchPage />}
 
+        {currentView === 'dashboard' && <DashboardPage />}
+
         {currentView === 'status' && (
           <div className="container mx-auto p-4">
             <SystemStatus
@@ -168,6 +171,7 @@ export function App() {
               mcpReady={readiness.mcpReady}
               initialized={readiness.initialized}
               logs={logs}
+              onClearLogs={clearLogs}
             />
           </div>
         )}
