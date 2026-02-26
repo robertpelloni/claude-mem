@@ -44,6 +44,35 @@ export class SessionStore {
   }
 
   /**
+   * Run a migration inside a transaction with version checking
+   * Safely handles rollback on failure
+   */
+  private runMigration(version: number, name: string, migrationFn: () => void): void {
+    try {
+      // Check if migration already applied
+      const applied = this.db.prepare('SELECT version FROM schema_versions WHERE version = ?').get(version) as SchemaVersion | undefined;
+      if (applied) {
+        // Already applied
+        return;
+      }
+
+      console.log(`[SessionStore] Applying migration ${version}: ${name}...`);
+
+      // Execute migration in transaction
+      this.db.transaction(() => {
+        migrationFn();
+        this.db.prepare('INSERT OR IGNORE INTO schema_versions (version, applied_at) VALUES (?, ?)').run(version, new Date().toISOString());
+      })();
+
+      console.log(`[SessionStore] Migration ${version} (${name}) applied successfully`);
+    } catch (error: any) {
+      console.error(`[SessionStore] Migration ${version} (${name}) failed:`, error.message);
+      // Re-throw to halt startup if critical migration fails
+      throw error;
+    }
+  }
+
+  /**
    * Initialize database schema using migrations (migration004)
    * This runs the core SDK tables migration if no tables exist
    *
@@ -426,87 +455,60 @@ export class SessionStore {
    * Create user_prompts table with FTS5 support (migration 10)
    */
   private createUserPromptsTable(): void {
-    try {
-      // Check if migration already applied
-      const applied = this.db.prepare('SELECT version FROM schema_versions WHERE version = ?').get(10) as SchemaVersion | undefined;
-      if (applied) return;
-
-      // Check if table already exists
+    this.runMigration(10, 'create_user_prompts_table', () => {
+      // Check if table already exists (idempotency check inside transaction)
       const tableInfo = this.db.query('PRAGMA table_info(user_prompts)').all() as TableColumnInfo[];
       if (tableInfo.length > 0) {
-        // Already migrated
-        this.db.prepare('INSERT OR IGNORE INTO schema_versions (version, applied_at) VALUES (?, ?)').run(10, new Date().toISOString());
         return;
       }
 
-      console.log('[SessionStore] Creating user_prompts table with FTS5 support...');
+      // Create main table
+      this.db.run(`
+        CREATE TABLE user_prompts (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          claude_session_id TEXT NOT NULL,
+          prompt_number INTEGER NOT NULL,
+          prompt_text TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          created_at_epoch INTEGER NOT NULL,
+          FOREIGN KEY(claude_session_id) REFERENCES sdk_sessions(claude_session_id) ON DELETE CASCADE
+        );
 
-      // Begin transaction
-      this.db.run('BEGIN TRANSACTION');
+        CREATE INDEX idx_user_prompts_claude_session ON user_prompts(claude_session_id);
+        CREATE INDEX idx_user_prompts_created ON user_prompts(created_at_epoch DESC);
+        CREATE INDEX idx_user_prompts_prompt_number ON user_prompts(prompt_number);
+        CREATE INDEX idx_user_prompts_lookup ON user_prompts(claude_session_id, prompt_number);
+      `);
 
-      try {
-        // Create main table (using claude_session_id since sdk_session_id is set asynchronously by worker)
-        this.db.run(`
-          CREATE TABLE user_prompts (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            claude_session_id TEXT NOT NULL,
-            prompt_number INTEGER NOT NULL,
-            prompt_text TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            created_at_epoch INTEGER NOT NULL,
-            FOREIGN KEY(claude_session_id) REFERENCES sdk_sessions(claude_session_id) ON DELETE CASCADE
-          );
+      // Create FTS5 virtual table
+      this.db.run(`
+        CREATE VIRTUAL TABLE user_prompts_fts USING fts5(
+          prompt_text,
+          content='user_prompts',
+          content_rowid='id'
+        );
+      `);
 
-          CREATE INDEX idx_user_prompts_claude_session ON user_prompts(claude_session_id);
-          CREATE INDEX idx_user_prompts_created ON user_prompts(created_at_epoch DESC);
-          CREATE INDEX idx_user_prompts_prompt_number ON user_prompts(prompt_number);
-          CREATE INDEX idx_user_prompts_lookup ON user_prompts(claude_session_id, prompt_number);
-        `);
+      // Create triggers to sync FTS5
+      this.db.run(`
+        CREATE TRIGGER user_prompts_ai AFTER INSERT ON user_prompts BEGIN
+          INSERT INTO user_prompts_fts(rowid, prompt_text)
+          VALUES (new.id, new.prompt_text);
+        END;
 
-        // Create FTS5 virtual table
-        this.db.run(`
-          CREATE VIRTUAL TABLE user_prompts_fts USING fts5(
-            prompt_text,
-            content='user_prompts',
-            content_rowid='id'
-          );
-        `);
+        CREATE TRIGGER user_prompts_ad AFTER DELETE ON user_prompts BEGIN
+          INSERT INTO user_prompts_fts(user_prompts_fts, rowid, prompt_text)
+          VALUES('delete', old.id, old.prompt_text);
+        END;
 
-        // Create triggers to sync FTS5
-        this.db.run(`
-          CREATE TRIGGER user_prompts_ai AFTER INSERT ON user_prompts BEGIN
-            INSERT INTO user_prompts_fts(rowid, prompt_text)
-            VALUES (new.id, new.prompt_text);
-          END;
-
-          CREATE TRIGGER user_prompts_ad AFTER DELETE ON user_prompts BEGIN
-            INSERT INTO user_prompts_fts(user_prompts_fts, rowid, prompt_text)
-            VALUES('delete', old.id, old.prompt_text);
-          END;
-
-          CREATE TRIGGER user_prompts_au AFTER UPDATE ON user_prompts BEGIN
-            INSERT INTO user_prompts_fts(user_prompts_fts, rowid, prompt_text)
-            VALUES('delete', old.id, old.prompt_text);
-            INSERT INTO user_prompts_fts(rowid, prompt_text)
-            VALUES (new.id, new.prompt_text);
-          END;
-        `);
-
-        // Commit transaction
-        this.db.run('COMMIT');
-
-        // Record migration
-        this.db.prepare('INSERT OR IGNORE INTO schema_versions (version, applied_at) VALUES (?, ?)').run(10, new Date().toISOString());
-
-        console.log('[SessionStore] Successfully created user_prompts table with FTS5 support');
-      } catch (error: any) {
-        // Rollback on error
-        this.db.run('ROLLBACK');
-        throw error;
-      }
-    } catch (error: any) {
-      console.error('[SessionStore] Migration error (create user_prompts table):', error.message);
-    }
+        CREATE TRIGGER user_prompts_au AFTER UPDATE ON user_prompts BEGIN
+          INSERT INTO user_prompts_fts(user_prompts_fts, rowid, prompt_text)
+          VALUES('delete', old.id, old.prompt_text);
+          INSERT INTO user_prompts_fts(rowid, prompt_text)
+          VALUES (new.id, new.prompt_text);
+        END;
+      `);
+    });
   }
 
   /**

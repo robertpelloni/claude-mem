@@ -20,6 +20,7 @@ import { mergeAndDeduplicateByProject } from './utils/data';
 export function App() {
   const [currentFilter, setCurrentFilter] = useState('');
   const [currentView, setCurrentView] = useState<'feed' | 'help' | 'status' | 'search' | 'dashboard' | 'pro' | 'graph'>('feed');
+  const [isWidgetMode, setIsWidgetMode] = useState(false);
   const [contextPreviewOpen, setContextPreviewOpen] = useState(false);
   const [paginatedObservations, setPaginatedObservations] = useState<Observation[]>([]);
   const [paginatedSummaries, setPaginatedSummaries] = useState<Summary[]>([]);
@@ -31,6 +32,14 @@ export function App() {
   const { observations, summaries, prompts, projects, logs, clearLogs, isProcessing, queueDepth, isConnected } = useSSE();
   const { settings, saveSettings, isSaving, saveStatus } = useSettings();
   const { stats, refreshStats } = useStats();
+
+  // Check for widget mode query param
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('mode') === 'widget') {
+      setIsWidgetMode(true);
+    }
+  }, []);
 
   // Poll for readiness
   useEffect(() => {
@@ -147,9 +156,10 @@ export function App() {
         onContextPreviewToggle={toggleContextPreview}
         currentView={currentView}
         onViewChange={setCurrentView}
+        compact={isWidgetMode}
       />
 
-      <div className="main-content">
+      <div className={`main-content ${isWidgetMode ? 'widget-mode' : ''}`} style={isWidgetMode ? { padding: '10px' } : undefined}>
         {currentView === 'feed' && (
           <ErrorBoundary>
             <Feed
