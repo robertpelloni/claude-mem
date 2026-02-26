@@ -1,14 +1,14 @@
 # TODO
 
+## Frontend
+- [ ] Implement node click handling in `GraphPage.tsx`.
+- [ ] Add controls to `GraphPage.tsx` (physics toggle, filter toggle).
+
 ## Documentation
-- [ ] Update `AGENTS.md` with strict instructions.
+- [ ] Create `docs/public/ide-integration.mdx`.
 
 ## Backend
-- [ ] Implement robust token counting for accurate Endless Mode stats.
-
-## UI / UX
-- [ ] Add search capability to `HelpPage`.
+- [ ] Implement automated rollback logic in `runMigration` (catch block refinement).
 
 ## Robustness
 - [ ] Add E2E tests for the full worker lifecycle.
-- [ ] Implement automated rollback for failed migrations.

@@ -23,6 +23,8 @@ export function GraphPage() {
   const [edges, setEdges] = useState<Edge[]>([]);
   const [loading, setLoading] = useState(true);
   const [hoveredNode, setHoveredNode] = useState<Node | null>(null);
+  const [filterType, setFilterType] = useState<string | null>(null);
+  const [repulsionStrength, setRepulsionStrength] = useState(1000);
   const simulationRef = useRef<any>(null);
 
   // Fetch graph data
@@ -64,7 +66,7 @@ export function GraphPage() {
     let draggingNode: Node | null = null;
 
     // Physics parameters
-    const repulsion = 1000;
+    const repulsion = repulsionStrength;
     const attraction = 0.05;
     const damping = 0.85;
     const centerForce = 0.01;
@@ -154,6 +156,13 @@ export function GraphPage() {
 
       // Draw Nodes
       nodes.forEach(node => {
+        // Skip if filtered out
+        if (filterType && node.type !== filterType) {
+          ctx.globalAlpha = 0.1;
+        } else {
+          ctx.globalAlpha = 1.0;
+        }
+
         ctx.beginPath();
         const radius = node.type === 'session' ? 8 : (node.type === 'file' ? 5 : 4);
         ctx.arc(node.x!, node.y!, radius, 0, 2 * Math.PI);
@@ -166,6 +175,7 @@ export function GraphPage() {
 
         // Highlight hover
         if (node === hoveredNode) {
+          ctx.globalAlpha = 1.0;
           ctx.strokeStyle = '#fff';
           ctx.lineWidth = 2;
           ctx.stroke();
@@ -223,8 +233,20 @@ export function GraphPage() {
       draggingNode = null;
     };
 
+    const handleClick = (e: MouseEvent) => {
+      if (hoveredNode) {
+        // Basic navigation logic (could be expanded)
+        console.log('Clicked node:', hoveredNode);
+        if (hoveredNode.type === 'file' && hoveredNode.label) {
+           // In a real app, we'd navigate. For now, log.
+           // Ideally, update a context or URL to filter SearchPage
+        }
+      }
+    };
+
     canvas.addEventListener('mousemove', handleMouseMove);
     canvas.addEventListener('mousedown', handleMouseDown);
+    canvas.addEventListener('click', handleClick);
     window.addEventListener('mouseup', handleMouseUp);
 
     // Start loop
@@ -235,9 +257,10 @@ export function GraphPage() {
       window.removeEventListener('resize', handleResize);
       canvas.removeEventListener('mousemove', handleMouseMove);
       canvas.removeEventListener('mousedown', handleMouseDown);
+      canvas.removeEventListener('click', handleClick);
       window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [loading, nodes, edges, hoveredNode]); // Re-bind if nodes change (initial load) - but careful with state updates in loop
+  }, [loading, nodes, edges, hoveredNode, filterType, repulsionStrength]);
 
   if (loading) return <div style={{ padding: '40px', textAlign: 'center', color: 'var(--color-text-muted)' }}>Loading graph...</div>;
 
@@ -245,10 +268,40 @@ export function GraphPage() {
     <div style={{ padding: '20px', height: 'calc(100vh - 80px)', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
       <div style={{ marginBottom: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h2 style={{ fontSize: '20px', fontWeight: 600, color: 'var(--color-text-header)' }}>Knowledge Graph</h2>
-        <div style={{ fontSize: '12px', color: 'var(--color-text-secondary)', display: 'flex', gap: '12px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#D97757' }}></span> Session</div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#4A90E2' }}></span> File</div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#50E3C2' }}></span> Concept</div>
+
+        <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
+          {/* Node Filter */}
+          <select
+            value={filterType || ''}
+            onChange={(e) => setFilterType(e.target.value || null)}
+            style={{ fontSize: '12px', padding: '4px', borderRadius: '4px', border: '1px solid var(--color-border-primary)', background: 'var(--color-bg-input)', color: 'var(--color-text-primary)' }}
+          >
+            <option value="">All Types</option>
+            <option value="session">Sessions Only</option>
+            <option value="file">Files Only</option>
+            <option value="concept">Concepts Only</option>
+          </select>
+
+          {/* Physics Toggle */}
+          <div style={{ fontSize: '12px', color: 'var(--color-text-secondary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span>Spread:</span>
+            <input
+              type="range"
+              min="100"
+              max="5000"
+              step="100"
+              value={repulsionStrength}
+              onChange={(e) => setRepulsionStrength(Number(e.target.value))}
+              style={{ width: '80px' }}
+            />
+          </div>
+
+          {/* Legend */}
+          <div style={{ fontSize: '12px', color: 'var(--color-text-secondary)', display: 'flex', gap: '12px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#D97757' }}></span> Session</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#4A90E2' }}></span> File</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#50E3C2' }}></span> Concept</div>
+          </div>
         </div>
       </div>
       <div style={{ flex: 1, border: '1px solid var(--color-border-primary)', borderRadius: '8px', overflow: 'hidden', background: 'var(--color-bg-card)' }}>

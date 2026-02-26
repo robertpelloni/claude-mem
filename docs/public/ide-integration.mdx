@@ -1,0 +1,43 @@
+import React from 'react';
+
+export default function IdeIntegration() {
+  return (
+    <div className="markdown-body">
+      <h1>IDE Native Integration</h1>
+
+      <p>
+        Claude-Mem supports a specialized "Widget Mode" designed for embedding directly into your IDE's webview panels.
+        This provides a compact, high-density view of your memory stream while you code.
+      </p>
+
+      <h2>VS Code Integration</h2>
+
+      <ol>
+        <li>Open the Command Palette (`Cmd+Shift+P`).</li>
+        <li>Select <strong>Simple Browser: Show</strong>.</li>
+        <li>Enter the URL: <code>http://localhost:37777/?mode=widget</code></li>
+        <li>Drag the tab to your sidebar or bottom panel for persistent access.</li>
+      </ol>
+
+      <p>
+        <em>Tip: Use the compact view to keep an eye on real-time observations as Claude Code runs in your terminal.</em>
+      </p>
+
+      <h2>JetBrains (IntelliJ, WebStorm, PyCharm)</h2>
+
+      <ol>
+        <li>Open the <strong>Plugins</strong> marketplace and ensure the "JCEF Browser" plugin is enabled (default).</li>
+        <li>Create a new <strong>Web Browser</strong> run configuration or open the built-in browser tool window.</li>
+        <li>Navigate to: <code>http://localhost:37777/?mode=widget</code></li>
+      </ol>
+
+      <h2>Widget Features</h2>
+
+      <ul>
+        <li><strong>Compact Header:</strong> Minimalist design to save vertical space.</li>
+        <li><strong>Responsive Feed:</strong> Cards automatically adjust padding for narrow widths.</li>
+        <li><strong>Full Functionality:</strong> Search, Status, and Help are all fully accessible.</li>
+      </ul>
+    </div>
+  );
+}

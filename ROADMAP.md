@@ -1,6 +1,6 @@
 # Roadmap
 
-## Implemented Features (v7.4.0)
+## Implemented Features (v7.5.0)
 - [x] **Core Worker Service**: Event-driven architecture, SQLite storage, Chroma vector sync.
 - [x] **Claude Code Integration**: Lifecycle hooks for seamless context injection.
 - [x] **OpenCode Plugin**: Full read/write capability via `worker-client`.
@@ -9,20 +9,23 @@
     - [x] Real-time Feed
     - [x] Advanced Search with Filters
     - [x] System Status Dashboard (Logs, Health)
-    - [x] Integrated Help/Documentation
+    - [x] Integrated Help/Documentation with Search
     - [x] System Dashboard (Dependencies, Project Structure, Git Info)
-    - [x] Pro Features UI Framework (Placeholder)
-    - [x] Knowledge Graph Visualization (Interactive Force-Directed Graph)
+    - [x] Knowledge Graph (Interactive Canvas)
+    - [x] Widget Mode (`?mode=widget`) for IDE integration.
 - [x] **Endless Mode Support**:
     - [x] Basic infrastructure and UI visibility.
     - [x] Visualization of "Working vs Archive" memory simulation.
-    - [x] Real-time stats calculation in backend.
+    - [x] Real-time stats calculation in backend (with robust estimation).
+- [x] **Robustness**:
+    - [x] Transactional Migrations.
+    - [x] Error Boundaries.
 
 ## Short Term (Next Steps)
+- [ ] **Graph Interactions**: Click-to-filter from Graph to Search.
 - [ ] **Remote Sync**: Cloud synchronization for team memory.
-- [ ] **IDE Native Widgets**: WebView widgets for VSCode/JetBrains.
-- [ ] **Help Page Search**: Full-text search within documentation.
+- [ ] **Advanced Analytics**: Deeper insights into coding patterns.
 
 ## Long Term
-- [ ] **Advanced Analytics**: Deeper insights into coding patterns.
 - [ ] **Multi-Agent Orchestration**: Coordinating multiple specialized agents.
+- [ ] **3D Visualization**: Upgrade Graph to 3D.

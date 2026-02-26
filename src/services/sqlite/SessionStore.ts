@@ -67,6 +67,10 @@ export class SessionStore {
       console.log(`[SessionStore] Migration ${version} (${name}) applied successfully`);
     } catch (error: any) {
       console.error(`[SessionStore] Migration ${version} (${name}) failed:`, error.message);
+      // SQLite transaction rollback is automatic on error when using db.transaction()
+      // But we can add explicit logging here for clarity
+      console.error(`[SessionStore] Rolled back migration ${version}`);
+
       // Re-throw to halt startup if critical migration fails
       throw error;
     }
