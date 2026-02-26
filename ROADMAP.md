@@ -12,6 +12,7 @@
     - [x] Integrated Help/Documentation
     - [x] System Dashboard (Dependencies, Project Structure, Git Info)
     - [x] Pro Features UI Framework (Placeholder)
+    - [x] Knowledge Graph Visualization (Interactive Force-Directed Graph)
 - [x] **Endless Mode Support**:
     - [x] Basic infrastructure and UI visibility.
     - [x] Visualization of "Working vs Archive" memory simulation.
@@ -19,8 +20,8 @@
 
 ## Short Term (Next Steps)
 - [ ] **Remote Sync**: Cloud synchronization for team memory.
-- [ ] **Graph View**: Interactive node-graph of concepts and files.
 - [ ] **IDE Native Widgets**: WebView widgets for VSCode/JetBrains.
+- [ ] **Help Page Search**: Full-text search within documentation.
 
 ## Long Term
 - [ ] **Advanced Analytics**: Deeper insights into coding patterns.

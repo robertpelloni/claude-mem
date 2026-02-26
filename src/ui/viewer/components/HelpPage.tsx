@@ -11,6 +11,7 @@ const HelpSection: React.FC<{ title: string; children: React.ReactNode }> = ({ t
 
 export const HelpPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState('overview');
+  const [searchQuery, setSearchQuery] = useState('');
 
   const tabs = [
     { id: 'overview', label: 'Overview' },
@@ -21,16 +22,43 @@ export const HelpPage: React.FC = () => {
     { id: 'config', label: 'Configuration' },
   ];
 
+  const handleSearch = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setSearchQuery(e.target.value.toLowerCase());
+  };
+
+  const matchesSearch = (text: string) => {
+    return !searchQuery || text.toLowerCase().includes(searchQuery);
+  };
+
   return (
     <div className="help-page-container">
       {/* Sidebar */}
       <div className="help-sidebar">
         <h2 className="help-sidebar-title">Help & Documentation</h2>
+
+        <div style={{ padding: '0 16px 16px 16px' }}>
+          <input
+            type="text"
+            placeholder="Search help..."
+            value={searchQuery}
+            onChange={handleSearch}
+            style={{
+              width: '100%',
+              padding: '8px 12px',
+              borderRadius: '6px',
+              border: '1px solid var(--color-border-primary)',
+              background: 'var(--color-bg-input)',
+              color: 'var(--color-text-primary)',
+              fontSize: '13px'
+            }}
+          />
+        </div>
+
         <nav className="help-nav">
           {tabs.map((tab) => (
             <button
               key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
+              onClick={() => { setActiveTab(tab.id); setSearchQuery(''); }}
               className={`help-nav-btn ${activeTab === tab.id ? 'active' : ''}`}
             >
               {tab.label}
@@ -41,7 +69,7 @@ export const HelpPage: React.FC = () => {
 
       {/* Content */}
       <div className="help-main">
-        {activeTab === 'overview' && (
+        {(activeTab === 'overview' || searchQuery) && matchesSearch('overview persistent memory search progressive disclosure viewer ui') && (
           <HelpSection title="Overview">
             <p>
               Claude-Mem is a persistent memory system for AI coding assistants. It automatically captures your work context,
@@ -57,7 +85,7 @@ export const HelpPage: React.FC = () => {
           </HelpSection>
         )}
 
-        {activeTab === 'search' && (
+        {(activeTab === 'search' || searchQuery) && matchesSearch('search tools mem-search query observations sessions concepts') && (
           <HelpSection title="Search Tools">
             <p>
               Use the <code>mem-search</code> skill to query your project history. This is available in Claude Code, OpenCode, and Gemini.
@@ -77,7 +105,7 @@ export const HelpPage: React.FC = () => {
           </HelpSection>
         )}
 
-        {activeTab === 'concepts' && (
+        {(activeTab === 'concepts' || searchQuery) && matchesSearch('concepts privacy observations sessions private tags') && (
           <HelpSection title="Concepts & Privacy">
             <h4>Observations</h4>
             <p>
@@ -102,7 +130,7 @@ export const HelpPage: React.FC = () => {
           </HelpSection>
         )}
 
-        {activeTab === 'features' && (
+        {(activeTab === 'features' || searchQuery) && matchesSearch('endless mode beta experimental compression tokens') && (
           <HelpSection title="Endless Mode (Beta)">
             <p>
               <strong>Status: Experimental</strong>
@@ -129,7 +157,7 @@ export const HelpPage: React.FC = () => {
           </HelpSection>
         )}
 
-        {activeTab === 'integrations' && (
+        {(activeTab === 'integrations' || searchQuery) && matchesSearch('integrations claude code opencode gemini cli mcp') && (
           <HelpSection title="Integrations">
             <h4>Claude Code</h4>
             <p>
@@ -152,7 +180,7 @@ export const HelpPage: React.FC = () => {
           </HelpSection>
         )}
 
-        {activeTab === 'config' && (
+        {(activeTab === 'config' || searchQuery) && matchesSearch('configuration settings model port log level') && (
           <HelpSection title="Configuration">
             <p>
               Configure Claude-Mem via <code>~/.claude-mem/settings.json</code> or the Settings menu in this UI.

@@ -1833,12 +1833,30 @@ export class SessionStore {
       const sessionStats = this.db.prepare('SELECT COUNT(*) as count FROM sdk_sessions').get() as { count: number };
 
       // Fallback: if tokens are 0 but we have items, estimate them
-      // Estimate: 200 tokens per observation, 500 per summary
-      let totalTokens = (obsStats?.tokens || 0) + (sumStats?.tokens || 0);
+      // Strategy:
+      // 1. If discovery_tokens is present (new data), use it.
+      // 2. If discovery_tokens is 0 (old data), estimate based on text length.
 
-      if (totalTokens === 0 && obsStats?.count > 0) {
-        totalTokens = (obsStats.count * 200);
-      }
+      // Calculate missing tokens for observations (where discovery_tokens = 0)
+      const uncountedObs = this.db.prepare(`
+        SELECT
+          SUM(LENGTH(COALESCE(title, '')) + LENGTH(COALESCE(subtitle, '')) + LENGTH(COALESCE(narrative, '')) + LENGTH(COALESCE(text, ''))) as estimated_chars
+        FROM observations
+        WHERE discovery_tokens = 0
+      `).get() as { estimated_chars: number };
+
+      // Calculate missing tokens for summaries (where discovery_tokens = 0)
+      const uncountedSum = this.db.prepare(`
+        SELECT
+          SUM(LENGTH(COALESCE(request, '')) + LENGTH(COALESCE(learned, '')) + LENGTH(COALESCE(completed, '')) + LENGTH(COALESCE(next_steps, ''))) as estimated_chars
+        FROM session_summaries
+        WHERE discovery_tokens = 0
+      `).get() as { estimated_chars: number };
+
+      // Approximation: 4 characters per token
+      const estimatedTokens = Math.floor(((uncountedObs?.estimated_chars || 0) + (uncountedSum?.estimated_chars || 0)) / 4);
+
+      let totalTokens = (obsStats?.tokens || 0) + (sumStats?.tokens || 0) + estimatedTokens;
 
       return {
         totalArchivedTokens: totalTokens,
