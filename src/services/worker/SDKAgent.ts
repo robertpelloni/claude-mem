@@ -11,17 +11,10 @@
 import { execSync } from 'child_process';
 import { homedir } from 'os';
 import path from 'path';
-import { existsSync, readFileSync } from 'fs';
-import { EventEmitter } from 'events';
 import { DatabaseManager } from './DatabaseManager.js';
 import { SessionManager } from './SessionManager.js';
 import { logger } from '../../utils/logger.js';
-import { silentDebug } from '../../utils/silent-debug.js';
-import { parseObservations, parseSummary } from '../../sdk/parser.js';
 import { buildInitPrompt, buildObservationPrompt, buildSummaryPrompt, buildContinuationPrompt } from '../../sdk/prompts.js';
-<<<<<<< HEAD
-import type { ActiveSession, SDKUserMessage, PendingMessage } from '../worker-types.js';
-=======
 import { SettingsDefaultsManager } from '../../shared/SettingsDefaultsManager.js';
 import { USER_SETTINGS_PATH, OBSERVER_SESSIONS_DIR, ensureDir } from '../../shared/paths.js';
 import { buildIsolatedEnv, getAuthMethodDescription } from '../../shared/EnvManager.js';
@@ -29,28 +22,14 @@ import type { ActiveSession, SDKUserMessage } from '../worker-types.js';
 import { ModeManager } from '../domain/ModeManager.js';
 import { processAgentResponse, type WorkerRef } from './agents/index.js';
 import { createPidCapturingSpawn, getProcessBySession, ensureProcessExit, waitForSlot } from './ProcessRegistry.js';
->>>>>>> upstream/main
 
 // Import Agent SDK (assumes it's installed)
 // @ts-ignore - Agent SDK types may not be available
 import { query } from '@anthropic-ai/claude-agent-sdk';
 
-interface JITFilterRequest {
-  userPrompt: string;
-  resolve: (ids: number[]) => void;
-  reject: (error: Error) => void;
-}
-
 export class SDKAgent {
   private dbManager: DatabaseManager;
   private sessionManager: SessionManager;
-
-  // JIT filter coordination
-  private jitFilterQueues: Map<number, {
-    requests: JITFilterRequest[];
-    emitter: EventEmitter;
-    currentResponse: string;
-  }> = new Map();
 
   constructor(dbManager: DatabaseManager, sessionManager: SessionManager) {
     this.dbManager = dbManager;
@@ -61,39 +40,54 @@ export class SDKAgent {
    * Start SDK agent for a session (event-driven, no polling)
    * @param worker WorkerService reference for spinner control (optional)
    */
-  async startSession(session: ActiveSession, worker?: any): Promise<void> {
-    try {
-      // Find Claude executable
-      const claudePath = this.findClaudeExecutable();
+  async startSession(session: ActiveSession, worker?: WorkerRef): Promise<void> {
+    // Track cwd from messages for CLAUDE.md generation (worktree support)
+    // Uses mutable object so generator updates are visible in response processing
+    const cwdTracker = { lastCwd: undefined as string | undefined };
 
-      // Get model ID and disallowed tools
-      const modelId = this.getModelId();
-      const disallowedTools = ['Bash']; // Prevent infinite loops
+    // Find Claude executable
+    const claudePath = this.findClaudeExecutable();
 
-      // Create message generator (event-driven)
-      const messageGenerator = this.createMessageGenerator(session);
+    // Get model ID and disallowed tools
+    const modelId = this.getModelId();
+    // Memory agent is OBSERVER ONLY - no tools allowed
+    const disallowedTools = [
+      'Bash',           // Prevent infinite loops
+      'Read',           // No file reading
+      'Write',          // No file writing
+      'Edit',           // No file editing
+      'Grep',           // No code searching
+      'Glob',           // No file pattern matching
+      'WebFetch',       // No web fetching
+      'WebSearch',      // No web searching
+      'Task',           // No spawning sub-agents
+      'NotebookEdit',   // No notebook editing
+      'AskUserQuestion',// No asking questions
+      'TodoWrite'       // No todo management
+    ];
 
-      // Run Agent SDK query loop
-      const queryResult = query({
-        prompt: messageGenerator,
-        options: {
-          model: modelId,
-          disallowedTools,
-          abortController: session.abortController,
-          pathToClaudeCodeExecutable: claudePath
-        }
+    // Create message generator (event-driven)
+    const messageGenerator = this.createMessageGenerator(session, cwdTracker);
+
+    // CRITICAL: Only resume if:
+    // 1. memorySessionId exists (was captured from a previous SDK response)
+    // 2. lastPromptNumber > 1 (this is a continuation within the same SDK session)
+    // 3. forceInit is NOT set (stale session recovery clears this)
+    // On worker restart or crash recovery, memorySessionId may exist from a previous
+    // SDK session but we must NOT resume because the SDK context was lost.
+    // NEVER use contentSessionId for resume - that would inject messages into the user's transcript!
+    const hasRealMemorySessionId = !!session.memorySessionId;
+    const shouldResume = hasRealMemorySessionId && session.lastPromptNumber > 1 && !session.forceInit;
+
+    // Clear forceInit after using it
+    if (session.forceInit) {
+      logger.info('SDK', 'forceInit flag set, starting fresh SDK session', {
+        sessionDbId: session.sessionDbId,
+        previousMemorySessionId: session.memorySessionId
       });
+      session.forceInit = false;
+    }
 
-<<<<<<< HEAD
-      // Process SDK messages
-      for await (const message of queryResult) {
-        // Handle assistant messages
-        if (message.type === 'assistant') {
-          const content = message.message.content;
-          const textContent = Array.isArray(content)
-            ? content.filter((c: any) => c.type === 'text').map((c: any) => c.text).join('\n')
-            : typeof content === 'string' ? content : '';
-=======
     // Wait for agent pool slot (configurable via CLAUDE_MEM_MAX_CONCURRENT_AGENTS)
     const settings = SettingsDefaultsManager.loadFromFile(USER_SETTINGS_PATH);
     const maxConcurrent = parseInt(settings.CLAUDE_MEM_MAX_CONCURRENT_AGENTS, 10) || 2;
@@ -104,25 +98,30 @@ export class SDKAgent {
     // being used instead of the configured auth method (CLI subscription or explicit API key)
     const isolatedEnv = buildIsolatedEnv();
     const authMethod = getAuthMethodDescription();
->>>>>>> upstream/main
 
-          const responseSize = textContent.length;
+    logger.info('SDK', 'Starting SDK query', {
+      sessionDbId: session.sessionDbId,
+      contentSessionId: session.contentSessionId,
+      memorySessionId: session.memorySessionId,
+      hasRealMemorySessionId,
+      shouldResume,
+      resume_parameter: shouldResume ? session.memorySessionId : '(none - fresh start)',
+      lastPromptNumber: session.lastPromptNumber,
+      authMethod
+    });
 
-          // Only log non-empty responses (filter out noise)
-          if (responseSize > 0) {
-            const truncatedResponse = responseSize > 100
-              ? textContent.substring(0, 100) + '...'
-              : textContent;
-            logger.dataOut('SDK', `Response received (${responseSize} chars)`, {
-              sessionId: session.sessionDbId,
-              promptNumber: session.lastPromptNumber
-            }, truncatedResponse);
+    // Debug-level alignment logs for detailed tracing
+    if (session.lastPromptNumber > 1) {
+      logger.debug('SDK', `[ALIGNMENT] Resume Decision | contentSessionId=${session.contentSessionId} | memorySessionId=${session.memorySessionId} | prompt#=${session.lastPromptNumber} | hasRealMemorySessionId=${hasRealMemorySessionId} | shouldResume=${shouldResume} | resumeWith=${shouldResume ? session.memorySessionId : 'NONE'}`);
+    } else {
+      // INIT prompt - never resume even if memorySessionId exists (stale from previous session)
+      const hasStaleMemoryId = hasRealMemorySessionId;
+      logger.debug('SDK', `[ALIGNMENT] First Prompt (INIT) | contentSessionId=${session.contentSessionId} | prompt#=${session.lastPromptNumber} | hasStaleMemoryId=${hasStaleMemoryId} | action=START_FRESH | Will capture new memorySessionId from SDK response`);
+      if (hasStaleMemoryId) {
+        logger.warn('SDK', `Skipping resume for INIT prompt despite existing memorySessionId=${session.memorySessionId} - SDK context was lost (worker restart or crash recovery)`);
+      }
+    }
 
-<<<<<<< HEAD
-            // Parse and process response
-            await this.processSDKResponse(session, textContent, worker);
-          }
-=======
     // Run Agent SDK query loop
     // Only resume if we have a captured memory session ID
     // Use custom spawn to capture PIDs for zombie process cleanup (Issue #737)
@@ -272,270 +271,27 @@ export class SDKAgent {
             'SDK',
             cwdTracker.lastCwd
           );
->>>>>>> upstream/main
         }
 
         // Log result messages
         if (message.type === 'result' && message.subtype === 'success') {
           // Usage telemetry is captured at SDK level
         }
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
-
-        // Detect fatal context overflow and terminate gracefully (issue #870)
-        if (typeof textContent === 'string' && textContent.includes('Prompt is too long')) {
-          throw new Error('Claude session context overflow: prompt is too long');
-        }
-
-        // Detect invalid API key — SDK returns this as response text, not an error.
-        // Throw so it surfaces in health endpoint and prevents silent failures.
-        if (typeof textContent === 'string' && textContent.includes('Invalid API key')) {
-          throw new Error('Invalid API key: check your API key configuration in ~/.claude-mem/settings.json or ~/.claude-mem/.env');
-        }
-
-        // Parse and process response using shared ResponseProcessor
-        await processAgentResponse(
-          textContent,
-          session,
-          this.dbManager,
-          this.sessionManager,
-          worker,
-          discoveryTokens,
-          originalTimestamp,
-          'SDK',
-          cwdTracker.lastCwd
-        );
->>>>>>> upstream/main
-      }
-
-      // Mark session complete
-      const sessionDuration = Date.now() - session.startTime;
-      logger.success('SDK', 'Agent completed', {
-        sessionId: session.sessionDbId,
-        duration: `${(sessionDuration / 1000).toFixed(1)}s`
-      });
-
-      this.dbManager.getSessionStore().markSessionCompleted(session.sessionDbId);
-
-    } catch (error: any) {
-      if (error.name === 'AbortError') {
-        logger.warn('SDK', 'Agent aborted', { sessionId: session.sessionDbId });
-      } else {
-        logger.failure('SDK', 'Agent error', { sessionDbId: session.sessionDbId }, error);
-=======
       }
     } finally {
       // Ensure subprocess is terminated after query completes (or on error)
       const tracked = getProcessBySession(session.sessionDbId);
       if (tracked && !tracked.process.killed && tracked.process.exitCode === null) {
         await ensureProcessExit(tracked, 5000);
->>>>>>> upstream/main
-      }
-      throw error;
-    } finally {
-      // Cleanup
-      this.sessionManager.deleteSession(session.sessionDbId).catch(() => {});
-    }
-  }
-
-  /**
-   * Start JIT filter session (persistent, waits for filter requests)
-   */
-  async startJitSession(
-    session: ActiveSession,
-    observations: Array<{id: number, type: string, title: string}>
-  ): Promise<void> {
-    try {
-      // Initialize JIT filter queue
-      this.jitFilterQueues.set(session.sessionDbId, {
-        requests: [],
-        emitter: new EventEmitter(),
-        currentResponse: ''
-      });
-
-      // Setup abort controller for JIT session
-      session.jitAbortController = new AbortController();
-      session.jitSessionId = `jit-${session.claudeSessionId}`;
-
-      // Find Claude executable
-      const claudePath = this.findClaudeExecutable();
-      const modelId = this.getModelId();
-
-      // Create JIT message generator
-      const messageGenerator = this.createJitMessageGenerator(session.sessionDbId, observations);
-
-      // Run Agent SDK query loop for JIT filtering
-      const queryResult = query({
-        prompt: messageGenerator,
-        options: {
-          model: modelId,
-          disallowedTools: ['Bash'],
-          abortController: session.jitAbortController,
-          pathToClaudeCodeExecutable: claudePath
-        }
-      });
-
-      // Store generator promise
-      session.jitGeneratorPromise = (async () => {
-        for await (const message of queryResult) {
-          if (message.type === 'assistant') {
-            const content = message.message.content;
-            const textContent = Array.isArray(content)
-              ? content.filter((c: any) => c.type === 'text').map((c: any) => c.text).join('\n')
-              : typeof content === 'string' ? content : '';
-
-            // Process filter response
-            await this.processJitFilterResponse(session.sessionDbId, textContent);
-          }
-        }
-      })().catch(error => {
-        if (error.name !== 'AbortError') {
-          logger.failure('SDK', 'JIT session error', { sessionDbId: session.sessionDbId }, error);
-        }
-      });
-
-      logger.info('SDK', 'JIT session started', {
-        sessionDbId: session.sessionDbId,
-        observationCount: observations.length
-      });
-
-    } catch (error: any) {
-      if (error.name === 'AbortError') {
-        logger.warn('SDK', 'JIT session aborted', { sessionDbId: session.sessionDbId });
-      } else {
-        logger.failure('SDK', 'JIT session error', { sessionDbId: session.sessionDbId }, error);
-      }
-      throw error;
-    }
-  }
-
-  /**
-   * Create JIT message generator (yields filter requests on-demand)
-   */
-  private async *createJitMessageGenerator(
-    sessionDbId: number,
-    observations: Array<{id: number, type: string, title: string}>
-  ): AsyncIterableIterator<SDKUserMessage> {
-    // Get session for jitSessionId
-    const session = this.sessionManager.getSession(sessionDbId);
-    if (!session || !session.jitSessionId) {
-      throw new Error(`No JIT session ID for session ${sessionDbId}`);
-    }
-
-    // Yield initial prompt with observation list
-    const observationList = observations.map(obs => {
-      const typeEmoji = this.getTypeEmoji(obs.type);
-      return `${typeEmoji} #${obs.id}: ${obs.title || 'Untitled'}`;
-    }).join('\n');
-
-    yield {
-      type: 'user',
-      message: {
-        role: 'user',
-        content: `You are a context filter for an AI memory system. You'll receive a list of past observations, then filter requests asking which observations are relevant to specific user questions.
-
-# Available observations:
-${observationList}
-
-Reply "READY" when you've loaded the observation list.`
-      },
-      session_id: session.jitSessionId,
-      parent_tool_use_id: null,
-      isSynthetic: true
-    };
-
-    // Wait for filter requests
-    const queue = this.jitFilterQueues.get(sessionDbId);
-    if (!queue) {
-      throw new Error(`No JIT queue for session ${sessionDbId}`);
-    }
-
-    const abortController = session.jitAbortController;
-    if (!abortController) {
-      throw new Error(`No JIT abort controller for session ${sessionDbId}`);
-    }
-
-    while (!abortController.signal.aborted) {
-      // Wait for filter request if queue is empty
-      if (queue.requests.length === 0) {
-        await new Promise<void>(resolve => {
-          const handler = () => resolve();
-          queue.emitter.once('request', handler);
-
-          // Also listen for abort
-          abortController.signal.addEventListener('abort', () => {
-            queue.emitter.off('request', handler);
-            resolve();
-          }, { once: true });
-        });
-      }
-
-      // Process pending requests
-      if (queue.requests.length > 0) {
-        const request = queue.requests[0]; // Keep in queue until processed
-        queue.currentResponse = ''; // Reset response buffer
-
-        yield {
-          type: 'user',
-          message: {
-            role: 'user',
-            content: `# User's current question:
-${request.userPrompt}
-
-# Task:
-Select the 3-5 most relevant observation IDs (just the numbers) that would help answer this question.
-If nothing is relevant, respond with "NONE".
-
-Respond ONLY with comma-separated IDs (e.g., "1234,5678,9012") or "NONE".`
-          },
-          session_id: session.jitSessionId,
-          parent_tool_use_id: null,
-          isSynthetic: true
-        };
       }
     }
-  }
 
-  /**
-   * Process JIT filter response and resolve the corresponding promise
-   */
-  private async processJitFilterResponse(sessionDbId: number, textContent: string): Promise<void> {
-    const queue = this.jitFilterQueues.get(sessionDbId);
-    if (!queue || queue.requests.length === 0) {
-      return; // No pending request (might be initial "READY" response)
-    }
-
-    // Accumulate response
-    queue.currentResponse += textContent;
-
-    // Check if response is complete (simple heuristic: contains NONE or numbers)
-    const response = queue.currentResponse.trim();
-    if (response === 'READY') {
-      queue.currentResponse = ''; // Clear initial response
-      return;
-    }
-
-    if (response === 'NONE' || response === '' || /^\d+(,\d+)*$/.test(response)) {
-      // Response is complete, resolve promise
-      const request = queue.requests.shift()!;
-      queue.currentResponse = '';
-
-      if (response === 'NONE' || !response) {
-        request.resolve([]);
-      } else {
-        const selectedIds = response
-          .split(',')
-          .map((id: string) => parseInt(id.trim(), 10))
-          .filter((id: number) => !isNaN(id));
-        request.resolve(selectedIds);
-      }
-
-      logger.debug('SDK', 'JIT filter response processed', {
-        sessionDbId,
-        selectedIds: response
-      });
-    }
+    // Mark session complete
+    const sessionDuration = Date.now() - session.startTime;
+    logger.success('SDK', 'Agent completed', {
+      sessionId: session.sessionDbId,
+      duration: `${(sessionDuration / 1000).toFixed(1)}s`
+    });
   }
 
   /**
@@ -553,7 +309,7 @@ Respond ONLY with comma-separated IDs (e.g., "1234,5678,9012") or "NONE".`
    *   - Continuation prompt for same session
    *   - Includes session context and prompt number
    *
-   * BOTH prompts receive session.claudeSessionId:
+   * BOTH prompts receive session.contentSessionId:
    * - This comes from the hook's session_id (see new-hook.ts)
    * - Same session_id used by SAVE hook to store observations
    * - This is how everything stays connected in one unified session
@@ -562,220 +318,116 @@ Respond ONLY with comma-separated IDs (e.g., "1234,5678,9012") or "NONE".`
    * - SessionManager.initializeSession already fetched this from database
    * - Database row was created by new-hook's createSDKSession call
    * - We just use the session_id we're given - simple and reliable
+   *
+   * SHARED CONVERSATION HISTORY:
+   * - Each user message is added to session.conversationHistory
+   * - This allows provider switching (Claude→Gemini) with full context
+   * - SDK manages its own internal state, but we mirror it for interop
+   *
+   * CWD TRACKING:
+   * - cwdTracker is a mutable object shared with startSession
+   * - As messages with cwd are processed, cwdTracker.lastCwd is updated
+   * - This enables processAgentResponse to use the correct cwd for CLAUDE.md
    */
-  private async *createMessageGenerator(session: ActiveSession): AsyncIterableIterator<SDKUserMessage> {
+  private async *createMessageGenerator(
+    session: ActiveSession,
+    cwdTracker: { lastCwd: string | undefined }
+  ): AsyncIterableIterator<SDKUserMessage> {
+    // Load active mode
+    const mode = ModeManager.getInstance().getActiveMode();
+
+    // Build initial prompt
+    const isInitPrompt = session.lastPromptNumber === 1;
+    logger.info('SDK', 'Creating message generator', {
+      sessionDbId: session.sessionDbId,
+      contentSessionId: session.contentSessionId,
+      lastPromptNumber: session.lastPromptNumber,
+      isInitPrompt,
+      promptType: isInitPrompt ? 'INIT' : 'CONTINUATION'
+    });
+
+    const initPrompt = isInitPrompt
+      ? buildInitPrompt(session.project, session.contentSessionId, session.userPrompt, mode)
+      : buildContinuationPrompt(session.userPrompt, session.lastPromptNumber, session.contentSessionId, mode);
+
+    // Add to shared conversation history for provider interop
+    session.conversationHistory.push({ role: 'user', content: initPrompt });
+
     // Yield initial user prompt with context (or continuation if prompt #2+)
-    // CRITICAL: Both paths use session.claudeSessionId from the hook
+    // CRITICAL: Both paths use session.contentSessionId from the hook
     yield {
       type: 'user',
       message: {
         role: 'user',
-        content: session.lastPromptNumber === 1
-          ? buildInitPrompt(session.project, session.claudeSessionId, session.userPrompt)
-          : buildContinuationPrompt(session.userPrompt, session.lastPromptNumber, session.claudeSessionId)
+        content: initPrompt
       },
-      session_id: session.claudeSessionId,
+      session_id: session.contentSessionId,
       parent_tool_use_id: null,
       isSynthetic: true
     };
 
     // Consume pending messages from SessionManager (event-driven, no polling)
     for await (const message of this.sessionManager.getMessageIterator(session.sessionDbId)) {
+      // CLAIM-CONFIRM: Track message ID for confirmProcessed() after successful storage
+      // The message is now in 'processing' status in DB until ResponseProcessor calls confirmProcessed()
+      session.processingMessageIds.push(message._persistentId);
+
+      // Capture cwd from each message for worktree support
+      if (message.cwd) {
+        cwdTracker.lastCwd = message.cwd;
+      }
+
       if (message.type === 'observation') {
         // Update last prompt number
         if (message.prompt_number !== undefined) {
           session.lastPromptNumber = message.prompt_number;
         }
 
+        const obsPrompt = buildObservationPrompt({
+          id: 0, // Not used in prompt
+          tool_name: message.tool_name!,
+          tool_input: JSON.stringify(message.tool_input),
+          tool_output: JSON.stringify(message.tool_response),
+          created_at_epoch: Date.now(),
+          cwd: message.cwd
+        });
+
+        // Add to shared conversation history for provider interop
+        session.conversationHistory.push({ role: 'user', content: obsPrompt });
+
         yield {
           type: 'user',
           message: {
             role: 'user',
-            content: buildObservationPrompt({
-              id: 0, // Not used in prompt
-              tool_name: message.tool_name!,
-              tool_input: JSON.stringify(message.tool_input),
-              tool_output: JSON.stringify(message.tool_response),
-              created_at_epoch: Date.now(),
-              cwd: message.cwd
-            })
+            content: obsPrompt
           },
-          session_id: session.claudeSessionId,
+          session_id: session.contentSessionId,
           parent_tool_use_id: null,
           isSynthetic: true
         };
       } else if (message.type === 'summarize') {
+        const summaryPrompt = buildSummaryPrompt({
+          id: session.sessionDbId,
+          memory_session_id: session.memorySessionId,
+          project: session.project,
+          user_prompt: session.userPrompt,
+          last_assistant_message: message.last_assistant_message || ''
+        }, mode);
+
+        // Add to shared conversation history for provider interop
+        session.conversationHistory.push({ role: 'user', content: summaryPrompt });
+
         yield {
           type: 'user',
           message: {
             role: 'user',
-            content: buildSummaryPrompt({
-              id: session.sessionDbId,
-              sdk_session_id: session.sdkSessionId,
-              project: session.project,
-              user_prompt: session.userPrompt,
-              last_user_message: message.last_user_message || '',
-              last_assistant_message: message.last_assistant_message || ''
-            })
+            content: summaryPrompt
           },
-          session_id: session.claudeSessionId,
+          session_id: session.contentSessionId,
           parent_tool_use_id: null,
           isSynthetic: true
         };
       }
-    }
-  }
-
-  /**
-   * Process SDK response text (parse XML, save to database, sync to Chroma)
-   */
-  private async processSDKResponse(session: ActiveSession, text: string, worker?: any): Promise<void> {
-    // Parse observations
-    const observations = parseObservations(text, session.claudeSessionId);
-
-    // Store observations
-    for (const obs of observations) {
-      const { id: obsId, createdAtEpoch } = this.dbManager.getSessionStore().storeObservation(
-        session.claudeSessionId,
-        session.project,
-        obs,
-        session.lastPromptNumber
-      );
-
-      // Log observation details
-      logger.info('SDK', 'Observation saved', {
-        sessionId: session.sessionDbId,
-        obsId,
-        type: obs.type,
-        title: obs.title || silentDebug('obs.title is null', { obsId, type: obs.type }, '(untitled)'),
-        filesRead: obs.files_read?.length ?? silentDebug('obs.files_read is null/undefined', { obsId }, '0'),
-        filesModified: obs.files_modified?.length ?? silentDebug('obs.files_modified is null/undefined', { obsId }, '0'),
-        concepts: obs.concepts?.length ?? silentDebug('obs.concepts is null/undefined', { obsId }, '0')
-      });
-
-      // Sync to Chroma with error logging
-      const chromaStart = Date.now();
-      const obsType = obs.type;
-      const obsTitle = obs.title || silentDebug('obs.title is null for Chroma sync', { obsId, type: obs.type }, '(untitled)');
-      this.dbManager.getChromaSync().syncObservation(
-        obsId,
-        session.claudeSessionId,
-        session.project,
-        obs,
-        session.lastPromptNumber,
-        createdAtEpoch
-      ).then(() => {
-        const chromaDuration = Date.now() - chromaStart;
-        logger.debug('CHROMA', 'Observation synced', {
-          obsId,
-          duration: `${chromaDuration}ms`,
-          type: obsType,
-          title: obsTitle
-        });
-      }).catch(err => {
-        logger.error('CHROMA', 'Failed to sync observation', {
-          obsId,
-          sessionId: session.sessionDbId,
-          type: obsType,
-          title: obsTitle
-        }, err);
-      });
-
-      // Broadcast to SSE clients (for web UI)
-      if (worker && worker.sseBroadcaster) {
-        worker.sseBroadcaster.broadcast({
-          type: 'new_observation',
-          observation: {
-            id: obsId,
-            sdk_session_id: session.sdkSessionId,
-            session_id: session.claudeSessionId,
-            type: obs.type,
-            title: obs.title,
-            subtitle: obs.subtitle,
-            text: obs.text || null,
-            narrative: obs.narrative || null,
-            facts: JSON.stringify(obs.facts || []),
-            concepts: JSON.stringify(obs.concepts || []),
-            files_read: JSON.stringify(obs.files || []),
-            files_modified: JSON.stringify([]),
-            project: session.project,
-            prompt_number: session.lastPromptNumber,
-            created_at_epoch: createdAtEpoch
-          }
-        });
-      }
-    }
-
-    // Parse summary
-    const summary = parseSummary(text, session.sessionDbId);
-
-    // Store summary
-    if (summary) {
-      const { id: summaryId, createdAtEpoch } = this.dbManager.getSessionStore().storeSummary(
-        session.claudeSessionId,
-        session.project,
-        summary,
-        session.lastPromptNumber
-      );
-
-      // Log summary details
-      logger.info('SDK', 'Summary saved', {
-        sessionId: session.sessionDbId,
-        summaryId,
-        request: summary.request || silentDebug('summary.request is null', { summaryId }, '(no request)'),
-        hasCompleted: !!summary.completed,
-        hasNextSteps: !!summary.next_steps
-      });
-
-      // Sync to Chroma with error logging
-      const chromaStart = Date.now();
-      const summaryRequest = summary.request || silentDebug('summary.request is null for Chroma sync', { summaryId }, '(no request)');
-      this.dbManager.getChromaSync().syncSummary(
-        summaryId,
-        session.claudeSessionId,
-        session.project,
-        summary,
-        session.lastPromptNumber,
-        createdAtEpoch
-      ).then(() => {
-        const chromaDuration = Date.now() - chromaStart;
-        logger.debug('CHROMA', 'Summary synced', {
-          summaryId,
-          duration: `${chromaDuration}ms`,
-          request: summaryRequest
-        });
-      }).catch(err => {
-        logger.error('CHROMA', 'Failed to sync summary', {
-          summaryId,
-          sessionId: session.sessionDbId,
-          request: summaryRequest
-        }, err);
-      });
-
-      // Broadcast to SSE clients (for web UI)
-      if (worker && worker.sseBroadcaster) {
-        worker.sseBroadcaster.broadcast({
-          type: 'new_summary',
-          summary: {
-            id: summaryId,
-            session_id: session.claudeSessionId,
-            request: summary.request,
-            investigated: summary.investigated,
-            learned: summary.learned,
-            completed: summary.completed,
-            next_steps: summary.next_steps,
-            notes: summary.notes,
-            project: session.project,
-            prompt_number: session.lastPromptNumber,
-            created_at_epoch: createdAtEpoch
-          }
-        });
-      }
-    }
-
-    // Broadcast activity status after processing (queue may have changed)
-    if (worker && typeof worker.broadcastProcessingStatus === 'function') {
-      worker.broadcastProcessingStatus();
     }
   }
 
@@ -787,17 +439,18 @@ Respond ONLY with comma-separated IDs (e.g., "1234,5678,9012") or "NONE".`
    * Find Claude executable (inline, called once per session)
    */
   private findClaudeExecutable(): string {
-    const claudePath = process.env.CLAUDE_CODE_PATH ||
-      execSync(process.platform === 'win32' ? 'where claude' : 'which claude', { encoding: 'utf8' })
-        .trim().split('\n')[0].trim();
+    const settings = SettingsDefaultsManager.loadFromFile(USER_SETTINGS_PATH);
 
-    if (!claudePath) {
-      throw new Error('Claude executable not found in PATH');
+    // 1. Check configured path
+    if (settings.CLAUDE_CODE_PATH) {
+      // Lazy load fs to keep startup fast
+      const { existsSync } = require('fs');
+      if (!existsSync(settings.CLAUDE_CODE_PATH)) {
+        throw new Error(`CLAUDE_CODE_PATH is set to "${settings.CLAUDE_CODE_PATH}" but the file does not exist.`);
+      }
+      return settings.CLAUDE_CODE_PATH;
     }
 
-<<<<<<< HEAD
-    return claudePath;
-=======
     // 2. On Windows, prefer "claude.cmd" via PATH to avoid spawn issues with spaces in paths
     if (process.platform === 'win32') {
       try {
@@ -822,102 +475,14 @@ Respond ONLY with comma-separated IDs (e.g., "1234,5678,9012") or "NONE".`
     }
 
     throw new Error('Claude executable not found. Please either:\n1. Add "claude" to your system PATH, or\n2. Set CLAUDE_CODE_PATH in ~/.claude-mem/settings.json');
->>>>>>> upstream/main
   }
 
   /**
    * Get model ID from settings or environment
    */
   private getModelId(): string {
-    try {
-      const settingsPath = path.join(homedir(), '.claude-mem', 'settings.json');
-      if (existsSync(settingsPath)) {
-        const settings = JSON.parse(readFileSync(settingsPath, 'utf-8'));
-        const modelId = settings.env?.CLAUDE_MEM_MODEL;
-        if (modelId) return modelId;
-      }
-    } catch {
-      // Fall through to env var or default
-    }
-
-    return process.env.CLAUDE_MEM_MODEL || 'claude-haiku-4-5';
-  }
-
-  /**
-   * Run a filter query using persistent JIT session
-   * Sends filter request to running JIT session and waits for response
-   */
-  async runFilterQuery(sessionDbId: number, userPrompt: string): Promise<number[]> {
-    try {
-      const queue = this.jitFilterQueues.get(sessionDbId);
-      if (!queue) {
-        logger.warn('SDK', 'No JIT session for filter query', { sessionDbId });
-        return []; // Return empty if JIT session not available
-      }
-
-      // Create promise for this filter request
-      const resultPromise = new Promise<number[]>((resolve, reject) => {
-        queue.requests.push({
-          userPrompt,
-          resolve,
-          reject
-        });
-
-        // Notify generator that new request is available
-        queue.emitter.emit('request');
-      });
-
-      // Wait for response (with timeout)
-      const timeout = 30000; // 30 second timeout
-      const timeoutPromise = new Promise<number[]>((_, reject) => {
-        setTimeout(() => reject(new Error('JIT filter query timeout')), timeout);
-      });
-
-      const selectedIds = await Promise.race([resultPromise, timeoutPromise]);
-
-      logger.debug('SDK', 'JIT filter query completed', {
-        sessionDbId,
-        selectedCount: selectedIds.length
-      });
-
-      return selectedIds;
-    } catch (error: any) {
-      logger.failure('SDK', 'JIT filter query failed', { sessionDbId }, error);
-      return []; // Return empty array on error (graceful degradation)
-    }
-  }
-
-  /**
-   * Cleanup JIT session resources
-   */
-  cleanupJitSession(sessionDbId: number): void {
-    const queue = this.jitFilterQueues.get(sessionDbId);
-    if (queue) {
-      // Reject any pending requests
-      queue.requests.forEach(req => {
-        req.reject(new Error('JIT session aborted'));
-      });
-      queue.requests = [];
-
-      // Remove queue
-      this.jitFilterQueues.delete(sessionDbId);
-
-      logger.debug('SDK', 'JIT session cleaned up', { sessionDbId });
-    }
-  }
-
-  /**
-   * Get emoji for observation type
-   */
-  private getTypeEmoji(type: string): string {
-    const emojiMap: Record<string, string> = {
-      'bugfix': '🔴',
-      'feature': '🟣',
-      'refactor': '🔄',
-      'change': '✅',
-      'discovery': '🔵',
-      'decision': '🧠'
-    };
-    return emojiMap[type] || '📝';
+    const settingsPath = path.join(homedir(), '.claude-mem', 'settings.json');
+    const settings = SettingsDefaultsManager.loadFromFile(settingsPath);
+    return settings.CLAUDE_MEM_MODEL;
   }
 }

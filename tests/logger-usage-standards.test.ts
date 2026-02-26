@@ -37,6 +37,7 @@ const EXCLUDED_PATTERNS = [
   /user-message-hook\.ts$/,  // Deprecated - kept for reference only, not registered in hooks.json
   /cli\/hook-command\.ts$/,  // CLI hook command uses console.log/error for hook protocol output
   /cli\/handlers\/user-message\.ts$/,  // User message handler uses console.error for user-visible context
+  /services\/transcripts\/cli\.ts$/,  // CLI transcript subcommands use console.log for user-visible interactive output
 ];
 
 // Files that should always use logger (core business logic)
@@ -88,7 +89,7 @@ async function findTypeScriptFiles(dir: string): Promise<string[]> {
  * Check if a file should be excluded from logger requirements
  */
 function shouldExclude(filePath: string): boolean {
-  const relativePath = relative(SRC_DIR, filePath).replace(/\\/g, '/');
+  const relativePath = relative(SRC_DIR, filePath);
   return EXCLUDED_PATTERNS.some(pattern => pattern.test(relativePath));
 }
 
@@ -96,7 +97,7 @@ function shouldExclude(filePath: string): boolean {
  * Check if a file is high priority for logging
  */
 function isHighPriority(filePath: string): boolean {
-  const relativePath = relative(SRC_DIR, filePath).replace(/\\/g, '/');
+  const relativePath = relative(SRC_DIR, filePath);
 
   // UI files are never high priority
   if (isUIFile(relativePath)) {

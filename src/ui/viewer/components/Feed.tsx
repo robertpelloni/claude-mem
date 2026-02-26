@@ -64,8 +64,7 @@ export function Feed({ observations, summaries, prompts, onLoadMore, isLoading, 
     <div className="feed" ref={feedRef}>
       <ScrollToTop targetRef={feedRef} />
       <div className="feed-content">
-        <div className="container">
-          {items.map(item => {
+        {items.map(item => {
           const key = `${item.itemType}-${item.id}`;
           if (item.itemType === 'observation') {
             return <ObservationCard key={key} observation={item} />;
@@ -94,7 +93,6 @@ export function Feed({ observations, summaries, prompts, onLoadMore, isLoading, 
             No more items to load
           </div>
         )}
-        </div>
       </div>
     </div>
   );

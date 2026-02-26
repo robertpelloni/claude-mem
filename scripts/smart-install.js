@@ -1,57 +1,46 @@
 #!/usr/bin/env node
-
 /**
  * Smart Install Script for claude-mem
  *
- * Features:
- * - Only runs npm install when necessary (version change or missing deps)
- * - Caches installation state with version marker
- * - Provides helpful Windows-specific error messages
- * - Cross-platform compatible (pure Node.js)
- * - Fast when already installed (just version check)
+ * Ensures Bun runtime and uv (Python package manager) are installed
+ * (auto-installs if missing) and handles dependency installation when needed.
  */
-
 import { existsSync, readFileSync, writeFileSync } from 'fs';
 import { execSync, spawnSync } from 'child_process';
 import { join, dirname } from 'path';
+import { homedir } from 'os';
 import { fileURLToPath } from 'url';
 
-<<<<<<< HEAD
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-
-// Plugin root is parent directory of scripts/
-const PLUGIN_ROOT = join(__dirname, '..');
-const PACKAGE_JSON_PATH = join(PLUGIN_ROOT, 'package.json');
-const VERSION_MARKER_PATH = join(PLUGIN_ROOT, '.install-version');
-const NODE_MODULES_PATH = join(PLUGIN_ROOT, 'node_modules');
-const BETTER_SQLITE3_PATH = join(NODE_MODULES_PATH, 'better-sqlite3');
-=======
 const IS_WINDOWS = process.platform === 'win32';
 
 /**
- * Resolve the marketplace root directory.
+ * Resolve the plugin root directory where dependencies should be installed.
  *
- * Claude Code may store plugins under either `~/.claude/plugins/` (legacy) or
- * `~/.config/claude/plugins/` (XDG-compliant, e.g. Nix-managed installs).
- * When `CLAUDE_PLUGIN_ROOT` is set we derive the base from it; otherwise we
- * probe both candidate paths and fall back to the legacy location.
+ * Priority:
+ * 1. CLAUDE_PLUGIN_ROOT env var (set by Claude Code for hooks — works for
+ *    both cache-based and marketplace installs)
+ * 2. Script location (dirname of this file, up one level from scripts/)
+ * 3. XDG path (~/.config/claude/plugins/marketplaces/thedotmack)
+ * 4. Legacy path (~/.claude/plugins/marketplaces/thedotmack)
  */
 function resolveRoot() {
-  const marketplaceRel = join('plugins', 'marketplaces', 'thedotmack');
-
-  // Derive from CLAUDE_PLUGIN_ROOT (e.g. .../plugins/cache/thedotmack/claude-mem/<ver>)
+  // CLAUDE_PLUGIN_ROOT is the authoritative location set by Claude Code
   if (process.env.CLAUDE_PLUGIN_ROOT) {
-    let dir = process.env.CLAUDE_PLUGIN_ROOT;
-    const cacheIndex = dir.indexOf(join('plugins', 'cache'));
-    if (cacheIndex !== -1) {
-      const base = dir.substring(0, cacheIndex);
-      const candidate = join(base, marketplaceRel);
-      if (existsSync(join(candidate, 'package.json'))) return candidate;
-    }
+    const root = process.env.CLAUDE_PLUGIN_ROOT;
+    if (existsSync(join(root, 'package.json'))) return root;
   }
 
-  // Probe XDG path first, then legacy
+  // Derive from script location (this file is in <root>/scripts/)
+  try {
+    const scriptDir = dirname(fileURLToPath(import.meta.url));
+    const candidate = dirname(scriptDir);
+    if (existsSync(join(candidate, 'package.json'))) return candidate;
+  } catch {
+    // import.meta.url not available
+  }
+
+  // Probe XDG path, then legacy
+  const marketplaceRel = join('plugins', 'marketplaces', 'thedotmack');
   const xdg = join(homedir(), '.config', 'claude', marketplaceRel);
   if (existsSync(join(xdg, 'package.json'))) return xdg;
 
@@ -65,380 +54,272 @@ const MARKER = join(ROOT, '.install-version');
 const BUN_COMMON_PATHS = IS_WINDOWS
   ? [join(homedir(), '.bun', 'bin', 'bun.exe')]
   : [join(homedir(), '.bun', 'bin', 'bun'), '/usr/local/bin/bun', '/opt/homebrew/bin/bun'];
->>>>>>> upstream/main
 
-// Colors for output
-const colors = {
-  reset: '\x1b[0m',
-  bright: '\x1b[1m',
-  green: '\x1b[32m',
-  yellow: '\x1b[33m',
-  red: '\x1b[31m',
-  cyan: '\x1b[36m',
-  dim: '\x1b[2m',
-};
+const UV_COMMON_PATHS = IS_WINDOWS
+  ? [join(homedir(), '.local', 'bin', 'uv.exe'), join(homedir(), '.cargo', 'bin', 'uv.exe')]
+  : [join(homedir(), '.local', 'bin', 'uv'), join(homedir(), '.cargo', 'bin', 'uv'), '/usr/local/bin/uv', '/opt/homebrew/bin/uv'];
 
-function log(message, color = colors.reset) {
-  console.error(`${color}${message}${colors.reset}`);
+/**
+ * Get the Bun executable path (from PATH or common install locations)
+ */
+function getBunPath() {
+  // Try PATH first
+  try {
+    const result = spawnSync('bun', ['--version'], {
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+      shell: IS_WINDOWS
+    });
+    if (result.status === 0) return 'bun';
+  } catch {
+    // Not in PATH
+  }
+
+  // Check common installation paths
+  return BUN_COMMON_PATHS.find(existsSync) || null;
 }
 
-function getPackageVersion() {
+/**
+ * Check if Bun is installed and accessible
+ */
+function isBunInstalled() {
+  return getBunPath() !== null;
+}
+
+/**
+ * Get Bun version if installed
+ */
+function getBunVersion() {
+  const bunPath = getBunPath();
+  if (!bunPath) return null;
+
   try {
-    const packageJson = JSON.parse(readFileSync(PACKAGE_JSON_PATH, 'utf-8'));
-    return packageJson.version;
-  } catch (error) {
-    log(`⚠️  Failed to read package.json: ${error.message}`, colors.yellow);
+    const result = spawnSync(bunPath, ['--version'], {
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+      shell: IS_WINDOWS
+    });
+    return result.status === 0 ? result.stdout.trim() : null;
+  } catch {
     return null;
   }
 }
 
-function getNodeVersion() {
-  return process.version; // e.g., "v22.21.1"
-}
-
-function getInstalledVersion() {
+/**
+ * Get the uv executable path (from PATH or common install locations)
+ */
+function getUvPath() {
+  // Try PATH first
   try {
-    if (existsSync(VERSION_MARKER_PATH)) {
-      const content = readFileSync(VERSION_MARKER_PATH, 'utf-8').trim();
-
-      // Try parsing as JSON (new format)
-      try {
-        const marker = JSON.parse(content);
-        return {
-          packageVersion: marker.packageVersion,
-          nodeVersion: marker.nodeVersion,
-          installedAt: marker.installedAt
-        };
-      } catch {
-        // Fallback: old format (plain text version string)
-        return {
-          packageVersion: content,
-          nodeVersion: null, // Unknown
-          installedAt: null
-        };
-      }
-    }
-  } catch (error) {
-    // Marker doesn't exist or can't be read
-  }
-  return null;
-}
-
-function setInstalledVersion(packageVersion, nodeVersion) {
-  try {
-    const marker = {
-      packageVersion,
-      nodeVersion,
-      installedAt: new Date().toISOString()
-    };
-    writeFileSync(VERSION_MARKER_PATH, JSON.stringify(marker, null, 2), 'utf-8');
-  } catch (error) {
-    log(`⚠️  Failed to write version marker: ${error.message}`, colors.yellow);
-  }
-}
-
-function needsInstall() {
-  // Check if node_modules exists
-  if (!existsSync(NODE_MODULES_PATH)) {
-    log('📦 Dependencies not found - first time setup', colors.cyan);
-    return true;
+    const result = spawnSync('uv', ['--version'], {
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+      shell: IS_WINDOWS
+    });
+    if (result.status === 0) return 'uv';
+  } catch {
+    // Not in PATH
   }
 
-  // Check if better-sqlite3 is installed
-  if (!existsSync(BETTER_SQLITE3_PATH)) {
-    log('📦 better-sqlite3 missing - reinstalling', colors.cyan);
-    return true;
-  }
-
-  // Check version marker
-  const currentPackageVersion = getPackageVersion();
-  const currentNodeVersion = getNodeVersion();
-  const installed = getInstalledVersion();
-
-  if (!installed) {
-    log('📦 No version marker found - installing', colors.cyan);
-    return true;
-  }
-
-  // Check package version
-  if (currentPackageVersion !== installed.packageVersion) {
-    log(`📦 Version changed (${installed.packageVersion} → ${currentPackageVersion}) - updating`, colors.cyan);
-    return true;
-  }
-
-  // Check Node.js version
-  if (installed.nodeVersion && currentNodeVersion !== installed.nodeVersion) {
-    log(`📦 Node.js version changed (${installed.nodeVersion} → ${currentNodeVersion}) - rebuilding native modules`, colors.cyan);
-    return true;
-  }
-
-  // If old format (no nodeVersion), assume needs install
-  if (!installed.nodeVersion) {
-    log('📦 Old version marker format - updating', colors.cyan);
-    return true;
-  }
-
-  // All good - no install needed
-  log(`✓ Dependencies already installed (v${currentPackageVersion})`, colors.dim);
-  return false;
+  // Check common installation paths
+  return UV_COMMON_PATHS.find(existsSync) || null;
 }
 
 /**
- * Verify that better-sqlite3 native module loads correctly
- * This catches ABI mismatches and corrupted builds
+ * Check if uv is installed and accessible
  */
-async function verifyNativeModules() {
+function isUvInstalled() {
+  return getUvPath() !== null;
+}
+
+/**
+ * Get uv version if installed
+ */
+function getUvVersion() {
+  const uvPath = getUvPath();
+  if (!uvPath) return null;
+
   try {
-    log('🔍 Verifying native modules...', colors.dim);
+    const result = spawnSync(uvPath, ['--version'], {
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+      shell: IS_WINDOWS
+    });
+    return result.status === 0 ? result.stdout.trim() : null;
+  } catch {
+    return null;
+  }
+}
 
-    // Try to actually load better-sqlite3
-    const { default: Database } = await import('better-sqlite3');
+/**
+ * Install Bun automatically based on platform
+ */
+function installBun() {
+  console.error('🔧 Bun not found. Installing Bun runtime...');
 
-    // Try to create a test in-memory database
-    const db = new Database(':memory:');
-
-    // Run a simple query to ensure it works
-    const result = db.prepare('SELECT 1 + 1 as result').get();
-
-    // Clean up
-    db.close();
-
-    if (result.result !== 2) {
-      throw new Error('SQLite math check failed');
+  try {
+    if (IS_WINDOWS) {
+      console.error('   Installing via PowerShell...');
+      execSync('powershell -c "irm bun.sh/install.ps1 | iex"', {
+        stdio: 'inherit',
+        shell: true
+      });
+    } else {
+      console.error('   Installing via curl...');
+      execSync('curl -fsSL https://bun.sh/install | bash', {
+        stdio: 'inherit',
+        shell: true
+      });
     }
 
-    log('✓ Native modules verified', colors.dim);
-    return true;
+    if (!isBunInstalled()) {
+      throw new Error(
+        'Bun installation completed but binary not found. ' +
+        'Please restart your terminal and try again.'
+      );
+    }
 
+    const version = getBunVersion();
+    console.error(`✅ Bun ${version} installed successfully`);
   } catch (error) {
-    if (error.code === 'ERR_DLOPEN_FAILED') {
-      log('⚠️  Native module ABI mismatch detected', colors.yellow);
-      return false;
+    console.error('❌ Failed to install Bun');
+    console.error('   Please install manually:');
+    if (IS_WINDOWS) {
+      console.error('   - winget install Oven-sh.Bun');
+      console.error('   - Or: powershell -c "irm bun.sh/install.ps1 | iex"');
+    } else {
+      console.error('   - curl -fsSL https://bun.sh/install | bash');
+      console.error('   - Or: brew install oven-sh/bun/bun');
+    }
+    console.error('   Then restart your terminal and try again.');
+    throw error;
+  }
+}
+
+/**
+ * Install uv automatically based on platform
+ */
+function installUv() {
+  console.error('🐍 Installing uv for Python/Chroma support...');
+
+  try {
+    if (IS_WINDOWS) {
+      console.error('   Installing via PowerShell...');
+      execSync('powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"', {
+        stdio: 'inherit',
+        shell: true
+      });
+    } else {
+      console.error('   Installing via curl...');
+      execSync('curl -LsSf https://astral.sh/uv/install.sh | sh', {
+        stdio: 'inherit',
+        shell: true
+      });
     }
 
-    // Other errors are unexpected - log and fail
-    log(`❌ Native module verification failed: ${error.message}`, colors.red);
+    if (!isUvInstalled()) {
+      throw new Error(
+        'uv installation completed but binary not found. ' +
+        'Please restart your terminal and try again.'
+      );
+    }
+
+    const version = getUvVersion();
+    console.error(`✅ uv ${version} installed successfully`);
+  } catch (error) {
+    console.error('❌ Failed to install uv');
+    console.error('   Please install manually:');
+    if (IS_WINDOWS) {
+      console.error('   - winget install astral-sh.uv');
+      console.error('   - Or: powershell -c "irm https://astral.sh/uv/install.ps1 | iex"');
+    } else {
+      console.error('   - curl -LsSf https://astral.sh/uv/install.sh | sh');
+      console.error('   - Or: brew install uv (macOS)');
+    }
+    console.error('   Then restart your terminal and try again.');
+    throw error;
+  }
+}
+
+/**
+ * Check if dependencies need to be installed
+ */
+function needsInstall() {
+  if (!existsSync(join(ROOT, 'node_modules'))) return true;
+  try {
+    const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf-8'));
+    const marker = JSON.parse(readFileSync(MARKER, 'utf-8'));
+    return pkg.version !== marker.version || getBunVersion() !== marker.bun;
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * Install dependencies using Bun
+ */
+function installDeps() {
+  const bunPath = getBunPath();
+  if (!bunPath) {
+    throw new Error('Bun executable not found');
+  }
+
+  console.error('📦 Installing dependencies with Bun...');
+
+  // Quote path for Windows paths with spaces
+  const bunCmd = IS_WINDOWS && bunPath.includes(' ') ? `"${bunPath}"` : bunPath;
+
+  execSync(`${bunCmd} install`, { cwd: ROOT, stdio: 'inherit', shell: IS_WINDOWS });
+
+  // Write version marker
+  const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf-8'));
+  writeFileSync(MARKER, JSON.stringify({
+    version: pkg.version,
+    bun: getBunVersion(),
+    uv: getUvVersion(),
+    installedAt: new Date().toISOString()
+  }));
+}
+
+/**
+ * Verify that critical runtime modules are resolvable from the install directory.
+ * Returns true if all critical modules exist, false otherwise.
+ */
+function verifyCriticalModules() {
+  const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf-8'));
+  const dependencies = Object.keys(pkg.dependencies || {});
+
+  const missing = [];
+  for (const dep of dependencies) {
+    const modulePath = join(ROOT, 'node_modules', ...dep.split('/'));
+    if (!existsSync(modulePath)) {
+      missing.push(dep);
+    }
+  }
+
+  if (missing.length > 0) {
+    console.error(`❌ Post-install check failed: missing modules: ${missing.join(', ')}`);
     return false;
   }
+
+  return true;
 }
 
-function getWindowsErrorHelp(errorOutput) {
-  // Detect Python version at runtime
-  let pythonStatus = '   Python not detected or version unknown';
-  try {
-    const pythonVersion = execSync('python --version', { encoding: 'utf-8', stdio: 'pipe' }).trim();
-    const versionMatch = pythonVersion.match(/Python\s+([\d.]+)/);
-    if (versionMatch) {
-      pythonStatus = `   You have ${versionMatch[0]} installed ✓`;
+// Main execution
+try {
+  if (!isBunInstalled()) installBun();
+  if (!isUvInstalled()) installUv();
+  if (needsInstall()) {
+    installDeps();
+
+    if (!verifyCriticalModules()) {
+      console.error('❌ Dependencies could not be installed. Plugin may not work correctly.');
+      process.exit(1);
     }
-  } catch (error) {
-    // Python not available or failed to detect - use default message
-  }
 
-  const help = [
-    '',
-    '╔══════════════════════════════════════════════════════════════════════╗',
-    '║                    Windows Installation Help                        ║',
-    '╚══════════════════════════════════════════════════════════════════════╝',
-    '',
-    '📋 better-sqlite3 requires build tools to compile native modules.',
-    '',
-    '🔧 Option 1: Install Visual Studio Build Tools (Recommended)',
-    '   1. Download: https://visualstudio.microsoft.com/downloads/#build-tools-for-visual-studio-2022',
-    '   2. Install "Desktop development with C++"',
-    '   3. Restart your terminal',
-    '   4. Try again',
-    '',
-    '🔧 Option 2: Install via npm (automated)',
-    '   Run as Administrator:',
-    '   npm install --global windows-build-tools',
-    '',
-    '🐍 Python Requirement:',
-    '   Python 3.6+ is required.',
-    pythonStatus,
-    '',
-  ];
-
-  // Check for specific error patterns
-  if (errorOutput.includes('MSBuild.exe')) {
-    help.push('❌ MSBuild not found - install Visual Studio Build Tools');
+    console.error('✅ Dependencies installed');
   }
-  if (errorOutput.includes('MSVS')) {
-    help.push('❌ Visual Studio not detected - install Build Tools');
-  }
-  if (errorOutput.includes('permission') || errorOutput.includes('EPERM')) {
-    help.push('❌ Permission denied - try running as Administrator');
-  }
-
-  help.push('');
-  help.push('📖 Full documentation: https://github.com/WiseLibs/better-sqlite3/blob/master/docs/troubleshooting.md');
-  help.push('');
-
-  return help.join('\n');
+} catch (e) {
+  console.error('❌ Installation failed:', e.message);
+  process.exit(1);
 }
-
-async function runNpmInstall() {
-  const isWindows = process.platform === 'win32';
-
-  log('', colors.cyan);
-  log('🔨 Installing dependencies...', colors.bright);
-  log('', colors.reset);
-
-  // Try normal install first, then retry with force if it fails
-  const strategies = [
-    { command: 'npm install', label: 'normal' },
-    { command: 'npm install --force', label: 'with force flag' },
-  ];
-
-  let lastError = null;
-
-  for (const { command, label } of strategies) {
-    try {
-      log(`Attempting install ${label}...`, colors.dim);
-
-      // Run npm install silently
-      execSync(command, {
-        cwd: PLUGIN_ROOT,
-        stdio: 'pipe', // Silent output unless error
-        encoding: 'utf-8',
-      });
-
-      // Verify better-sqlite3 was installed
-      if (!existsSync(BETTER_SQLITE3_PATH)) {
-        throw new Error('better-sqlite3 installation verification failed');
-      }
-
-      // NEW: Verify native modules actually work
-      const nativeModulesWork = await verifyNativeModules();
-      if (!nativeModulesWork) {
-        throw new Error('Native modules failed to load after install');
-      }
-
-      const packageVersion = getPackageVersion();
-      const nodeVersion = getNodeVersion();
-      setInstalledVersion(packageVersion, nodeVersion);
-
-      log('', colors.green);
-      log('✅ Dependencies installed successfully!', colors.bright);
-      log(`   Package version: ${packageVersion}`, colors.dim);
-      log(`   Node.js version: ${nodeVersion}`, colors.dim);
-      log('', colors.reset);
-
-      return true;
-
-    } catch (error) {
-      lastError = error;
-      // Continue to next strategy
-    }
-  }
-
-  // All strategies failed - show error
-  log('', colors.red);
-  log('❌ Installation failed after retrying!', colors.bright);
-  log('', colors.reset);
-
-  // Provide Windows-specific help
-  if (isWindows && lastError && lastError.message && lastError.message.includes('better-sqlite3')) {
-    log(getWindowsErrorHelp(lastError.message), colors.yellow);
-  }
-
-  // Show generic error info with troubleshooting steps
-  if (lastError) {
-    if (lastError.stderr) {
-      log('Error output:', colors.dim);
-      log(lastError.stderr.toString(), colors.red);
-    } else if (lastError.message) {
-      log(lastError.message, colors.red);
-    }
-
-    log('', colors.yellow);
-    log('📋 Troubleshooting Steps:', colors.bright);
-    log('', colors.reset);
-    log('1. Check your internet connection', colors.yellow);
-    log('2. Try running: npm cache clean --force', colors.yellow);
-    log('3. Try running: npm install (in plugin directory)', colors.yellow);
-    log('4. Check npm version: npm --version (requires npm 7+)', colors.yellow);
-    log('5. Try updating npm: npm install -g npm@latest', colors.yellow);
-    log('', colors.reset);
-  }
-
-  return false;
-}
-
-/**
- * Check if we should fail when worker startup fails
- * Returns true if worker failed AND dependencies are missing
- */
-function shouldFailOnWorkerStartup(workerStarted) {
-  return !workerStarted && !existsSync(NODE_MODULES_PATH);
-}
-
-async function main() {
-  try {
-    // Check if we need to install dependencies
-    const installNeeded = needsInstall();
-
-    if (installNeeded) {
-      // Run installation (now async)
-      const installSuccess = await runNpmInstall();
-
-      if (!installSuccess) {
-        log('', colors.red);
-        log('⚠️  Installation failed', colors.yellow);
-        log('', colors.reset);
-        process.exit(1);
-      }
-    } else {
-      // NEW: Even if install not needed, verify native modules work
-      const nativeModulesWork = await verifyNativeModules();
-
-      if (!nativeModulesWork) {
-        log('📦 Native modules need rebuild - reinstalling', colors.cyan);
-        const installSuccess = await runNpmInstall();
-
-        if (!installSuccess) {
-          log('', colors.red);
-          log('⚠️  Native module rebuild failed', colors.yellow);
-          log('', colors.reset);
-          process.exit(1);
-        }
-      }
-    }
-
-    // Try to start the PM2 worker after fresh install
-    try {
-      log('🚀 Starting worker service...', colors.cyan);
-      // On Windows, PM2 executable is pm2.cmd, not pm2
-      const localPm2Base = join(NODE_MODULES_PATH, '.bin', 'pm2');
-      const localPm2Cmd = process.platform === 'win32' ? localPm2Base + '.cmd' : localPm2Base;
-      const pm2Command = existsSync(localPm2Cmd) ? localPm2Cmd : 'pm2';
-      const ecosystemPath = join(PLUGIN_ROOT, 'ecosystem.config.cjs');
-
-      // Using spawnSync with array args to avoid command injection risks
-      const result = spawnSync(pm2Command, ['start', ecosystemPath], {
-        cwd: PLUGIN_ROOT,
-        stdio: 'pipe',
-        encoding: 'utf-8'
-      });
-      if (result.status !== 0) {
-        throw new Error(result.stderr || 'PM2 start failed');
-      }
-
-      log('✅ Worker service started', colors.green);
-    } catch (error) {
-      // Worker might already be running or PM2 not available - that's okay
-      // The ensureWorkerRunning() function will handle auto-start when needed
-      log('ℹ️ Worker startup error', colors.dim);
-    }
-
-    // Success - dependencies installed (if needed)
-    process.exit(0);
-
-  } catch (error) {
-    log(`❌ Unexpected error: ${error.message}`, colors.red);
-    log('', colors.reset);
-    process.exit(1);
-  }
-}
-
-main();

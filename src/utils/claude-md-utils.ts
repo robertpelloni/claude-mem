@@ -114,6 +114,11 @@ export function replaceTaggedContent(existingContent: string, newContent: string
  * @param newContent - Content to write inside tags
  */
 export function writeClaudeMdToFolder(folderPath: string, newContent: string): void {
+  const resolvedPath = path.resolve(folderPath);
+
+  // Never write inside .git directories — corrupts refs (#1165)
+  if (resolvedPath.includes('/.git/') || resolvedPath.includes('\\.git\\') || resolvedPath.endsWith('/.git') || resolvedPath.endsWith('\\.git')) return;
+
   const claudeMdPath = path.join(folderPath, 'CLAUDE.md');
   const tempFile = `${claudeMdPath}.tmp`;
 
@@ -414,10 +419,8 @@ export async function updateFolderClaudeMdFiles(
     try {
       // Fetch timeline via existing API
       const host = getWorkerHost();
-      // Normalize path to forward slashes for URL consistency
-      const normalizedPath = folderPath.split(path.sep).join('/');
       const response = await fetch(
-        `http://${host}:${port}/api/search/by-file?filePath=${encodeURIComponent(normalizedPath)}&limit=${limit}&project=${encodeURIComponent(project)}&isFolder=true`
+        `http://${host}:${port}/api/search/by-file?filePath=${encodeURIComponent(folderPath)}&limit=${limit}&project=${encodeURIComponent(project)}&isFolder=true`
       );
 
       if (!response.ok) {

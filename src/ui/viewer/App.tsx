@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Header } from './components/Header';
 import { Feed } from './components/Feed';
 import { ContextSettingsModal } from './components/ContextSettingsModal';
-import { HelpModal } from './components/HelpModal';
+import { LogsDrawer } from './components/LogsModal';
 import { useSSE } from './hooks/useSSE';
 import { useSettings } from './hooks/useSettings';
 import { useStats } from './hooks/useStats';
@@ -14,17 +14,7 @@ import { mergeAndDeduplicateByProject } from './utils/data';
 export function App() {
   const [currentFilter, setCurrentFilter] = useState('');
   const [contextPreviewOpen, setContextPreviewOpen] = useState(false);
-  const [helpOpen, setHelpOpen] = useState(false);
-
-  // Search state
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState<{
-    observations: Observation[];
-    summaries: Summary[];
-    prompts: UserPrompt[];
-  }>({ observations: [], summaries: [], prompts: [] });
-  const [isSearching, setIsSearching] = useState(false);
-
+  const [logsModalOpen, setLogsModalOpen] = useState(false);
   const [paginatedObservations, setPaginatedObservations] = useState<Observation[]>([]);
   const [paginatedSummaries, setPaginatedSummaries] = useState<Summary[]>([]);
   const [paginatedPrompts, setPaginatedPrompts] = useState<UserPrompt[]>([]);
@@ -35,97 +25,43 @@ export function App() {
   const { preference, resolvedTheme, setThemePreference } = useTheme();
   const pagination = usePagination(currentFilter);
 
-  // Search handler
-  const handleSearch = useCallback(async (query: string) => {
-    setSearchQuery(query);
-    if (!query.trim()) {
-      setSearchResults({ observations: [], summaries: [], prompts: [] });
-      return;
-    }
-
-    setIsSearching(true);
-    try {
-      const params = new URLSearchParams({
-        query: query,
-        limit: '20',
-        format: 'json'
-      });
-      if (currentFilter) params.append('project', currentFilter);
-
-      const res = await fetch(`/api/search?${params.toString()}`);
-      if (res.ok) {
-        const data = await res.json();
-        setSearchResults({
-          observations: data.observations || [],
-          summaries: data.sessions || [],
-          prompts: data.prompts || []
-        });
-      }
-    } catch (e) {
-      console.error('Search failed', e);
-    } finally {
-      setIsSearching(false);
-    }
-  }, [currentFilter]);
-
   // When filtering by project: ONLY use paginated data (API-filtered)
   // When showing all projects: merge SSE live data with paginated data
   const allObservations = useMemo(() => {
-    if (searchQuery) return searchResults.observations;
     if (currentFilter) {
       // Project filter active: API handles filtering, ignore SSE items
       return paginatedObservations;
     }
     // No filter: merge SSE + paginated, deduplicate by ID
     return mergeAndDeduplicateByProject(observations, paginatedObservations);
-  }, [observations, paginatedObservations, currentFilter, searchQuery, searchResults]);
+  }, [observations, paginatedObservations, currentFilter]);
 
   const allSummaries = useMemo(() => {
-    if (searchQuery) return searchResults.summaries;
     if (currentFilter) {
       return paginatedSummaries;
     }
     return mergeAndDeduplicateByProject(summaries, paginatedSummaries);
-  }, [summaries, paginatedSummaries, currentFilter, searchQuery, searchResults]);
+  }, [summaries, paginatedSummaries, currentFilter]);
 
   const allPrompts = useMemo(() => {
-    if (searchQuery) return searchResults.prompts;
     if (currentFilter) {
       return paginatedPrompts;
     }
     return mergeAndDeduplicateByProject(prompts, paginatedPrompts);
-  }, [prompts, paginatedPrompts, currentFilter, searchQuery, searchResults]);
+  }, [prompts, paginatedPrompts, currentFilter]);
 
   // Toggle context preview modal
   const toggleContextPreview = useCallback(() => {
     setContextPreviewOpen(prev => !prev);
   }, []);
 
-  // Toggle help modal
-  const toggleHelp = useCallback(() => {
-    setHelpOpen(prev => !prev);
+  // Toggle logs modal
+  const toggleLogsModal = useCallback(() => {
+    setLogsModalOpen(prev => !prev);
   }, []);
-
-  // Keyboard shortcuts
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Ignore if typing in input
-      if (e.target instanceof HTMLElement && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT')) {
-        return;
-      }
-
-      if (e.key === '?') {
-        toggleHelp();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [toggleHelp]);
 
   // Handle loading more data
   const handleLoadMore = useCallback(async () => {
-    if (searchQuery) return; // Disable infinite scroll during search for now
-
     try {
       const [newObservations, newSummaries, newPrompts] = await Promise.all([
         pagination.observations.loadMore(),
@@ -145,7 +81,7 @@ export function App() {
     } catch (error) {
       console.error('Failed to load more data:', error);
     }
-  }, [currentFilter, pagination.observations, pagination.summaries, pagination.prompts, searchQuery]);
+  }, [currentFilter, pagination.observations, pagination.summaries, pagination.prompts]);
 
   // Reset paginated data and load first page when filter changes
   useEffect(() => {
@@ -168,9 +104,6 @@ export function App() {
         themePreference={preference}
         onThemeChange={setThemePreference}
         onContextPreviewToggle={toggleContextPreview}
-        onHelpToggle={toggleHelp}
-        onSearch={handleSearch}
-        isSearching={isSearching}
       />
 
       <Feed
@@ -178,8 +111,8 @@ export function App() {
         summaries={allSummaries}
         prompts={allPrompts}
         onLoadMore={handleLoadMore}
-        isLoading={!searchQuery && (pagination.observations.isLoading || pagination.summaries.isLoading || pagination.prompts.isLoading)}
-        hasMore={!searchQuery && (pagination.observations.hasMore || pagination.summaries.hasMore || pagination.prompts.hasMore)}
+        isLoading={pagination.observations.isLoading || pagination.summaries.isLoading || pagination.prompts.isLoading}
+        hasMore={pagination.observations.hasMore || pagination.summaries.hasMore || pagination.prompts.hasMore}
       />
 
       <ContextSettingsModal
@@ -191,9 +124,20 @@ export function App() {
         saveStatus={saveStatus}
       />
 
-      <HelpModal
-        isOpen={helpOpen}
-        onClose={toggleHelp}
+      <button
+        className="console-toggle-btn"
+        onClick={toggleLogsModal}
+        title="Toggle Console"
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <polyline points="4 17 10 11 4 5"></polyline>
+          <line x1="12" y1="19" x2="20" y2="19"></line>
+        </svg>
+      </button>
+
+      <LogsDrawer
+        isOpen={logsModalOpen}
+        onClose={toggleLogsModal}
       />
     </>
   );

@@ -12,16 +12,6 @@ import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-const HOOKS = [
-  { name: 'context-hook', source: 'src/hooks/context-hook.ts' },
-  { name: 'new-hook', source: 'src/hooks/new-hook.ts' },
-  { name: 'pre-tool-use-hook', source: 'src/hooks/pre-tool-use-hook.ts' },
-  { name: 'save-hook', source: 'src/hooks/save-hook.ts' },
-  { name: 'summary-hook', source: 'src/hooks/summary-hook.ts' },
-  { name: 'cleanup-hook', source: 'src/hooks/cleanup-hook.ts' },
-  { name: 'user-message-hook', source: 'src/hooks/user-message-hook.ts' }
-];
-
 const WORKER_SERVICE = {
   name: 'worker-service',
   source: 'src/services/worker-service.ts'
@@ -59,8 +49,6 @@ async function buildHooks() {
     }
     console.log('✓ Output directories ready');
 
-<<<<<<< HEAD
-=======
     // Generate plugin/package.json for cache directory dependency installation
     // Note: bun:sqlite is a Bun built-in, no external dependencies needed for SQLite
     console.log('\n📦 Generating plugin package.json...');
@@ -71,8 +59,16 @@ async function buildHooks() {
       description: 'Runtime dependencies for claude-mem bundled hooks',
       type: 'module',
       dependencies: {
-        // Chroma embedding function with native ONNX binaries (can't be bundled)
-        '@chroma-core/default-embed': '^0.1.9'
+        'tree-sitter-cli': '^0.26.5',
+        'tree-sitter-c': '^0.24.1',
+        'tree-sitter-cpp': '^0.23.4',
+        'tree-sitter-go': '^0.25.0',
+        'tree-sitter-java': '^0.23.5',
+        'tree-sitter-javascript': '^0.25.0',
+        'tree-sitter-python': '^0.25.0',
+        'tree-sitter-ruby': '^0.23.1',
+        'tree-sitter-rust': '^0.24.0',
+        'tree-sitter-typescript': '^0.23.2',
       },
       engines: {
         node: '>=18.0.0',
@@ -82,7 +78,6 @@ async function buildHooks() {
     fs.writeFileSync('plugin/package.json', JSON.stringify(pluginPackageJson, null, 2) + '\n');
     console.log('✓ plugin/package.json generated');
 
->>>>>>> upstream/main
     // Build React viewer
     console.log('\n📋 Building React viewer...');
     const { spawn } = await import('child_process');
@@ -108,9 +103,6 @@ async function buildHooks() {
       outfile: `${hooksDir}/${WORKER_SERVICE.name}.cjs`,
       minify: true,
       logLevel: 'error', // Suppress warnings (import.meta warning is benign)
-<<<<<<< HEAD
-      external: ['better-sqlite3'],
-=======
       external: [
         'bun:sqlite',
         // Optional chromadb embedding providers
@@ -120,12 +112,11 @@ async function buildHooks() {
         '@chroma-core/default-embed',
         'onnxruntime-node'
       ],
->>>>>>> upstream/main
       define: {
         '__DEFAULT_PACKAGE_VERSION__': `"${version}"`
       },
       banner: {
-        js: '#!/usr/bin/env node'
+        js: '#!/usr/bin/env bun'
       }
     });
 
@@ -145,7 +136,19 @@ async function buildHooks() {
       outfile: `${hooksDir}/${MCP_SERVER.name}.cjs`,
       minify: true,
       logLevel: 'error',
-      external: ['better-sqlite3'],
+      external: [
+        'bun:sqlite',
+        'tree-sitter-cli',
+        'tree-sitter-javascript',
+        'tree-sitter-typescript',
+        'tree-sitter-python',
+        'tree-sitter-go',
+        'tree-sitter-rust',
+        'tree-sitter-ruby',
+        'tree-sitter-java',
+        'tree-sitter-c',
+        'tree-sitter-cpp',
+      ],
       define: {
         '__DEFAULT_PACKAGE_VERSION__': `"${version}"`
       },
@@ -170,7 +173,7 @@ async function buildHooks() {
       outfile: `${hooksDir}/${CONTEXT_GENERATOR.name}.cjs`,
       minify: true,
       logLevel: 'error',
-      external: ['better-sqlite3'],
+      external: ['bun:sqlite'],
       define: {
         '__DEFAULT_PACKAGE_VERSION__': `"${version}"`
       }
@@ -179,61 +182,26 @@ async function buildHooks() {
     const contextGenStats = fs.statSync(`${hooksDir}/${CONTEXT_GENERATOR.name}.cjs`);
     console.log(`✓ context-generator built (${(contextGenStats.size / 1024).toFixed(2)} KB)`);
 
-    // Build each hook
-    for (const hook of HOOKS) {
-      console.log(`\n🔧 Building ${hook.name}...`);
-
-      const outfile = `${hooksDir}/${hook.name}.js`;
-
-      await build({
-        entryPoints: [hook.source],
-        bundle: true,
-        platform: 'node',
-        target: 'node18',
-        format: 'esm',
-        outfile,
-        minify: true,
-        external: ['better-sqlite3'],
-        define: {
-          '__DEFAULT_PACKAGE_VERSION__': `"${version}"`
-        },
-        banner: {
-          js: '#!/usr/bin/env node'
-        }
-      });
-
-      // Make executable
-      fs.chmodSync(outfile, 0o755);
-
-      // Check file size
-      const stats = fs.statSync(outfile);
-      const sizeInKB = (stats.size / 1024).toFixed(2);
-      console.log(`✓ ${hook.name} built (${sizeInKB} KB)`);
+    // Verify critical distribution files exist (skills are source files, not build outputs)
+    console.log('\n📋 Verifying distribution files...');
+    const requiredDistributionFiles = [
+      'plugin/skills/mem-search/SKILL.md',
+      'plugin/skills/smart-explore/SKILL.md',
+      'plugin/hooks/hooks.json',
+      'plugin/.claude-plugin/plugin.json',
+    ];
+    for (const filePath of requiredDistributionFiles) {
+      if (!fs.existsSync(filePath)) {
+        throw new Error(`Missing required distribution file: ${filePath}`);
+      }
     }
+    console.log('✓ All required distribution files present');
 
-    // Copy smart-install.js to plugin/scripts for cross-platform path compatibility
-    console.log('\n📋 Copying smart-install.js...');
-    const smartInstallSource = path.join(__dirname, 'smart-install.js');
-    const smartInstallDest = path.join(hooksDir, 'smart-install.js');
-    
-    if (!fs.existsSync(smartInstallSource)) {
-      throw new Error(`smart-install.js not found at ${smartInstallSource}`);
-    }
-    
-    try {
-      fs.copyFileSync(smartInstallSource, smartInstallDest);
-      console.log('✓ smart-install.js copied to plugin/scripts/');
-    } catch (error) {
-      throw new Error(`Failed to copy smart-install.js: ${error.message}`);
-    }
-
-    console.log('\n✅ All hooks, worker service, and MCP server built successfully!');
+    console.log('\n✅ Worker service, MCP server, and context generator built successfully!');
     console.log(`   Output: ${hooksDir}/`);
-    console.log(`   - Hooks: *-hook.js`);
     console.log(`   - Worker: worker-service.cjs`);
     console.log(`   - MCP Server: mcp-server.cjs`);
-    console.log(`   - Skills: plugin/skills/`);
-    console.log('\n💡 Note: Dependencies will be auto-installed on first hook execution');
+    console.log(`   - Context Generator: context-generator.cjs`);
 
   } catch (error) {
     console.error('\n❌ Build failed:', error.message);

@@ -11,6 +11,8 @@
 import { SessionStore } from '../sqlite/SessionStore.js';
 import { SessionSearch } from '../sqlite/SessionSearch.js';
 import { ChromaSync } from '../sync/ChromaSync.js';
+import { SettingsDefaultsManager } from '../../shared/SettingsDefaultsManager.js';
+import { USER_SETTINGS_PATH } from '../../shared/paths.js';
 import { logger } from '../../utils/logger.js';
 import type { DBSession } from '../worker-types.js';
 
@@ -27,14 +29,14 @@ export class DatabaseManager {
     this.sessionStore = new SessionStore();
     this.sessionSearch = new SessionSearch();
 
-    // Initialize ChromaSync with a single collection for all projects
-    // Projects are filtered via metadata, not collection names
-    this.chromaSync = new ChromaSync();
-
-    // Start background backfill (fire-and-forget, with error logging)
-    this.chromaSync.ensureBackfilled().catch((error) => {
-      logger.error('DB', 'Chroma backfill failed (non-fatal)', {}, error);
-    });
+    // Initialize ChromaSync only if Chroma is enabled (SQLite-only fallback when disabled)
+    const settings = SettingsDefaultsManager.loadFromFile(USER_SETTINGS_PATH);
+    const chromaEnabled = settings.CLAUDE_MEM_CHROMA_ENABLED !== 'false';
+    if (chromaEnabled) {
+      this.chromaSync = new ChromaSync('claude-mem');
+    } else {
+      logger.info('DB', 'Chroma disabled via CLAUDE_MEM_CHROMA_ENABLED=false, using SQLite-only search');
+    }
 
     logger.info('DB', 'Database initialized');
   }
@@ -45,14 +47,10 @@ export class DatabaseManager {
   async close(): Promise<void> {
     // Close ChromaSync first (MCP connection lifecycle managed by ChromaMcpManager)
     if (this.chromaSync) {
-      try {
-        await this.chromaSync.close();
-        this.chromaSync = null;
-      } catch (error) {
-        logger.error('DB', 'Failed to close ChromaSync', {}, error as Error);
-      }
+      await this.chromaSync.close();
+      this.chromaSync = null;
     }
-    
+
     if (this.sessionStore) {
       this.sessionStore.close();
       this.sessionStore = null;
@@ -85,12 +83,9 @@ export class DatabaseManager {
   }
 
   /**
-   * Get ChromaSync instance (throws if not initialized)
+   * Get ChromaSync instance (returns null if Chroma is disabled)
    */
-  getChromaSync(): ChromaSync {
-    if (!this.chromaSync) {
-      throw new Error('ChromaSync not initialized');
-    }
+  getChromaSync(): ChromaSync | null {
     return this.chromaSync;
   }
 
@@ -103,8 +98,8 @@ export class DatabaseManager {
    */
   getSessionById(sessionDbId: number): {
     id: number;
-    claude_session_id: string;
-    sdk_session_id: string | null;
+    content_session_id: string;
+    memory_session_id: string | null;
     project: string;
     user_prompt: string;
   } {
@@ -115,10 +110,4 @@ export class DatabaseManager {
     return session;
   }
 
-  /**
-   * Mark session as completed
-   */
-  markSessionComplete(sessionDbId: number): void {
-    this.getSessionStore().markSessionCompleted(sessionDbId);
-  }
 }

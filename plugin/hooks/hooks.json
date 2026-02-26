@@ -1,34 +1,41 @@
 {
   "description": "Claude-mem memory system hooks",
   "hooks": {
-<<<<<<< HEAD
-=======
     "Setup": [
       {
         "matcher": "*",
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/setup.sh",
+            "command": "_R=\"${CLAUDE_PLUGIN_ROOT}\"; [ -z \"$_R\" ] && _R=\"$HOME/.claude/plugins/marketplaces/thedotmack/plugin\"; \"$_R/scripts/setup.sh\"",
             "timeout": 300
           }
         ]
       }
     ],
->>>>>>> upstream/main
     "SessionStart": [
       {
         "matcher": "startup|clear|compact",
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/smart-install.js\" && node ${CLAUDE_PLUGIN_ROOT}/scripts/context-hook.js",
-            "timeout": 5
+            "command": "_R=\"${CLAUDE_PLUGIN_ROOT}\"; [ -z \"$_R\" ] && _R=\"$HOME/.claude/plugins/marketplaces/thedotmack/plugin\"; node \"$_R/scripts/smart-install.js\"",
+            "timeout": 300
+          }
+        ]
+      },
+      {
+        "matcher": "startup|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "_R=\"${CLAUDE_PLUGIN_ROOT}\"; [ -z \"$_R\" ] && _R=\"$HOME/.claude/plugins/marketplaces/thedotmack/plugin\"; node \"$_R/scripts/bun-runner.js\" \"$_R/scripts/worker-service.cjs\" start",
+            "timeout": 60
           },
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/user-message-hook.js",
-            "timeout": 5
+            "command": "_R=\"${CLAUDE_PLUGIN_ROOT}\"; [ -z \"$_R\" ] && _R=\"$HOME/.claude/plugins/marketplaces/thedotmack/plugin\"; node \"$_R/scripts/bun-runner.js\" \"$_R/scripts/worker-service.cjs\" hook claude-code context",
+            "timeout": 60
           }
         ]
       }
@@ -38,20 +45,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/new-hook.js",
-            "timeout": 120
-          }
-        ]
-      }
-    ],
-    "PreToolUse": [
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/pre-tool-use-hook.js",
-            "timeout": 10
+            "command": "_R=\"${CLAUDE_PLUGIN_ROOT}\"; [ -z \"$_R\" ] && _R=\"$HOME/.claude/plugins/marketplaces/thedotmack/plugin\"; node \"$_R/scripts/bun-runner.js\" \"$_R/scripts/worker-service.cjs\" hook claude-code session-init",
+            "timeout": 60
           }
         ]
       }
@@ -62,7 +57,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/save-hook.js",
+            "command": "_R=\"${CLAUDE_PLUGIN_ROOT}\"; [ -z \"$_R\" ] && _R=\"$HOME/.claude/plugins/marketplaces/thedotmack/plugin\"; node \"$_R/scripts/bun-runner.js\" \"$_R/scripts/worker-service.cjs\" hook claude-code observation",
             "timeout": 120
           }
         ]
@@ -73,19 +68,13 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/summary-hook.js",
+            "command": "_R=\"${CLAUDE_PLUGIN_ROOT}\"; [ -z \"$_R\" ] && _R=\"$HOME/.claude/plugins/marketplaces/thedotmack/plugin\"; node \"$_R/scripts/bun-runner.js\" \"$_R/scripts/worker-service.cjs\" hook claude-code summarize",
             "timeout": 120
-          }
-        ]
-      }
-    ],
-    "SessionEnd": [
-      {
-        "hooks": [
+          },
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/cleanup-hook.js",
-            "timeout": 120
+            "command": "_R=\"${CLAUDE_PLUGIN_ROOT}\"; [ -z \"$_R\" ] && _R=\"$HOME/.claude/plugins/marketplaces/thedotmack/plugin\"; node \"$_R/scripts/bun-runner.js\" \"$_R/scripts/worker-service.cjs\" hook claude-code session-complete",
+            "timeout": 30
           }
         ]
       }
