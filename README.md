@@ -10,8 +10,6 @@
   <br>
 </h1>
 
-<<<<<<< HEAD
-=======
 <p align="center">
   <a href="docs/i18n/README.zh.md">🇨🇳 中文</a> •
   <a href="docs/i18n/README.zh-tw.md">🇹🇼 繁體中文</a> •
@@ -47,7 +45,6 @@
   <a href="docs/i18n/README.no.md">🇳🇴 Norsk</a>
 </p>
 
->>>>>>> upstream/main
 <h4 align="center">Persistent memory compression system built for <a href="https://claude.com/claude-code" target="_blank">Claude Code</a>.</h4>
 
 <p align="center">

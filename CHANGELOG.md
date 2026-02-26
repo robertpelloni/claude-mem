@@ -1,6 +1,3 @@
-<<<<<<< HEAD
-# Changelog
-=======
 # Changelog
 
 All notable changes to claude-mem.

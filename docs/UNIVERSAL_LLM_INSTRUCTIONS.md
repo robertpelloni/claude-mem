@@ -1,27 +1,78 @@
-# Universal LLM Instructions — Omni-Workspace Root
+# Universal LLM Instructions — Claude-Mem
 
-> **CRITICAL: THIS IS THE SINGLE SOURCE OF TRUTH FOR ALL AI AGENTS OPERATING IN THE ROOT WORKSPACE DIRECTORY.**
+> **SINGLE SOURCE OF TRUTH for all AI agents operating on the claude-mem project.**
+> Model-specific overrides: `CLAUDE.md`, `GEMINI.md`, `GPT.md`, `.github/copilot-instructions.md`
+> Quick reference: `AGENTS.md`
 
 ## 1. Project Context & Vision
-This repository is an **Omni-Workspace**—a monorepo directory listing of unrelated submodules, forks, and independent projects. It serves as the central command and control hub for a fleet of autonomous AI agents (Google Jules, Claude, Gemini, GPT). 
-*   **The Goal:** Maintain, synchronize, and orchestrate updates across 100+ nested repositories without regressions or data loss.
-*   **The Vision:** A fully automated, self-healing, and self-documenting workspace where AI models collaborate seamlessly across diverse codebases.
+
+Claude-mem is a **persistent memory compression system** for Claude Code. It captures tool usage observations, compresses them via AI, and injects relevant context into future sessions.
+
+- **Upstream**: [thedotmack/claude-mem](https://github.com/thedotmack/claude-mem) (original author: Alex Newman)
+- **Fork**: [robertpelloni/claude-mem](https://github.com/robertpelloni/claude-mem)
+- **Vision**: See `VISION.md` for the full project vision and design philosophy.
+- **Roadmap**: See `ROADMAP.md` for milestones and future phases.
 
 ## 2. Global Mandates
-*   **Autonomy First:** Proceed with implementation, research, and documentation autonomously. Do not pause for confirmation unless a destructive action is unavoidable and risky.
-*   **Never Lose Features:** When merging branches (especially AI-generated feature branches) or syncing upstream, **ALWAYS intelligently merge and solve conflicts.** Never force push or overwrite working code.
-*   **Upstream Syncing:** Always check for and merge upstream changes into `robertpelloni` forks if a valid upstream branch exists.
-*   **Submodule Integrity:** Run `python update_repos_v3.py` (or the latest iteration) to recursively sync all submodules. Never leave submodules in a detached HEAD state if it can be avoided.
 
-## 3. Documentation Protocol
-*   **Changelog & Versioning:** Every significant build or session ends with a version bump in `VERSION`. The rationale and date must be recorded in `CHANGELOG.md`. The commit message must reference the version bump (e.g., `chore: bump version to 1.3.0`).
-*   **Model-Specific Files:** `GEMINI.md`, `CLAUDE.md`, and `GPT.md` must *only* contain model-specific overrides and strengths, and must explicitly reference this universal document first.
-*   **Handoff:** End sessions by documenting your findings, roadblocks, and next steps in `HANDOFF.md` to ensure continuity across the model cycle (Gemini -> Claude -> GPT).
-*   **Dashboards:** Regenerate `SUBMODULE_DASHBOARD.md` via `python scripts/generate_dashboard.py` after any submodule state change.
+- **Autonomy First**: Proceed with implementation, research, and documentation autonomously. Do not pause for confirmation unless a critical, irreversible destructive action is about to be taken.
+- **Never Lose Features**: When merging branches or syncing upstream, **ALWAYS intelligently merge and solve conflicts.** Favor local/new changes that represent progress.
+- **Conventions**: Follow existing project conventions (TypeScript, ESM modules, better-sqlite3, Express.js, esbuild).
+- **Upstream Syncing**: Always check for and merge upstream changes from `thedotmack/claude-mem` into the `robertpelloni` fork.
+- **Fail-Open**: Hooks must never block Claude Code. Exit cleanly on errors.
 
-## 4. Execution Loop
-1.  **Research:** Analyze the current state, read `VERSION`, `ROADMAP.md`, and `HANDOFF.md`.
-2.  **Strategy:** Determine the safest path to update submodules or implement the requested feature.
-3.  **Execute:** Perform the Git operations or code changes.
-4.  **Validate:** Ensure no conflicts remain and no features are lost.
-5.  **Document & Push:** Update changelogs, bump versions, commit, and push (`git add . && git commit -m "..." && git push origin main`).
+## 3. Documentation & Versioning Protocol
+
+- **Single Source of Truth**: The `VERSION` file contains the current version number.
+- **Increment on Build**: Every significant change set MUST bump the version.
+- **Changelog**: Record changes in `CHANGELOG.md` with every version bump.
+  - Format: `## [vX.Y.Z] - YYYY-MM-DD`
+  - Categories: New Features, Bug Fixes, Breaking Changes, Technical Details
+- **Commit Message**: `chore: bump version to X.Y.Z — <description>`
+- **Version Sync Locations**: `VERSION`, `package.json`, `CLAUDE.md`, `plugin/.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`
+- **Model-Specific Files**: `CLAUDE.md`, `GEMINI.md`, `GPT.md` must only contain model-specific overrides and reference this document.
+- **Handoff**: End sessions by updating `HANDOFF.md` with findings, changes, and next steps.
+
+## 4. Workflow Protocols
+
+### A. Feature Implementation
+1. **Analyze**: Read `ROADMAP.md`, `TODO.md`, `AGENTS.md`. Search codebase for context.
+2. **Plan**: Select a feature. Break into atomic steps.
+3. **Execute**: Implement. Self-correct errors immediately.
+4. **Verify**: Run `npm run build` and `npm test`.
+5. **Commit**: Descriptive messages, push.
+6. **Loop**: Next feature without pausing.
+
+### B. Upstream Sync
+1. `git fetch upstream`
+2. `git merge upstream/main` — resolve conflicts preserving fork features.
+3. `npm run build` and `npm test` to verify.
+4. Push merged result.
+
+## 5. Model-Specific Roles
+
+- **Claude**: Architect, Planner, Documentation Lead. Holistic system understanding, large-scale refactoring.
+- **Gemini**: Speed, Performance, Large Context. Full-repo scans, complex scripting, pattern detection.
+- **GPT**: Code Generation, Unit Testing. Algorithm implementation, type-safe interfaces.
+
+## 6. Architecture Quick Reference
+
+| Component | Source | Built Output | Format |
+|-----------|--------|--------------|--------|
+| Hooks | `src/hooks/` | `plugin/scripts/*-hook.js` | ESM |
+| Worker | `src/services/worker-service.ts` | `plugin/worker-service.cjs` | CJS |
+| Viewer UI | `src/ui/viewer/` | `plugin/ui/viewer.html` | HTML bundle |
+| Skills | `plugin/skills/` | (markdown, no build) | MD |
+| Database | `src/services/sqlite/` | — | SQLite3 |
+| Vector | `src/services/sync/` | — | Chroma MCP |
+
+## 7. Key Commands
+
+```bash
+npm run build              # Compile TypeScript → plugin/
+npm run sync-marketplace   # Sync to ~/.claude/plugins/marketplaces/thedotmack/
+npm test                   # Run all tests
+npm run worker:start       # Start worker
+npm run worker:restart     # Restart worker
+npm run worker:logs        # View worker logs
+```

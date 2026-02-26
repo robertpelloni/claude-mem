@@ -1,12 +1,14 @@
 # Claude-Mem: AI Development Instructions
 
+> **See also**: `AGENTS.md` (universal agent instructions), `docs/UNIVERSAL_LLM_INSTRUCTIONS.md` (full shared protocol)
+
 ## What This Project Is
 
 Claude-mem is a Claude Code plugin providing persistent memory across sessions. It captures tool usage, compresses observations using the Claude Agent SDK, and injects relevant context into future sessions.
 
 **Your Role**: You are working on the plugin itself. When users interact with Claude Code with this plugin installed, your observations get captured and become their persistent memory.
 
-**Current Version**: 5.5.1
+**Current Version**: See `VERSION` file (currently 10.3.1)
 
 ## IMPORTANT: Skills Are Auto-Invoked
 
