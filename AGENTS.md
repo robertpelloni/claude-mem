@@ -15,6 +15,9 @@
 -   **Role**: Central nervous system. Runs on port 37777.
 -   **Database**: SQLite (`SessionStore.ts`) + Chroma Vector DB (`ChromaSync.ts`).
 -   **API**: Express.js server exposing REST endpoints (`/api/*`).
+    -   `SystemRoutes.ts`: System info, Endless Mode stats.
+    -   `AnalyticsRoutes.ts`: Top files, concepts.
+    -   `GraphRoutes.ts`: Knowledge graph data.
 -   **MCP**: Hosts an MCP server for external agents (Gemini, etc.).
 
 ### Viewer UI (`src/ui/viewer/`)

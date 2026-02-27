@@ -1878,6 +1878,67 @@ export class SessionStore {
   /**
    * Get knowledge graph data (nodes and edges)
    */
+  /**
+   * Get analytics data (top modified files, concepts, etc.)
+   */
+  getAnalytics(): {
+    topFiles: Array<{ name: string; count: number }>;
+    topConcepts: Array<{ name: string; count: number }>;
+  } {
+    try {
+      // 1. Top Modified Files
+      const filesQuery = this.db.prepare(`
+        SELECT files_modified FROM observations WHERE files_modified IS NOT NULL
+      `);
+      const fileCounts = new Map<string, number>();
+
+      for (const row of filesQuery.all() as { files_modified: string }[]) {
+        try {
+          const files = JSON.parse(row.files_modified);
+          if (Array.isArray(files)) {
+            files.forEach(f => {
+              const name = f.split('/').pop() || f;
+              fileCounts.set(name, (fileCounts.get(name) || 0) + 1);
+            });
+          }
+        } catch {}
+      }
+
+      // 2. Top Concepts
+      const conceptsQuery = this.db.prepare(`
+        SELECT concepts FROM observations WHERE concepts IS NOT NULL
+      `);
+      const conceptCounts = new Map<string, number>();
+
+      for (const row of conceptsQuery.all() as { concepts: string }[]) {
+        try {
+          const concepts = JSON.parse(row.concepts);
+          if (Array.isArray(concepts)) {
+            concepts.forEach(c => {
+              conceptCounts.set(c, (conceptCounts.get(c) || 0) + 1);
+            });
+          }
+        } catch {}
+      }
+
+      // Sort and slice
+      const topFiles = Array.from(fileCounts.entries())
+        .map(([name, count]) => ({ name, count }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 10);
+
+      const topConcepts = Array.from(conceptCounts.entries())
+        .map(([name, count]) => ({ name, count }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 10);
+
+      return { topFiles, topConcepts };
+    } catch (error) {
+      console.error('[SessionStore] Failed to get analytics:', error);
+      return { topFiles: [], topConcepts: [] };
+    }
+  }
+
   getKnowledgeGraph(limit: number = 50): { nodes: any[]; edges: any[] } {
     const nodes = new Map<string, any>();
     const edges = new Set<string>();

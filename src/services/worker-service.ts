@@ -41,6 +41,7 @@ import { SettingsRoutes } from './worker/http/routes/SettingsRoutes.js';
 import { IntegrationsRoutes } from './worker/http/routes/IntegrationsRoutes.js';
 import { SystemRoutes } from './worker/http/routes/SystemRoutes.js';
 import { GraphRoutes } from './worker/http/routes/GraphRoutes.js';
+import { AnalyticsRoutes } from './worker/http/routes/AnalyticsRoutes.js';
 
 export class WorkerService {
   private app: express.Application;
@@ -70,6 +71,7 @@ export class WorkerService {
   private integrationsRoutes: IntegrationsRoutes;
   private systemRoutes: SystemRoutes;
   private graphRoutes: GraphRoutes;
+  private analyticsRoutes: AnalyticsRoutes;
 
   // Initialization tracking
   private initializationComplete: Promise<void>;
@@ -121,6 +123,7 @@ export class WorkerService {
     this.integrationsRoutes = new IntegrationsRoutes(this.dbManager);
     this.systemRoutes = new SystemRoutes(this.dbManager);
     this.graphRoutes = new GraphRoutes(this.dbManager);
+    this.analyticsRoutes = new AnalyticsRoutes(this.dbManager);
 
     this.setupMiddleware();
     this.setupRoutes();
@@ -275,6 +278,7 @@ export class WorkerService {
     this.integrationsRoutes.setupRoutes(this.app);
     this.systemRoutes.setupRoutes(this.app);
     this.graphRoutes.setupRoutes(this.app);
+    this.analyticsRoutes.setupRoutes(this.app);
 
     // Register early handler for /api/context/inject to avoid 404 during startup
     // This handler waits for initialization to complete before delegating to SearchRoutes

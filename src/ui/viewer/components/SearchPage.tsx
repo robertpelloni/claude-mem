@@ -9,8 +9,12 @@ interface SearchResult {
   item: Observation | Summary;
 }
 
-export const SearchPage: React.FC = () => {
-  const [query, setQuery] = useState('');
+interface SearchPageProps {
+  initialQuery?: string;
+}
+
+export const SearchPage: React.FC<SearchPageProps> = ({ initialQuery = '' }) => {
+  const [query, setQuery] = useState(initialQuery);
   const [results, setResults] = useState<SearchResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -30,9 +34,19 @@ export const SearchPage: React.FC = () => {
       .catch(console.error);
   }, []);
 
-  const handleSearch = async (e?: React.FormEvent) => {
+  // Auto-search if initialQuery provided
+  useEffect(() => {
+    if (initialQuery) {
+      setQuery(initialQuery);
+      handleSearch(undefined, initialQuery);
+    }
+  }, [initialQuery]);
+
+  const handleSearch = async (e?: React.FormEvent, overrideQuery?: string) => {
     if (e) e.preventDefault();
-    if (!query.trim() && selectedType === 'all' && !selectedProject) return;
+    const searchQuery = overrideQuery !== undefined ? overrideQuery : query;
+
+    if (!searchQuery.trim() && selectedType === 'all' && !selectedProject) return;
 
     setIsSearching(true);
     setError(null);
@@ -40,7 +54,7 @@ export const SearchPage: React.FC = () => {
 
     try {
       const params = new URLSearchParams({
-        q: query,
+        q: searchQuery,
         limit: '20'
       });
 

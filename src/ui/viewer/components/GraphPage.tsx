@@ -17,7 +17,11 @@ interface Edge {
   type: string;
 }
 
-export function GraphPage() {
+interface GraphPageProps {
+  onNodeClick?: (query: string) => void;
+}
+
+export function GraphPage({ onNodeClick }: GraphPageProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [nodes, setNodes] = useState<Node[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
@@ -234,12 +238,15 @@ export function GraphPage() {
     };
 
     const handleClick = (e: MouseEvent) => {
-      if (hoveredNode) {
-        // Basic navigation logic (could be expanded)
-        console.log('Clicked node:', hoveredNode);
-        if (hoveredNode.type === 'file' && hoveredNode.label) {
-           // In a real app, we'd navigate. For now, log.
-           // Ideally, update a context or URL to filter SearchPage
+      if (hoveredNode && onNodeClick) {
+        if (hoveredNode.type === 'file') {
+          onNodeClick(`file:${hoveredNode.label}`);
+        } else if (hoveredNode.type === 'concept') {
+          onNodeClick(`concept:${hoveredNode.label}`);
+        } else if (hoveredNode.type === 'session') {
+          // Extract session ID from label "Session 123"
+          const sessionId = hoveredNode.label.split(' ')[1];
+          onNodeClick(`session:${sessionId}`);
         }
       }
     };

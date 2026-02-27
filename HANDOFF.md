@@ -21,9 +21,10 @@
     *   **Key Pages**:
         *   `Feed`: Real-time stream of observations and summaries.
         *   `Search`: Full-text and vector search interface.
-        *   `Dashboard`: System diagnostics, project structure, and Endless Mode stats.
-        *   `Graph`: Interactive knowledge graph using HTML5 Canvas.
+        *   `Dashboard`: System diagnostics, analytics (Top Files/Concepts), and Endless Mode stats.
+        *   `Graph`: Interactive knowledge graph using HTML5 Canvas with search integration.
         *   `Status`: Live logs and integration health.
+    *   **Widget Mode**: `?mode=widget` for compact IDE embedding.
 
 3.  **Hooks** (`src/hooks/`)
     *   **Role**: Integration points with Claude Code lifecycle.
@@ -34,18 +35,18 @@
     *   **Gemini CLI Extension**: MCP server proxying to the worker.
     *   **OpenCode Plugin**: HTTP client for reading/recording memory.
 
-## Recent Changes (v7.4.0)
+## Recent Changes (v7.5.0)
 
--   **System Dashboard**: Added project structure visualization and dependency listing.
--   **Knowledge Graph**: Implemented `/api/graph` and a custom force-directed graph visualizer.
--   **Robustness**: Added `ErrorBoundary` wrappers and better error handling.
--   **Endless Mode**: Added backend logic for token savings calculation.
+-   **Graph Interactivity**: Clicking nodes in the graph now navigates to the search page filtered by that entity.
+-   **Analytics**: Added "Most Active Files" and "Top Concepts" to the Dashboard.
+-   **Widget Mode**: Full support for compact layouts in IDEs.
+-   **Robustness**: Transactional migrations and robust token estimation.
 
 ## Next Steps
 
-1.  **Help Search**: Implement search within the in-app documentation.
-2.  **Robust Token Counting**: Improve the accuracy of "Tokens Saved" metrics.
-3.  **Remote Sync**: Begin planning for cloud synchronization.
+1.  **Remote Sync**: Begin planning for cloud synchronization.
+2.  **Advanced Analytics**: Deepen insights (e.g., code heatmaps).
+3.  **3D Graph**: Upgrade the graph visualization.
 
 ## Build & Verify
 

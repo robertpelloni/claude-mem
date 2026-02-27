@@ -20,6 +20,7 @@ import { mergeAndDeduplicateByProject } from './utils/data';
 export function App() {
   const [currentFilter, setCurrentFilter] = useState('');
   const [currentView, setCurrentView] = useState<'feed' | 'help' | 'status' | 'search' | 'dashboard' | 'pro' | 'graph'>('feed');
+  const [searchQuery, setSearchQuery] = useState(''); // Shared search query state
   const [isWidgetMode, setIsWidgetMode] = useState(false);
   const [contextPreviewOpen, setContextPreviewOpen] = useState(false);
   const [paginatedObservations, setPaginatedObservations] = useState<Observation[]>([]);
@@ -181,7 +182,7 @@ export function App() {
 
         {currentView === 'search' && (
           <ErrorBoundary>
-            <SearchPage />
+            <SearchPage initialQuery={searchQuery} />
           </ErrorBoundary>
         )}
 
@@ -193,7 +194,10 @@ export function App() {
 
         {currentView === 'graph' && (
           <ErrorBoundary>
-            <GraphPage />
+            <GraphPage onNodeClick={(query) => {
+              setSearchQuery(query);
+              setCurrentView('search');
+            }} />
           </ErrorBoundary>
         )}
 

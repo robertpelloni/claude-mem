@@ -20,23 +20,42 @@ interface SystemInfo {
   };
 }
 
+interface Analytics {
+  topFiles: Array<{ name: string; count: number }>;
+  topConcepts: Array<{ name: string; count: number }>;
+}
+
 export function DashboardPage() {
   const [info, setInfo] = useState<SystemInfo | null>(null);
+  const [analytics, setAnalytics] = useState<Analytics | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch('/api/system/info')
-      .then(res => res.json())
-      .then(data => {
-        setInfo(data);
+    const loadData = async () => {
+      try {
+        const [sysRes, analRes] = await Promise.all([
+          fetch('/api/system/info'),
+          fetch('/api/analytics')
+        ]);
+
+        if (sysRes.ok) {
+          setInfo(await sysRes.json());
+        }
+
+        if (analRes.ok) {
+          setAnalytics(await analRes.json());
+        }
+
         setLoading(false);
-      })
-      .catch(err => {
+      } catch (err) {
         console.error(err);
-        setError('Failed to load system info');
+        setError('Failed to load dashboard data');
         setLoading(false);
-      });
+      }
+    };
+
+    loadData();
   }, []);
 
   const renderTree = (node: any, depth = 0) => {
@@ -126,7 +145,64 @@ export function DashboardPage() {
         </div>
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px', gridAutoRows: 'minmax(min-content, max-content)' }}>
+
+        {/* Analytics Section */}
+        {analytics && (
+          <>
+            <div style={{
+              background: 'var(--color-bg-card)',
+              border: '1px solid var(--color-border-primary)',
+              borderRadius: '8px',
+              padding: '20px'
+            }}>
+              <h3 style={{ fontSize: '14px', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', marginBottom: '16px' }}>
+                Top Concepts
+              </h3>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                {analytics.topConcepts.length === 0 ? (
+                  <span style={{ color: 'var(--color-text-muted)', fontSize: '13px' }}>No concepts found</span>
+                ) : (
+                  analytics.topConcepts.map((c) => (
+                    <span key={c.name} style={{
+                      fontSize: '12px',
+                      background: 'var(--color-bg-tertiary)',
+                      padding: '4px 8px',
+                      borderRadius: '12px',
+                      color: 'var(--color-text-primary)',
+                      border: '1px solid var(--color-border-primary)'
+                    }}>
+                      {c.name} <span style={{ opacity: 0.6 }}>({c.count})</span>
+                    </span>
+                  ))
+                )}
+              </div>
+            </div>
+
+            <div style={{
+              background: 'var(--color-bg-card)',
+              border: '1px solid var(--color-border-primary)',
+              borderRadius: '8px',
+              padding: '20px'
+            }}>
+              <h3 style={{ fontSize: '14px', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', marginBottom: '16px' }}>
+                Most Active Files
+              </h3>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {analytics.topFiles.length === 0 ? (
+                  <span style={{ color: 'var(--color-text-muted)', fontSize: '13px' }}>No file activity recorded</span>
+                ) : (
+                  analytics.topFiles.map((f) => (
+                    <div key={f.name} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
+                      <span style={{ color: 'var(--color-text-primary)', fontFamily: 'monospace' }}>{f.name}</span>
+                      <span style={{ color: 'var(--color-text-secondary)' }}>{f.count} changes</span>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </>
+        )}
 
         {/* Git Info */}
         <div style={{
