@@ -1939,6 +1939,56 @@ export class SessionStore {
     }
   }
 
+  /**
+   * Get database integrity stats
+   */
+  getIntegrityStats(): {
+    totalSessions: number;
+    sessionsWithoutSummaries: number;
+    totalObservations: number;
+    orphanedObservations: number;
+    dbSizeMB: number;
+  } {
+    try {
+      const sessionsQuery = this.db.prepare('SELECT COUNT(*) as count FROM sdk_sessions').get() as { count: number };
+
+      const unsummarizedQuery = this.db.prepare(`
+        SELECT COUNT(*) as count
+        FROM sdk_sessions s
+        LEFT JOIN session_summaries sum ON s.sdk_session_id = sum.sdk_session_id
+        WHERE sum.id IS NULL AND s.status = 'completed'
+      `).get() as { count: number };
+
+      const obsQuery = this.db.prepare('SELECT COUNT(*) as count FROM observations').get() as { count: number };
+
+      const orphanedObsQuery = this.db.prepare(`
+        SELECT COUNT(*) as count
+        FROM observations o
+        LEFT JOIN sdk_sessions s ON o.sdk_session_id = s.sdk_session_id
+        WHERE s.id IS NULL
+      `).get() as { count: number };
+
+      // Get file size
+      let dbSizeMB = 0;
+      try {
+        const fs = require('fs');
+        const stats = fs.statSync(DB_PATH);
+        dbSizeMB = Math.round((stats.size / (1024 * 1024)) * 100) / 100;
+      } catch (e) {}
+
+      return {
+        totalSessions: sessionsQuery?.count || 0,
+        sessionsWithoutSummaries: unsummarizedQuery?.count || 0,
+        totalObservations: obsQuery?.count || 0,
+        orphanedObservations: orphanedObsQuery?.count || 0,
+        dbSizeMB
+      };
+    } catch (error) {
+      console.error('[SessionStore] Failed to get integrity stats:', error);
+      return { totalSessions: 0, sessionsWithoutSummaries: 0, totalObservations: 0, orphanedObservations: 0, dbSizeMB: 0 };
+    }
+  }
+
   getKnowledgeGraph(limit: number = 50): { nodes: any[]; edges: any[] } {
     const nodes = new Map<string, any>();
     const edges = new Set<string>();

@@ -19,7 +19,20 @@ export class SystemRoutes extends BaseRouteHandler {
 
   setupRoutes(app: express.Application): void {
     app.get('/api/system/info', this.handleGetSystemInfo.bind(this));
+    app.get('/api/system/integrity', this.handleGetSystemIntegrity.bind(this));
   }
+
+  /**
+   * Get database integrity stats
+   */
+  private handleGetSystemIntegrity = this.wrapHandler(async (req: Request, res: Response): Promise<void> => {
+    if (!this.dbManager) {
+      res.status(503).json({ error: 'Database not initialized' });
+      return;
+    }
+    const stats = this.dbManager.getSessionStore().getIntegrityStats();
+    res.json(stats);
+  });
 
   /**
    * Get system information (project structure, dependencies, git)

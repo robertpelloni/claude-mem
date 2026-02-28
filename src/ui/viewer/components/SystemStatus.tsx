@@ -14,6 +14,7 @@ interface SystemStatusProps {
 export const SystemStatus: React.FC<SystemStatusProps> = ({ isConnected, mcpReady, initialized, version, logs = [], onClearLogs }) => {
   const { stats } = useStats();
   const [workerVersion, setWorkerVersion] = useState<string | null>(null);
+  const [integrityStats, setIntegrityStats] = useState<any>(null);
   const [logFilter, setLogFilter] = useState<'ALL' | 'INFO' | 'WARN' | 'ERROR'>('ALL');
   const [autoScroll, setAutoScroll] = useState(true);
   const logsEndRef = useRef<HTMLDivElement>(null);
@@ -23,6 +24,11 @@ export const SystemStatus: React.FC<SystemStatusProps> = ({ isConnected, mcpRead
       .then(res => res.json())
       .then(data => setWorkerVersion(data.version))
       .catch(() => setWorkerVersion('Unknown'));
+
+    fetch('/api/system/integrity')
+      .then(res => res.json())
+      .then(data => setIntegrityStats(data))
+      .catch(() => {});
   }, []);
 
   const filteredLogs = logs.filter(log => {
@@ -61,7 +67,9 @@ export const SystemStatus: React.FC<SystemStatusProps> = ({ isConnected, mcpRead
             <span className={`status-dot ${initialized ? 'connected' : ''}`}></span>
             <span className="status-text">{initialized ? 'Ready' : 'Initializing...'}</span>
           </div>
-          <div className="status-card-meta">Sessions: {stats?.totalSessions || 0}</div>
+          <div className="status-card-meta">
+            {integrityStats ? `${integrityStats.dbSizeMB} MB • ${integrityStats.totalObservations} Obs` : `Sessions: ${stats?.totalSessions || 0}`}
+          </div>
         </div>
 
         {/* MCP / Gemini Status */}

@@ -62,18 +62,39 @@ export function DashboardPage() {
     if (!node) return null;
     const paddingLeft = depth * 20;
 
+    // Check if this file is in top active files
+    const fileStats = node.type === 'file' && analytics
+      ? analytics.topFiles.find(f => f.name === node.name)
+      : null;
+
+    // Determine heat color (simplified)
+    const heatColor = fileStats ? `rgba(217, 119, 87, ${Math.min(0.2 + (fileStats.count * 0.05), 0.8)})` : 'transparent';
+    const heatBorder = fileStats ? `1px solid rgba(217, 119, 87, ${Math.min(0.5 + (fileStats.count * 0.05), 1)})` : '1px solid transparent';
+
     return (
       <div key={node.name} style={{ marginLeft: depth > 0 ? '12px' : 0 }}>
         <div style={{
           display: 'flex',
           alignItems: 'center',
+          justifyContent: 'space-between',
           gap: '6px',
-          padding: '2px 0',
+          padding: '2px 4px',
           fontSize: '13px',
-          color: node.type === 'directory' ? 'var(--color-accent-primary)' : 'var(--color-text-secondary)'
+          color: node.type === 'directory' ? 'var(--color-accent-primary)' : 'var(--color-text-secondary)',
+          background: heatColor,
+          border: heatBorder,
+          borderRadius: '4px',
+          marginBottom: '2px'
         }}>
-          <span>{node.type === 'directory' ? '📁' : '📄'}</span>
-          <span>{node.name}</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span>{node.type === 'directory' ? '📁' : '📄'}</span>
+            <span>{node.name}</span>
+          </div>
+          {fileStats && (
+            <span style={{ fontSize: '10px', fontWeight: 'bold', color: 'var(--color-accent-primary)' }} title={`${fileStats.count} changes`}>
+              🔥 {fileStats.count}
+            </span>
+          )}
         </div>
         {node.children && node.children.map((child: any) => renderTree(child, depth + 1))}
       </div>
