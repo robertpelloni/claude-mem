@@ -12,7 +12,8 @@ export class AnalyticsRoutes extends BaseRouteHandler {
   }
 
   private handleGetAnalytics = this.wrapHandler(async (req: Request, res: Response): Promise<void> => {
-    const analytics = this.dbManager.getSessionStore().getAnalytics();
+    const beforeEpoch = req.query.before_epoch ? parseInt(req.query.before_epoch as string) : undefined;
+    const analytics = this.dbManager.getSessionStore().getAnalytics(beforeEpoch);
     res.json(analytics);
   });
 }

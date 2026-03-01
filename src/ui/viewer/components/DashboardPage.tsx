@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { TimelineControl } from './TimelineControl';
 
 interface SystemInfo {
   dependencies: Record<string, string>;
@@ -30,13 +31,18 @@ export function DashboardPage() {
   const [analytics, setAnalytics] = useState<Analytics | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [timeEpoch, setTimeEpoch] = useState<number>(Date.now());
+  const [minEpoch, setMinEpoch] = useState<number | undefined>(undefined);
 
   useEffect(() => {
     const loadData = async () => {
       try {
+        // Query params for time travel
+        const timeQuery = timeEpoch < Date.now() - 5000 ? `?before_epoch=${timeEpoch}` : '';
+
         const [sysRes, analRes] = await Promise.all([
-          fetch('/api/system/info'),
-          fetch('/api/analytics')
+          fetch(`/api/system/info${timeQuery}`),
+          fetch(`/api/analytics${timeQuery}`)
         ]);
 
         if (sysRes.ok) {
@@ -48,6 +54,12 @@ export function DashboardPage() {
         }
 
         setLoading(false);
+
+        // On first load, try to guess the min epoch for the slider from the oldest file change or just set a default 30 day window
+        if (minEpoch === undefined) {
+            setMinEpoch(Date.now() - (30 * 24 * 60 * 60 * 1000));
+        }
+
       } catch (err) {
         console.error(err);
         setError('Failed to load dashboard data');
@@ -56,7 +68,7 @@ export function DashboardPage() {
     };
 
     loadData();
-  }, []);
+  }, [timeEpoch]);
 
   const renderTree = (node: any, depth = 0) => {
     if (!node) return null;
@@ -110,6 +122,13 @@ export function DashboardPage() {
   return (
     <div style={{ padding: '40px', maxWidth: '1000px', margin: '0 auto' }}>
       <h2 style={{ fontSize: '24px', fontWeight: 600, color: 'var(--color-text-header)', marginBottom: '24px' }}>System Dashboard</h2>
+
+      <TimelineControl
+        currentEpoch={timeEpoch}
+        onChange={setTimeEpoch}
+        minEpoch={minEpoch}
+        maxEpoch={Date.now()}
+      />
 
       {/* Endless Mode Visualization */}
       {isEndlessMode && (

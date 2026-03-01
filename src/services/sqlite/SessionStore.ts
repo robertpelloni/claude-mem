@@ -1832,11 +1832,14 @@ export class SessionStore {
    * Get stats for Endless Mode visualization
    * Returns total tokens stored in archive (savings) and session counts
    */
-  getEndlessModeStats(): { totalArchivedTokens: number; totalSessions: number; totalObservations: number } {
+  getEndlessModeStats(beforeEpoch?: number): { totalArchivedTokens: number; totalSessions: number; totalObservations: number } {
     try {
-      const obsStats = this.db.prepare('SELECT SUM(discovery_tokens) as tokens, COUNT(*) as count FROM observations').get() as { tokens: number; count: number };
-      const sumStats = this.db.prepare('SELECT SUM(discovery_tokens) as tokens FROM session_summaries').get() as { tokens: number };
-      const sessionStats = this.db.prepare('SELECT COUNT(*) as count FROM sdk_sessions').get() as { count: number };
+      const timeFilter = beforeEpoch ? 'WHERE created_at_epoch <= ?' : '';
+      const params = beforeEpoch ? [beforeEpoch] : [];
+
+      const obsStats = this.db.prepare(`SELECT SUM(discovery_tokens) as tokens, COUNT(*) as count FROM observations ${timeFilter}`).get(...params) as { tokens: number; count: number };
+      const sumStats = this.db.prepare(`SELECT SUM(discovery_tokens) as tokens FROM session_summaries ${timeFilter}`).get(...params) as { tokens: number };
+      const sessionStats = this.db.prepare(`SELECT COUNT(*) as count FROM sdk_sessions ${beforeEpoch ? 'WHERE started_at_epoch <= ?' : ''}`).get(...params) as { count: number };
 
       // Fallback: if tokens are 0 but we have items, estimate them
       // Strategy:
@@ -1844,20 +1847,22 @@ export class SessionStore {
       // 2. If discovery_tokens is 0 (old data), estimate based on text length.
 
       // Calculate missing tokens for observations (where discovery_tokens = 0)
+      const uncountedObsCondition = beforeEpoch ? 'discovery_tokens = 0 AND created_at_epoch <= ?' : 'discovery_tokens = 0';
       const uncountedObs = this.db.prepare(`
         SELECT
           SUM(LENGTH(COALESCE(title, '')) + LENGTH(COALESCE(subtitle, '')) + LENGTH(COALESCE(narrative, '')) + LENGTH(COALESCE(text, ''))) as estimated_chars
         FROM observations
-        WHERE discovery_tokens = 0
-      `).get() as { estimated_chars: number };
+        WHERE ${uncountedObsCondition}
+      `).get(...params) as { estimated_chars: number };
 
       // Calculate missing tokens for summaries (where discovery_tokens = 0)
+      const uncountedSumCondition = beforeEpoch ? 'discovery_tokens = 0 AND created_at_epoch <= ?' : 'discovery_tokens = 0';
       const uncountedSum = this.db.prepare(`
         SELECT
           SUM(LENGTH(COALESCE(request, '')) + LENGTH(COALESCE(learned, '')) + LENGTH(COALESCE(completed, '')) + LENGTH(COALESCE(next_steps, ''))) as estimated_chars
         FROM session_summaries
-        WHERE discovery_tokens = 0
-      `).get() as { estimated_chars: number };
+        WHERE ${uncountedSumCondition}
+      `).get(...params) as { estimated_chars: number };
 
       // Approximation: 4 characters per token
       const estimatedTokens = Math.floor(((uncountedObs?.estimated_chars || 0) + (uncountedSum?.estimated_chars || 0)) / 4);
@@ -1881,18 +1886,21 @@ export class SessionStore {
   /**
    * Get analytics data (top modified files, concepts, etc.)
    */
-  getAnalytics(): {
+  getAnalytics(beforeEpoch?: number): {
     topFiles: Array<{ name: string; count: number }>;
     topConcepts: Array<{ name: string; count: number }>;
   } {
     try {
+      const timeFilter = beforeEpoch ? 'AND created_at_epoch <= ?' : '';
+      const params = beforeEpoch ? [beforeEpoch] : [];
+
       // 1. Top Modified Files
       const filesQuery = this.db.prepare(`
-        SELECT files_modified FROM observations WHERE files_modified IS NOT NULL
+        SELECT files_modified FROM observations WHERE files_modified IS NOT NULL ${timeFilter}
       `);
       const fileCounts = new Map<string, number>();
 
-      for (const row of filesQuery.all() as { files_modified: string }[]) {
+      for (const row of filesQuery.all(...params) as { files_modified: string }[]) {
         try {
           const files = JSON.parse(row.files_modified);
           if (Array.isArray(files)) {
@@ -1906,11 +1914,11 @@ export class SessionStore {
 
       // 2. Top Concepts
       const conceptsQuery = this.db.prepare(`
-        SELECT concepts FROM observations WHERE concepts IS NOT NULL
+        SELECT concepts FROM observations WHERE concepts IS NOT NULL ${timeFilter}
       `);
       const conceptCounts = new Map<string, number>();
 
-      for (const row of conceptsQuery.all() as { concepts: string }[]) {
+      for (const row of conceptsQuery.all(...params) as { concepts: string }[]) {
         try {
           const concepts = JSON.parse(row.concepts);
           if (Array.isArray(concepts)) {

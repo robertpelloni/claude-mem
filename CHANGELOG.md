@@ -1,5 +1,11 @@
 # Changelog
 
+## [7.7.0] - 2026-02-25
+
+### Added
+- **Time Travel Debugger**: Added an interactive timeline slider to the Dashboard. Dragging the slider filters the Analytics, System Stats, and Endless Mode data to show the state of the project *before* the selected point in time.
+- **Backend Time Filters**: `SessionStore.ts` endpoints (`getAnalytics`, `getEndlessModeStats`) now accept a `beforeEpoch` parameter to enable time slicing.
+
 ## [7.6.0] - 2026-02-25
 
 ### Added

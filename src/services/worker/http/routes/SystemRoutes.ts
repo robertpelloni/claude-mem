@@ -39,6 +39,7 @@ export class SystemRoutes extends BaseRouteHandler {
    */
   private handleGetSystemInfo = this.wrapHandler(async (req: Request, res: Response): Promise<void> => {
     const packageRoot = getPackageRoot();
+    const beforeEpoch = req.query.before_epoch ? parseInt(req.query.before_epoch as string) : undefined;
 
     // 1. Dependencies from package.json
     let dependencies: Record<string, string> = {};
@@ -65,7 +66,7 @@ export class SystemRoutes extends BaseRouteHandler {
     let endlessMode = null;
     if (this.dbManager) {
       try {
-        const stats = this.dbManager.getSessionStore().getEndlessModeStats();
+        const stats = this.dbManager.getSessionStore().getEndlessModeStats(beforeEpoch);
         endlessMode = {
           active: true, // Always active if DB is connected
           savings: stats.totalArchivedTokens,
