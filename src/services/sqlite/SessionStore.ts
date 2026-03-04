@@ -44,39 +44,6 @@ export class SessionStore {
   }
 
   /**
-   * Run a migration inside a transaction with version checking
-   * Safely handles rollback on failure
-   */
-  private runMigration(version: number, name: string, migrationFn: () => void): void {
-    try {
-      // Check if migration already applied
-      const applied = this.db.prepare('SELECT version FROM schema_versions WHERE version = ?').get(version) as SchemaVersion | undefined;
-      if (applied) {
-        // Already applied
-        return;
-      }
-
-      console.log(`[SessionStore] Applying migration ${version}: ${name}...`);
-
-      // Execute migration in transaction
-      this.db.transaction(() => {
-        migrationFn();
-        this.db.prepare('INSERT OR IGNORE INTO schema_versions (version, applied_at) VALUES (?, ?)').run(version, new Date().toISOString());
-      })();
-
-      console.log(`[SessionStore] Migration ${version} (${name}) applied successfully`);
-    } catch (error: any) {
-      console.error(`[SessionStore] Migration ${version} (${name}) failed:`, error.message);
-      // SQLite transaction rollback is automatic on error when using db.transaction()
-      // But we can add explicit logging here for clarity
-      console.error(`[SessionStore] Rolled back migration ${version}`);
-
-      // Re-throw to halt startup if critical migration fails
-      throw error;
-    }
-  }
-
-  /**
    * Initialize database schema using migrations (migration004)
    * This runs the core SDK tables migration if no tables exist
    *
@@ -459,60 +426,87 @@ export class SessionStore {
    * Create user_prompts table with FTS5 support (migration 10)
    */
   private createUserPromptsTable(): void {
-    this.runMigration(10, 'create_user_prompts_table', () => {
-      // Check if table already exists (idempotency check inside transaction)
+    try {
+      // Check if migration already applied
+      const applied = this.db.prepare('SELECT version FROM schema_versions WHERE version = ?').get(10) as SchemaVersion | undefined;
+      if (applied) return;
+
+      // Check if table already exists
       const tableInfo = this.db.query('PRAGMA table_info(user_prompts)').all() as TableColumnInfo[];
       if (tableInfo.length > 0) {
+        // Already migrated
+        this.db.prepare('INSERT OR IGNORE INTO schema_versions (version, applied_at) VALUES (?, ?)').run(10, new Date().toISOString());
         return;
       }
 
-      // Create main table
-      this.db.run(`
-        CREATE TABLE user_prompts (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          claude_session_id TEXT NOT NULL,
-          prompt_number INTEGER NOT NULL,
-          prompt_text TEXT NOT NULL,
-          created_at TEXT NOT NULL,
-          created_at_epoch INTEGER NOT NULL,
-          FOREIGN KEY(claude_session_id) REFERENCES sdk_sessions(claude_session_id) ON DELETE CASCADE
-        );
+      console.log('[SessionStore] Creating user_prompts table with FTS5 support...');
 
-        CREATE INDEX idx_user_prompts_claude_session ON user_prompts(claude_session_id);
-        CREATE INDEX idx_user_prompts_created ON user_prompts(created_at_epoch DESC);
-        CREATE INDEX idx_user_prompts_prompt_number ON user_prompts(prompt_number);
-        CREATE INDEX idx_user_prompts_lookup ON user_prompts(claude_session_id, prompt_number);
-      `);
+      // Begin transaction
+      this.db.run('BEGIN TRANSACTION');
 
-      // Create FTS5 virtual table
-      this.db.run(`
-        CREATE VIRTUAL TABLE user_prompts_fts USING fts5(
-          prompt_text,
-          content='user_prompts',
-          content_rowid='id'
-        );
-      `);
+      try {
+        // Create main table (using claude_session_id since sdk_session_id is set asynchronously by worker)
+        this.db.run(`
+          CREATE TABLE user_prompts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            claude_session_id TEXT NOT NULL,
+            prompt_number INTEGER NOT NULL,
+            prompt_text TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            created_at_epoch INTEGER NOT NULL,
+            FOREIGN KEY(claude_session_id) REFERENCES sdk_sessions(claude_session_id) ON DELETE CASCADE
+          );
 
-      // Create triggers to sync FTS5
-      this.db.run(`
-        CREATE TRIGGER user_prompts_ai AFTER INSERT ON user_prompts BEGIN
-          INSERT INTO user_prompts_fts(rowid, prompt_text)
-          VALUES (new.id, new.prompt_text);
-        END;
+          CREATE INDEX idx_user_prompts_claude_session ON user_prompts(claude_session_id);
+          CREATE INDEX idx_user_prompts_created ON user_prompts(created_at_epoch DESC);
+          CREATE INDEX idx_user_prompts_prompt_number ON user_prompts(prompt_number);
+          CREATE INDEX idx_user_prompts_lookup ON user_prompts(claude_session_id, prompt_number);
+        `);
 
-        CREATE TRIGGER user_prompts_ad AFTER DELETE ON user_prompts BEGIN
-          INSERT INTO user_prompts_fts(user_prompts_fts, rowid, prompt_text)
-          VALUES('delete', old.id, old.prompt_text);
-        END;
+        // Create FTS5 virtual table
+        this.db.run(`
+          CREATE VIRTUAL TABLE user_prompts_fts USING fts5(
+            prompt_text,
+            content='user_prompts',
+            content_rowid='id'
+          );
+        `);
 
-        CREATE TRIGGER user_prompts_au AFTER UPDATE ON user_prompts BEGIN
-          INSERT INTO user_prompts_fts(user_prompts_fts, rowid, prompt_text)
-          VALUES('delete', old.id, old.prompt_text);
-          INSERT INTO user_prompts_fts(rowid, prompt_text)
-          VALUES (new.id, new.prompt_text);
-        END;
-      `);
-    });
+        // Create triggers to sync FTS5
+        this.db.run(`
+          CREATE TRIGGER user_prompts_ai AFTER INSERT ON user_prompts BEGIN
+            INSERT INTO user_prompts_fts(rowid, prompt_text)
+            VALUES (new.id, new.prompt_text);
+          END;
+
+          CREATE TRIGGER user_prompts_ad AFTER DELETE ON user_prompts BEGIN
+            INSERT INTO user_prompts_fts(user_prompts_fts, rowid, prompt_text)
+            VALUES('delete', old.id, old.prompt_text);
+          END;
+
+          CREATE TRIGGER user_prompts_au AFTER UPDATE ON user_prompts BEGIN
+            INSERT INTO user_prompts_fts(user_prompts_fts, rowid, prompt_text)
+            VALUES('delete', old.id, old.prompt_text);
+            INSERT INTO user_prompts_fts(rowid, prompt_text)
+            VALUES (new.id, new.prompt_text);
+          END;
+        `);
+
+        // Commit transaction
+        this.db.run('COMMIT');
+
+        // Record migration
+        this.db.prepare('INSERT OR IGNORE INTO schema_versions (version, applied_at) VALUES (?, ?)').run(10, new Date().toISOString());
+
+        console.log('[SessionStore] Successfully created user_prompts table with FTS5 support');
+      } catch (error: any) {
+        // Rollback on error
+        this.db.run('ROLLBACK');
+        throw error;
+      }
+    } catch (error: any) {
+      console.error('[SessionStore] Migration error (create user_prompts table):', error.message);
+    }
   }
 
   /**
@@ -1828,283 +1822,6 @@ export class SessionStore {
   /**
    * Close the database connection
    */
-  /**
-   * Get stats for Endless Mode visualization
-   * Returns total tokens stored in archive (savings) and session counts
-   */
-  getEndlessModeStats(beforeEpoch?: number): { totalArchivedTokens: number; totalSessions: number; totalObservations: number } {
-    try {
-      const timeFilter = beforeEpoch ? 'WHERE created_at_epoch <= ?' : '';
-      const params = beforeEpoch ? [beforeEpoch] : [];
-
-      const obsStats = this.db.prepare(`SELECT SUM(discovery_tokens) as tokens, COUNT(*) as count FROM observations ${timeFilter}`).get(...params) as { tokens: number; count: number };
-      const sumStats = this.db.prepare(`SELECT SUM(discovery_tokens) as tokens FROM session_summaries ${timeFilter}`).get(...params) as { tokens: number };
-      const sessionStats = this.db.prepare(`SELECT COUNT(*) as count FROM sdk_sessions ${beforeEpoch ? 'WHERE started_at_epoch <= ?' : ''}`).get(...params) as { count: number };
-
-      // Fallback: if tokens are 0 but we have items, estimate them
-      // Strategy:
-      // 1. If discovery_tokens is present (new data), use it.
-      // 2. If discovery_tokens is 0 (old data), estimate based on text length.
-
-      // Calculate missing tokens for observations (where discovery_tokens = 0)
-      const uncountedObsCondition = beforeEpoch ? 'discovery_tokens = 0 AND created_at_epoch <= ?' : 'discovery_tokens = 0';
-      const uncountedObs = this.db.prepare(`
-        SELECT
-          SUM(LENGTH(COALESCE(title, '')) + LENGTH(COALESCE(subtitle, '')) + LENGTH(COALESCE(narrative, '')) + LENGTH(COALESCE(text, ''))) as estimated_chars
-        FROM observations
-        WHERE ${uncountedObsCondition}
-      `).get(...params) as { estimated_chars: number };
-
-      // Calculate missing tokens for summaries (where discovery_tokens = 0)
-      const uncountedSumCondition = beforeEpoch ? 'discovery_tokens = 0 AND created_at_epoch <= ?' : 'discovery_tokens = 0';
-      const uncountedSum = this.db.prepare(`
-        SELECT
-          SUM(LENGTH(COALESCE(request, '')) + LENGTH(COALESCE(learned, '')) + LENGTH(COALESCE(completed, '')) + LENGTH(COALESCE(next_steps, ''))) as estimated_chars
-        FROM session_summaries
-        WHERE ${uncountedSumCondition}
-      `).get(...params) as { estimated_chars: number };
-
-      // Approximation: 4 characters per token
-      const estimatedTokens = Math.floor(((uncountedObs?.estimated_chars || 0) + (uncountedSum?.estimated_chars || 0)) / 4);
-
-      let totalTokens = (obsStats?.tokens || 0) + (sumStats?.tokens || 0) + estimatedTokens;
-
-      return {
-        totalArchivedTokens: totalTokens,
-        totalSessions: sessionStats?.count || 0,
-        totalObservations: obsStats?.count || 0
-      };
-    } catch (error) {
-      console.error('[SessionStore] Failed to get endless mode stats:', error);
-      return { totalArchivedTokens: 0, totalSessions: 0, totalObservations: 0 };
-    }
-  }
-
-  /**
-   * Get knowledge graph data (nodes and edges)
-   */
-  /**
-   * Get analytics data (top modified files, concepts, etc.)
-   */
-  getAnalytics(beforeEpoch?: number): {
-    topFiles: Array<{ name: string; count: number }>;
-    topConcepts: Array<{ name: string; count: number }>;
-  } {
-    try {
-      const timeFilter = beforeEpoch ? 'AND created_at_epoch <= ?' : '';
-      const params = beforeEpoch ? [beforeEpoch] : [];
-
-      // 1. Top Modified Files
-      const filesQuery = this.db.prepare(`
-        SELECT files_modified FROM observations WHERE files_modified IS NOT NULL ${timeFilter}
-      `);
-      const fileCounts = new Map<string, number>();
-
-      for (const row of filesQuery.all(...params) as { files_modified: string }[]) {
-        try {
-          const files = JSON.parse(row.files_modified);
-          if (Array.isArray(files)) {
-            files.forEach(f => {
-              const name = f.split('/').pop() || f;
-              fileCounts.set(name, (fileCounts.get(name) || 0) + 1);
-            });
-          }
-        } catch {}
-      }
-
-      // 2. Top Concepts
-      const conceptsQuery = this.db.prepare(`
-        SELECT concepts FROM observations WHERE concepts IS NOT NULL ${timeFilter}
-      `);
-      const conceptCounts = new Map<string, number>();
-
-      for (const row of conceptsQuery.all(...params) as { concepts: string }[]) {
-        try {
-          const concepts = JSON.parse(row.concepts);
-          if (Array.isArray(concepts)) {
-            concepts.forEach(c => {
-              conceptCounts.set(c, (conceptCounts.get(c) || 0) + 1);
-            });
-          }
-        } catch {}
-      }
-
-      // Sort and slice
-      const topFiles = Array.from(fileCounts.entries())
-        .map(([name, count]) => ({ name, count }))
-        .sort((a, b) => b.count - a.count)
-        .slice(0, 10);
-
-      const topConcepts = Array.from(conceptCounts.entries())
-        .map(([name, count]) => ({ name, count }))
-        .sort((a, b) => b.count - a.count)
-        .slice(0, 10);
-
-      return { topFiles, topConcepts };
-    } catch (error) {
-      console.error('[SessionStore] Failed to get analytics:', error);
-      return { topFiles: [], topConcepts: [] };
-    }
-  }
-
-  /**
-   * Get database integrity stats
-   */
-  getIntegrityStats(): {
-    totalSessions: number;
-    sessionsWithoutSummaries: number;
-    totalObservations: number;
-    orphanedObservations: number;
-    dbSizeMB: number;
-  } {
-    try {
-      const sessionsQuery = this.db.prepare('SELECT COUNT(*) as count FROM sdk_sessions').get() as { count: number };
-
-      const unsummarizedQuery = this.db.prepare(`
-        SELECT COUNT(*) as count
-        FROM sdk_sessions s
-        LEFT JOIN session_summaries sum ON s.sdk_session_id = sum.sdk_session_id
-        WHERE sum.id IS NULL AND s.status = 'completed'
-      `).get() as { count: number };
-
-      const obsQuery = this.db.prepare('SELECT COUNT(*) as count FROM observations').get() as { count: number };
-
-      const orphanedObsQuery = this.db.prepare(`
-        SELECT COUNT(*) as count
-        FROM observations o
-        LEFT JOIN sdk_sessions s ON o.sdk_session_id = s.sdk_session_id
-        WHERE s.id IS NULL
-      `).get() as { count: number };
-
-      // Get file size
-      let dbSizeMB = 0;
-      try {
-        const fs = require('fs');
-        const stats = fs.statSync(DB_PATH);
-        dbSizeMB = Math.round((stats.size / (1024 * 1024)) * 100) / 100;
-      } catch (e) {}
-
-      return {
-        totalSessions: sessionsQuery?.count || 0,
-        sessionsWithoutSummaries: unsummarizedQuery?.count || 0,
-        totalObservations: obsQuery?.count || 0,
-        orphanedObservations: orphanedObsQuery?.count || 0,
-        dbSizeMB
-      };
-    } catch (error) {
-      console.error('[SessionStore] Failed to get integrity stats:', error);
-      return { totalSessions: 0, sessionsWithoutSummaries: 0, totalObservations: 0, orphanedObservations: 0, dbSizeMB: 0 };
-    }
-  }
-
-  getKnowledgeGraph(limit: number = 50): { nodes: any[]; edges: any[] } {
-    const nodes = new Map<string, any>();
-    const edges = new Set<string>();
-
-    try {
-      // 1. Get recent sessions
-      const sessions = this.db.prepare(`
-        SELECT id, sdk_session_id, project, started_at_epoch
-        FROM sdk_sessions
-        WHERE status != 'failed'
-        ORDER BY started_at_epoch DESC
-        LIMIT ?
-      `).all(limit) as any[];
-
-      for (const session of sessions) {
-        const sessionId = `session-${session.id}`;
-        nodes.set(sessionId, {
-          id: sessionId,
-          label: `Session ${session.id}`,
-          type: 'session',
-          val: 8,
-          data: session
-        });
-
-        // 2. Get concepts for this session
-        const concepts = this.db.prepare(`
-          SELECT concepts
-          FROM observations
-          WHERE sdk_session_id = ?
-        `).all(session.sdk_session_id) as { concepts: string }[];
-
-        for (const row of concepts) {
-          if (!row.concepts) continue;
-          try {
-            const tags = JSON.parse(row.concepts);
-            if (Array.isArray(tags)) {
-              for (const tag of tags) {
-                const tagId = `concept-${tag}`;
-                if (!nodes.has(tagId)) {
-                  nodes.set(tagId, {
-                    id: tagId,
-                    label: tag,
-                    type: 'concept',
-                    val: 5
-                  });
-                }
-                const edgeId = `${sessionId}->${tagId}`;
-                if (!edges.has(edgeId)) {
-                  edges.add(JSON.stringify({ source: sessionId, target: tagId, type: 'HAS_CONCEPT' }));
-                }
-              }
-            }
-          } catch (e) {}
-        }
-
-        // 3. Get files for this session
-        const files = this.db.prepare(`
-          SELECT files_read, files_modified
-          FROM observations
-          WHERE sdk_session_id = ?
-        `).all(session.sdk_session_id) as { files_read: string, files_modified: string }[];
-
-        for (const row of files) {
-          const processFiles = (json: string, type: 'READ' | 'MODIFIED') => {
-            if (!json) return;
-            try {
-              const fileList = JSON.parse(json);
-              if (Array.isArray(fileList)) {
-                for (const file of fileList) {
-                  const fileId = `file-${file}`;
-                  const fileName = file.split('/').pop() || file;
-
-                  if (!nodes.has(fileId)) {
-                    nodes.set(fileId, {
-                      id: fileId,
-                      label: fileName,
-                      type: 'file',
-                      val: type === 'MODIFIED' ? 6 : 3,
-                      path: file
-                    });
-                  } else if (type === 'MODIFIED') {
-                    // Upgrade value if modified
-                    const existing = nodes.get(fileId);
-                    existing.val = Math.max(existing.val, 6);
-                  }
-
-                  // Edges
-                  edges.add(JSON.stringify({ source: sessionId, target: fileId, type }));
-                }
-              }
-            } catch (e) {}
-          };
-
-          processFiles(row.files_read, 'READ');
-          processFiles(row.files_modified, 'MODIFIED');
-        }
-      }
-
-      return {
-        nodes: Array.from(nodes.values()),
-        edges: Array.from(edges).map(e => JSON.parse(e))
-      };
-    } catch (error) {
-      console.error('[SessionStore] Failed to get knowledge graph:', error);
-      return { nodes: [], edges: [] };
-    }
-  }
-
   close(): void {
     this.db.close();
   }

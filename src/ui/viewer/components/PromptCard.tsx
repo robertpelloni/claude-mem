@@ -13,15 +13,15 @@ export function PromptCard({ prompt }: PromptCardProps) {
     <div className="card prompt-card">
       <div className="card-header">
         <div className="card-header-left">
-          <span className="card-type">Prompt</span>
-          <span className="card-project">{prompt.project}</span>
+          <span className="card-type" title="User Prompt">Prompt</span>
+          <span className="card-project" title={`Project Context: ${prompt.project}`}>{prompt.project}</span>
         </div>
       </div>
-      <div className="card-content">
+      <div className="card-content" title="User Prompt Text">
         {prompt.prompt_text}
       </div>
       <div className="card-meta">
-        <span className="meta-date">#{prompt.id} • {date}</span>
+        <span className="meta-date" title={`Prompt ID: ${prompt.id}, Created At: ${date}`}>#{prompt.id} • {date}</span>
       </div>
     </div>
   );

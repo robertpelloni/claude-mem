@@ -20,11 +20,11 @@ export function SummaryCard({ summary }: SummaryCardProps) {
     <article className="card summary-card">
       <header className="summary-card-header">
         <div className="summary-badge-row">
-          <span className="card-type summary-badge">Session Summary</span>
-          <span className="summary-project-badge">{summary.project}</span>
+          <span className="card-type summary-badge" title="Summary of the completed session">Session Summary</span>
+          <span className="summary-project-badge" title={`Project Context: ${summary.project}`}>{summary.project}</span>
         </div>
         {summary.request && (
-          <h2 className="summary-title">{summary.request}</h2>
+          <h2 className="summary-title" title="Original User Request">{summary.request}</h2>
         )}
       </header>
 
@@ -51,9 +51,9 @@ export function SummaryCard({ summary }: SummaryCardProps) {
       </div>
 
       <footer className="summary-card-footer">
-        <span className="summary-meta-id">Session #{summary.id}</span>
+        <span className="summary-meta-id" title={`Session Summary ID: ${summary.id}`}>Session #{summary.id}</span>
         <span className="summary-meta-divider">•</span>
-        <time className="summary-meta-date" dateTime={new Date(summary.created_at_epoch).toISOString()}>
+        <time className="summary-meta-date" dateTime={new Date(summary.created_at_epoch).toISOString()} title={`Session Summary Created At: ${date}`}>
           {date}
         </time>
       </footer>

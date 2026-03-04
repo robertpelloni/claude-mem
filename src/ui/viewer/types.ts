@@ -37,22 +37,13 @@ export interface UserPrompt {
   created_at_epoch: number;
 }
 
-export interface LogEntry {
-  timestamp: string;
-  level: string;
-  component: string;
-  message: string;
-  context?: any;
-  data?: any;
-}
-
 export type FeedItem =
   | (Observation & { itemType: 'observation' })
   | (Summary & { itemType: 'summary' })
   | (UserPrompt & { itemType: 'prompt' });
 
 export interface StreamEvent {
-  type: 'initial_load' | 'new_observation' | 'new_summary' | 'new_prompt' | 'processing_status' | 'log';
+  type: 'initial_load' | 'new_observation' | 'new_summary' | 'new_prompt' | 'processing_status';
   observations?: Observation[];
   summaries?: Summary[];
   prompts?: UserPrompt[];
@@ -61,7 +52,6 @@ export interface StreamEvent {
   summary?: Summary;
   prompt?: UserPrompt;
   isProcessing?: boolean;
-  log?: LogEntry;
 }
 
 export interface Settings {
@@ -69,11 +59,6 @@ export interface Settings {
   CLAUDE_MEM_CONTEXT_OBSERVATIONS: string;
   CLAUDE_MEM_WORKER_PORT: string;
   CLAUDE_MEM_WORKER_HOST: string;
-
-  // System Configuration
-  CLAUDE_MEM_DATA_DIR?: string;
-  CLAUDE_MEM_LOG_LEVEL?: string;
-  CLAUDE_MEM_PYTHON_VERSION?: string;
 
   // Token Economics Display
   CLAUDE_MEM_CONTEXT_SHOW_READ_TOKENS?: string;
@@ -102,6 +87,13 @@ export interface WorkerStats {
   sseClients?: number;
 }
 
+export interface PackageInfo {
+  name: string;
+  version: string;
+  description: string;
+  path: string;
+}
+
 export interface DatabaseStats {
   size?: number;
   observations?: number;
@@ -112,14 +104,5 @@ export interface DatabaseStats {
 export interface Stats {
   worker?: WorkerStats;
   database?: DatabaseStats;
-}
-
-export interface IntegrationStatus {
-  chroma: {
-    connected: boolean;
-    collectionName: string;
-    vectorDbDir: string;
-    itemCount?: number;
-    error?: string;
-  };
+  packages?: PackageInfo[];
 }

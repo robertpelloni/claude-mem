@@ -1,13 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Header } from './components/Header';
 import { Feed } from './components/Feed';
-import { HelpPage } from './components/HelpPage';
-import { SystemStatus } from './components/SystemStatus';
-import { SearchPage } from './components/SearchPage';
-import { DashboardPage } from './components/DashboardPage';
-import { GraphPage } from './components/GraphPage';
-import { ProFeaturesPage } from './components/ProFeaturesPage';
-import { ErrorBoundary } from './components/ErrorBoundary';
 import { ContextSettingsModal } from './components/ContextSettingsModal';
 import { useSSE } from './hooks/useSSE';
 import { useSettings } from './hooks/useSettings';
@@ -19,49 +12,14 @@ import { mergeAndDeduplicateByProject } from './utils/data';
 
 export function App() {
   const [currentFilter, setCurrentFilter] = useState('');
-  const [currentView, setCurrentView] = useState<'feed' | 'help' | 'status' | 'search' | 'dashboard' | 'pro' | 'graph'>('feed');
-  const [searchQuery, setSearchQuery] = useState(''); // Shared search query state
-  const [isWidgetMode, setIsWidgetMode] = useState(false);
   const [contextPreviewOpen, setContextPreviewOpen] = useState(false);
   const [paginatedObservations, setPaginatedObservations] = useState<Observation[]>([]);
   const [paginatedSummaries, setPaginatedSummaries] = useState<Summary[]>([]);
   const [paginatedPrompts, setPaginatedPrompts] = useState<UserPrompt[]>([]);
 
-  // System readiness state
-  const [readiness, setReadiness] = useState({ mcpReady: false, initialized: false });
-
-  const { observations, summaries, prompts, projects, logs, clearLogs, isProcessing, queueDepth, isConnected } = useSSE();
+  const { observations, summaries, prompts, projects, isProcessing, queueDepth, isConnected } = useSSE();
   const { settings, saveSettings, isSaving, saveStatus } = useSettings();
   const { stats, refreshStats } = useStats();
-
-  // Check for widget mode query param
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('mode') === 'widget') {
-      setIsWidgetMode(true);
-    }
-  }, []);
-
-  // Poll for readiness
-  useEffect(() => {
-    const checkReadiness = () => {
-      fetch('/api/readiness')
-        .then(res => res.json())
-        .then(data => {
-          setReadiness({
-            mcpReady: data.mcpReady === true,
-            initialized: data.status === 'ready'
-          });
-        })
-        .catch(() => {
-          setReadiness({ mcpReady: false, initialized: false });
-        });
-    };
-
-    checkReadiness();
-    const interval = setInterval(checkReadiness, 5000);
-    return () => clearInterval(interval);
-  }, []);
   const { preference, resolvedTheme, setThemePreference } = useTheme();
   const pagination = usePagination(currentFilter);
 
@@ -93,22 +51,6 @@ export function App() {
   // Toggle context preview modal
   const toggleContextPreview = useCallback(() => {
     setContextPreviewOpen(prev => !prev);
-  }, []);
-
-  // Keyboard shortcuts
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Ignore if typing in input
-      if (e.target instanceof HTMLElement && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT')) {
-        return;
-      }
-
-      if (e.key === '?') {
-        setCurrentView('help');
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
   // Handle loading more data
@@ -155,72 +97,16 @@ export function App() {
         themePreference={preference}
         onThemeChange={setThemePreference}
         onContextPreviewToggle={toggleContextPreview}
-        currentView={currentView}
-        onViewChange={setCurrentView}
-        compact={isWidgetMode}
       />
 
-      <div className={`main-content ${isWidgetMode ? 'widget-mode' : ''}`} style={isWidgetMode ? { padding: '10px' } : undefined}>
-        {currentView === 'feed' && (
-          <ErrorBoundary>
-            <Feed
-              observations={allObservations}
-              summaries={allSummaries}
-              prompts={allPrompts}
-              onLoadMore={handleLoadMore}
-              isLoading={pagination.observations.isLoading || pagination.summaries.isLoading || pagination.prompts.isLoading}
-              hasMore={pagination.observations.hasMore || pagination.summaries.hasMore || pagination.prompts.hasMore}
-            />
-          </ErrorBoundary>
-        )}
-
-        {currentView === 'help' && (
-          <ErrorBoundary>
-            <HelpPage />
-          </ErrorBoundary>
-        )}
-
-        {currentView === 'search' && (
-          <ErrorBoundary>
-            <SearchPage initialQuery={searchQuery} />
-          </ErrorBoundary>
-        )}
-
-        {currentView === 'dashboard' && (
-          <ErrorBoundary>
-            <DashboardPage />
-          </ErrorBoundary>
-        )}
-
-        {currentView === 'graph' && (
-          <ErrorBoundary>
-            <GraphPage onNodeClick={(query) => {
-              setSearchQuery(query);
-              setCurrentView('search');
-            }} />
-          </ErrorBoundary>
-        )}
-
-        {currentView === 'pro' && (
-          <ErrorBoundary>
-            <ProFeaturesPage />
-          </ErrorBoundary>
-        )}
-
-        {currentView === 'status' && (
-          <ErrorBoundary>
-            <div className="container mx-auto p-4">
-              <SystemStatus
-                isConnected={isConnected}
-                mcpReady={readiness.mcpReady}
-                initialized={readiness.initialized}
-                logs={logs}
-                onClearLogs={clearLogs}
-              />
-            </div>
-          </ErrorBoundary>
-        )}
-      </div>
+      <Feed
+        observations={allObservations}
+        summaries={allSummaries}
+        prompts={allPrompts}
+        onLoadMore={handleLoadMore}
+        isLoading={pagination.observations.isLoading || pagination.summaries.isLoading || pagination.prompts.isLoading}
+        hasMore={pagination.observations.hasMore || pagination.summaries.hasMore || pagination.prompts.hasMore}
+      />
 
       <ContextSettingsModal
         isOpen={contextPreviewOpen}

@@ -38,10 +38,6 @@ import { SessionRoutes } from './worker/http/routes/SessionRoutes.js';
 import { DataRoutes } from './worker/http/routes/DataRoutes.js';
 import { SearchRoutes } from './worker/http/routes/SearchRoutes.js';
 import { SettingsRoutes } from './worker/http/routes/SettingsRoutes.js';
-import { IntegrationsRoutes } from './worker/http/routes/IntegrationsRoutes.js';
-import { SystemRoutes } from './worker/http/routes/SystemRoutes.js';
-import { GraphRoutes } from './worker/http/routes/GraphRoutes.js';
-import { AnalyticsRoutes } from './worker/http/routes/AnalyticsRoutes.js';
 
 export class WorkerService {
   private app: express.Application;
@@ -68,10 +64,6 @@ export class WorkerService {
   private dataRoutes: DataRoutes;
   private searchRoutes: SearchRoutes | null;
   private settingsRoutes: SettingsRoutes;
-  private integrationsRoutes: IntegrationsRoutes;
-  private systemRoutes: SystemRoutes;
-  private graphRoutes: GraphRoutes;
-  private analyticsRoutes: AnalyticsRoutes;
 
   // Initialization tracking
   private initializationComplete: Promise<void>;
@@ -89,14 +81,6 @@ export class WorkerService {
     this.dbManager = new DatabaseManager();
     this.sessionManager = new SessionManager(this.dbManager);
     this.sseBroadcaster = new SSEBroadcaster();
-
-    // Attach logger to SSE broadcaster for live log streaming
-    logger.addListener((entry) => {
-      this.sseBroadcaster.broadcast({
-        type: 'log',
-        log: entry
-      });
-    });
     this.sdkAgent = new SDKAgent(this.dbManager, this.sessionManager);
     this.paginationHelper = new PaginationHelper(this.dbManager);
     this.settingsManager = new SettingsManager(this.dbManager);
@@ -120,10 +104,6 @@ export class WorkerService {
     // SearchRoutes needs SearchManager which requires initialized DB - will be created in initializeBackground()
     this.searchRoutes = null;
     this.settingsRoutes = new SettingsRoutes(this.settingsManager);
-    this.integrationsRoutes = new IntegrationsRoutes(this.dbManager);
-    this.systemRoutes = new SystemRoutes(this.dbManager);
-    this.graphRoutes = new GraphRoutes(this.dbManager);
-    this.analyticsRoutes = new AnalyticsRoutes(this.dbManager);
 
     this.setupMiddleware();
     this.setupRoutes();
@@ -275,10 +255,6 @@ export class WorkerService {
     this.dataRoutes.setupRoutes(this.app);
     // searchRoutes is set up after database initialization in initializeBackground()
     this.settingsRoutes.setupRoutes(this.app);
-    this.integrationsRoutes.setupRoutes(this.app);
-    this.systemRoutes.setupRoutes(this.app);
-    this.graphRoutes.setupRoutes(this.app);
-    this.analyticsRoutes.setupRoutes(this.app);
 
     // Register early handler for /api/context/inject to avoid 404 during startup
     // This handler waits for initialization to complete before delegating to SearchRoutes

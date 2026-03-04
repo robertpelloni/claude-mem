@@ -2,8 +2,7 @@ import React, { useState, useCallback, useEffect } from 'react';
 import type { Settings } from '../types';
 import { TerminalPreview } from './TerminalPreview';
 import { useContextPreview } from '../hooks/useContextPreview';
-import { IntegrationsStatus } from './IntegrationsStatus';
-import { VersionSwitcher } from './VersionSwitcher';
+import { useStats } from '../hooks/useStats';
 
 interface ContextSettingsModalProps {
   isOpen: boolean;
@@ -195,6 +194,7 @@ export function ContextSettingsModal({
   isSaving,
   saveStatus
 }: ContextSettingsModalProps) {
+  const { stats } = useStats();
   const [formState, setFormState] = useState<Settings>(settings);
 
   // Create debounced save function
@@ -264,8 +264,28 @@ export function ContextSettingsModal({
       <div className="context-settings-modal" onClick={(e) => e.stopPropagation()}>
         {/* Header */}
         <div className="modal-header">
-          <h2>Settings</h2>
+          <h2>
+            Settings
+            {isSaving && <span className="saving-indicator">Saving...</span>}
+            {saveStatus === 'success' && <span className="save-success-indicator">Saved</span>}
+            {saveStatus === 'error' && <span className="save-error-indicator">Error saving</span>}
+          </h2>
           <div className="header-controls">
+            <button
+              onClick={() => {
+                const packagesSection = document.getElementById('packages-modal-section');
+                if (packagesSection) packagesSection.scrollIntoView({ behavior: 'smooth' });
+              }}
+              className="modal-icon-link"
+              title="View Packages"
+              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px', display: 'flex' }}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+                <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+                <line x1="12" y1="22.08" x2="12" y2="12"></line>
+              </svg>
+            </button>
             <a
               href="https://docs.claude-mem.ai"
               target="_blank"
@@ -448,7 +468,7 @@ export function ContextSettingsModal({
             {/* Section 4: Advanced */}
             <CollapsibleSection
               title="Advanced"
-              description="Model selection and context features"
+              description="Model selection and integrations"
               defaultOpen={false}
             >
               <FormField
@@ -464,6 +484,19 @@ export function ContextSettingsModal({
                   <option value="sonnet">sonnet (balanced)</option>
                   <option value="opus">opus (highest quality)</option>
                 </select>
+              </FormField>
+
+              <FormField
+                label="Worker Port"
+                tooltip="Port for the background worker service"
+              >
+                <input
+                  type="number"
+                  min="1024"
+                  max="65535"
+                  value={formState.CLAUDE_MEM_WORKER_PORT || '37777'}
+                  onChange={(e) => updateSetting('CLAUDE_MEM_WORKER_PORT', e.target.value)}
+                />
               </FormField>
 
               <div className="toggle-group" style={{ marginTop: '12px' }}>
@@ -484,75 +517,38 @@ export function ContextSettingsModal({
               </div>
             </CollapsibleSection>
 
-            {/* Section 5: System Configuration */}
-            <CollapsibleSection
-              title="System"
-              description="Core configuration (requires restart)"
-              defaultOpen={false}
-            >
-              <FormField
-                label="Log Level"
-                tooltip="Verbosity of worker logs"
+            {/* Section 5: Packages */}
+            <div id="packages-modal-section">
+              <CollapsibleSection
+                title="Local Packages"
+                description="Installed local submodules and plugins"
+                defaultOpen={false}
               >
-                <select
-                  value={formState.CLAUDE_MEM_LOG_LEVEL || 'INFO'}
-                  onChange={(e) => updateSetting('CLAUDE_MEM_LOG_LEVEL', e.target.value)}
-                >
-                  <option value="DEBUG">DEBUG</option>
-                  <option value="INFO">INFO</option>
-                  <option value="WARN">WARN</option>
-                  <option value="ERROR">ERROR</option>
-                  <option value="SILENT">SILENT</option>
-                </select>
-              </FormField>
-
-              <FormField
-                label="Worker Port"
-                tooltip="Port for the background worker service"
-              >
-                <input
-                  type="number"
-                  min="1024"
-                  max="65535"
-                  value={formState.CLAUDE_MEM_WORKER_PORT || '37777'}
-                  onChange={(e) => updateSetting('CLAUDE_MEM_WORKER_PORT', e.target.value)}
-                />
-              </FormField>
-
-              <FormField
-                label="Data Directory"
-                tooltip="Path to store database and logs"
-              >
-                <input
-                  type="text"
-                  value={formState.CLAUDE_MEM_DATA_DIR || ''}
-                  onChange={(e) => updateSetting('CLAUDE_MEM_DATA_DIR', e.target.value)}
-                />
-              </FormField>
-
-              <FormField
-                label="Python Version"
-                tooltip="Python version for Chroma integration (e.g. 3.13)"
-              >
-                <input
-                  type="text"
-                  value={formState.CLAUDE_MEM_PYTHON_VERSION || '3.13'}
-                  placeholder="3.13"
-                  onChange={(e) => updateSetting('CLAUDE_MEM_PYTHON_VERSION', e.target.value)}
-                />
-              </FormField>
-            </CollapsibleSection>
-
-            {/* Section 6: Integrations & Updates */}
-            <CollapsibleSection
-              title="Integrations & Updates"
-              description="Manage external systems and versions"
-              defaultOpen={false}
-            >
-              <VersionSwitcher />
-              <div style={{ height: '20px' }} />
-              <IntegrationsStatus />
-            </CollapsibleSection>
+                <div className="packages-list" style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '8px' }}>
+                  {stats?.packages && stats.packages.length > 0 ? (
+                    stats.packages.map((pkg: any) => (
+                      <div key={pkg.name} className="package-card" style={{ padding: '12px', border: '1px solid var(--border)', borderRadius: '6px', background: 'var(--bg-secondary)' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                          <h4 style={{ margin: 0, fontSize: '14px', color: 'var(--text-primary)' }}>{pkg.name}</h4>
+                          <span style={{ fontSize: '12px', fontFamily: 'monospace', color: 'var(--text-tertiary)', background: 'var(--bg-primary)', padding: '2px 6px', borderRadius: '4px' }}>v{pkg.version}</span>
+                        </div>
+                        <p style={{ margin: '0 0 8px 0', fontSize: '12px', color: 'var(--text-secondary)' }}>{pkg.description}</p>
+                        <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                          </svg>
+                          {pkg.path}
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <div style={{ fontSize: '13px', color: 'var(--text-tertiary)', fontStyle: 'italic', padding: '8px 0' }}>
+                      No local packages found.
+                    </div>
+                  )}
+                </div>
+              </CollapsibleSection>
+            </div>
           </div>
         </div>
       </div>

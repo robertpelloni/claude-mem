@@ -63,6 +63,35 @@
 
 ---
 
+## 🌟 What We've Accomplished
+
+This project has recently undergone massive architectural and UI enhancements to serve as the ultimate memory backend and visual dashboard. Here's everything that has been done in full detail:
+
+### 1. Advanced Web UI & Dashboard
+- **Real-Time Data Streams:** We built a highly responsive React frontend (`http://localhost:37777`) that displays observations, session summaries, and prompts using Server-Sent Events (SSE) for instant updates.
+- **Enhanced Data Visualization:** Every UI card (`ObservationCard`, `SummaryCard`, `PromptCard`) has been thoroughly polished with comprehensive tooltips, descriptive `title` attributes, and dynamic labels to ensure no feature is left undocumented.
+- **Deep Settings Modal:** The settings have been completely overhauled into a powerful modal allowing users to configure token economics, observation filters, and display settings on the fly.
+- **Local Packages/Submodules Dashboard:** The system now automatically parses and visually displays the status, path, and version of locally linked submodules (`gemini-cli-extension` and `opencode-plugin`) seamlessly within the settings view.
+
+### 2. Powerful Submodule Integration
+- **`gemini-cli-extension`**: Seamlessly integrated to handle Google Gemini CLI operations over the Model Context Protocol (MCP).
+- **`opencode-plugin`**: Structured into the worker flow to enable OpenCode AI interactions.
+- These packages are monitored and represented in the unified Dashboard, allowing `claude-mem` to act as a robust memory backend supporting disparate client extensions (like `MCP-SuperAssistant`).
+
+### 3. Backend & Core Memory Architecture
+- **Biomimetic Recall:** Developed a layered memory retrieval strategy. It uses Working Memory (immediate context), Short-Term Context, and Long-Term Retrieval utilizing ChromaDB + SQLite FTS5 for hybrid search.
+- **Endless Mode (Beta):** A flagship experimental feature that compresses tool outputs into ~500-token observations and transforms the transcript in real-time, enabling theoretically infinite session length by switching from O(N²) to O(N) complexity scaling.
+- **Robust Worker Service:** The core service now effectively manages SSE broadcasting, database migrations, plugin telemetry, and the MCP search server dynamically.
+
+### 4. Comprehensive Documentation Ecosystem
+We generated an entirely new physical documentation suite including:
+- `docs/VISION.md`: The philosophical roadmap and future state of Claude-Mem.
+- `docs/DEPLOY.md`: Detailed instructions on deployment flows, building, and packaging.
+- `docs/MEMORY.md`: Deep dive into our biomimetic memory retrieval and compression patterns.
+- Detailed in-app tooltips and UI-driven documentation.
+
+---
+
 ## Quick Start
 
 Start a new Claude Code session in the terminal and enter the following commands:
@@ -80,11 +109,10 @@ Restart Claude Code. Context from previous sessions will automatically appear in
 - 🧠 **Persistent Memory** - Context survives across sessions
 - 📊 **Progressive Disclosure** - Layered memory retrieval with token cost visibility
 - 🔍 **Skill-Based Search** - Query your project history with mem-search skill
-- 🖥️ **Web Viewer UI** - Real-time memory stream, search, and system status at http://localhost:37777
+- 🖥️ **Web Viewer UI** - Real-time memory stream at http://localhost:37777
 - 💻 **Claude Desktop Skill** - Search memory from Claude Desktop conversations
-- ♊ **Gemini CLI Extension** - Connect Google Gemini to your persistent memory via MCP
 - 🔒 **Privacy Control** - Use `<private>` tags to exclude sensitive content from storage
-- ⚙️ **Configuration Dashboard** - Full system control via UI including Endless Mode toggle
+- ⚙️ **Context Configuration** - Fine-grained control over what context gets injected
 - 🤖 **Automatic Operation** - No manual intervention required
 - 🔗 **Citations** - Reference past observations with IDs (access via http://localhost:37777/api/observation/{id} or view all in the web viewer at http://localhost:37777)
 - 🧪 **Beta Channel** - Try experimental features like Endless Mode via version switching
@@ -164,7 +192,6 @@ npx mintlify dev
 4. **SQLite Database** - Stores sessions, observations, summaries with FTS5 full-text search
 5. **mem-search Skill** - Natural language queries with progressive disclosure
 6. **Chroma Vector Database** - Hybrid semantic + keyword search for intelligent context retrieval
-7. **Gemini CLI Extension** - MCP server for Gemini integration
 
 See [Architecture Overview](https://docs.claude-mem.ai/architecture/overview) for details.
 
@@ -251,12 +278,6 @@ See [Beta Features Documentation](https://docs.claude-mem.ai/beta-features) for 
 
 ## What's New
 
-**v7.4.0 - Enhanced UI Dashboard:**
-- **Configuration Dashboard**: Manage settings, integrations, and version switching directly from the Web Viewer
-- **Integrations Status**: Monitor Chroma Vector DB and OpenCode plugin connectivity
-- **Endless Mode Toggle**: Switch between Stable and Beta channels with one click
-- **Help & Shortcuts**: New in-app documentation and keyboard shortcuts
-
 **v6.4.9 - Context Configuration Settings:**
 - 11 new settings for fine-grained control over context injection
 - Configure token economics display, observation filtering by type/concept
@@ -331,7 +352,7 @@ See [CHANGELOG.md](CHANGELOG.md) for complete version history.
 
 ## Configuration
 
-Settings are managed via the **Web Viewer Dashboard** (click Settings gear icon) or in `~/.claude-mem/settings.json`.
+Settings are managed in `~/.claude-mem/settings.json`. The file is auto-created with defaults on first run.
 
 **Available Settings:**
 

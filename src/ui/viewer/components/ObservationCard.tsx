@@ -49,10 +49,10 @@ export function ObservationCard({ observation }: ObservationCardProps) {
       {/* Header with toggle buttons in top right */}
       <div className="card-header">
         <div className="card-header-left">
-          <span className={`card-type type-${observation.type}`}>
+          <span className={`card-type type-${observation.type}`} title={`Observation Type: ${observation.type}`}>
             {observation.type}
           </span>
-          <span className="card-project">{observation.project}</span>
+          <span className="card-project" title={`Project Context: ${observation.project}`}>{observation.project}</span>
         </div>
         <div className="view-mode-toggles">
           {hasFactsContent && (
@@ -62,6 +62,7 @@ export function ObservationCard({ observation }: ObservationCardProps) {
                 setShowFacts(!showFacts);
                 if (!showFacts) setShowNarrative(false); // Turn off narrative when turning on facts
               }}
+              title="Toggle extracted facts and metadata view"
             >
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <polyline points="9 11 12 14 22 4"></polyline>
@@ -77,6 +78,7 @@ export function ObservationCard({ observation }: ObservationCardProps) {
                 setShowNarrative(!showNarrative);
                 if (!showNarrative) setShowFacts(false); // Turn off facts when turning on narrative
               }}
+              title="Toggle detailed narrative view"
             >
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
@@ -91,7 +93,7 @@ export function ObservationCard({ observation }: ObservationCardProps) {
       </div>
 
       {/* Title */}
-      <div className="card-title">{observation.title || 'Untitled'}</div>
+      <div className="card-title" title={observation.title || 'Observation Title'}>{observation.title || 'Untitled'}</div>
 
       {/* Content based on toggle state */}
       <div className="view-mode-content">
@@ -114,11 +116,11 @@ export function ObservationCard({ observation }: ObservationCardProps) {
 
       {/* Metadata footer - id, date, and conditionally concepts/files when facts toggle is on */}
       <div className="card-meta">
-        <span className="meta-date">#{observation.id} • {date}</span>
+        <span className="meta-date" title={`Observation ID: ${observation.id}, Created At: ${date}`}>#{observation.id} • {date}</span>
         {showFacts && (concepts.length > 0 || filesRead.length > 0 || filesModified.length > 0) && (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
             {concepts.map((concept: string, i: number) => (
-              <span key={i} style={{
+              <span key={i} title={`Extracted Concept: ${concept}`} style={{
                 padding: '2px 8px',
                 background: 'var(--color-type-badge-bg)',
                 color: 'var(--color-type-badge-text)',
@@ -130,12 +132,12 @@ export function ObservationCard({ observation }: ObservationCardProps) {
               </span>
             ))}
             {filesRead.length > 0 && (
-              <span className="meta-files">
+              <span className="meta-files" title="Files read during this observation">
                 <span className="file-label">read:</span> {filesRead.join(', ')}
               </span>
             )}
             {filesModified.length > 0 && (
-              <span className="meta-files">
+              <span className="meta-files" title="Files modified during this observation">
                 <span className="file-label">modified:</span> {filesModified.join(', ')}
               </span>
             )}
