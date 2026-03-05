@@ -23,6 +23,12 @@ Claude-mem is a Claude Code plugin providing persistent memory across sessions. 
    - Starts PM2 worker if not healthy
    - Injects context from previous sessions (configurable observation count)
 
+**Planning Skill** (`plugin/skills/make-plan/SKILL.md`) - Orchestrator instructions for creating phased implementation plans with documentation discovery
+
+**Execution Skill** (`plugin/skills/do/SKILL.md`) - Orchestrator instructions for executing phased plans using subagents
+
+**Chroma** (`src/services/sync/ChromaSync.ts`) - Vector embeddings for semantic search
+
 2. **UserPromptSubmit** → `new-hook.ts` runs
    - Creates session record in SQLite
    - Saves raw user prompt for FTS5 search
