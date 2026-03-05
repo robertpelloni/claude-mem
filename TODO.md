@@ -4,7 +4,7 @@
 
 ## 🔴 Critical / Blocking
 
-- [ ] **Merge upstream v10.5.2** — 20 commits behind upstream/main. 24 file conflicts need careful resolution. Includes `smart-explore` AST navigation, hook crash fixes, and skill conversions.
+- [x] **Merge upstream v10.5.2** — 20 commits behind upstream/main. 24 file conflicts need careful resolution. Includes `smart-explore` AST navigation, hook crash fixes, and skill conversions.
 - [x] **Fix CLAUDE.md stale version** — References v5.5.1, actual version is 10.3.1. Should read from `VERSION` file.
 
 ## 🟡 High Priority
