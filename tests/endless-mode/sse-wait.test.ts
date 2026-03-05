@@ -6,7 +6,7 @@
  * and handles various scenarios including success, timeout, and errors.
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, mock, spyOn, setSystemTime } from 'bun:test';
 import {
   createMockEventSource,
   createImmediateSuccessMockEventSource,
@@ -14,23 +14,42 @@ import {
   createErrorMockEventSource,
   createNeverResolvingMockEventSource
 } from '../helpers/mockEventSource';
-import { mockFetchSuccess, resetAllMocks } from '../helpers/mocks';
-import { bashCommandScenario, sessionScenario } from '../helpers/scenarios';
 
-// Store original EventSource
+export const mockFetchSuccess = (responseData: any) => mock(() =>
+  Promise.resolve({
+    ok: true,
+    status: 200,
+    json: () => Promise.resolve(responseData)
+  }) as any
+);
+
+export const bashCommandScenario = {
+  tool_name: 'Bash',
+  tool_input: { command: 'echo hello' },
+  tool_response: { stdout: 'hello\\n', exit_code: 0 }
+};
+
+export const sessionScenario = {
+  claudeSessionId: `test-session-${Date.now()}`
+};
+
+// Store original EventSource and fetch
 const originalEventSource = global.EventSource;
+const originalFetch = global.fetch;
 
 describe('Endless Mode v7.1 - SSE Wait Logic', () => {
   beforeEach(() => {
-    resetAllMocks();
-    vi.clearAllTimers();
-    vi.useFakeTimers();
+    mock.restore();
+    setSystemTime(new Date()); // Bun test equivalent of useFakeTimers
   });
 
   afterEach(() => {
-    // Restore original EventSource
+    // Restore original globals
     global.EventSource = originalEventSource;
-    vi.useRealTimers();
+    if (originalFetch) {
+      global.fetch = originalFetch;
+    }
+    setSystemTime(); // Restores real time in bun:test
   });
 
   describe('Scenario 1: Endless Mode Disabled, Tool Creates Observation', () => {
@@ -39,7 +58,7 @@ describe('Endless Mode v7.1 - SSE Wait Logic', () => {
       global.EventSource = createImmediateSuccessMockEventSource() as any;
 
       // Mock fetch for observation creation
-      const mockFetch = vi.fn()
+      const mockFetch = mock()
         .mockResolvedValueOnce({
           ok: true,
           status: 200,
@@ -102,7 +121,7 @@ describe('Endless Mode v7.1 - SSE Wait Logic', () => {
     it('should wait for SSE, fetch empty observations, return normally', async () => {
       global.EventSource = createImmediateSuccessMockEventSource() as any;
 
-      const mockFetch = vi.fn()
+      const mockFetch = mock()
         .mockResolvedValueOnce({
           ok: true,
           status: 200,
@@ -134,7 +153,7 @@ describe('Endless Mode v7.1 - SSE Wait Logic', () => {
       // In real implementation, this would trigger after ENDLESS_WAIT_TIMEOUT_MS
 
       // Fast-forward time to trigger timeout
-      vi.advanceTimersByTime(90000); // Default 90 second timeout
+      setSystemTime(new Date(Date.now() + 90000)); // Default 90 second timeout
 
       expect(global.EventSource).toBeDefined();
     });
@@ -149,7 +168,7 @@ describe('Endless Mode v7.1 - SSE Wait Logic', () => {
       global.fetch = mockFetch as any;
 
       // Advance timers to trigger error
-      vi.advanceTimersByTime(100);
+      setSystemTime(new Date(Date.now() + 100));
 
       expect(global.EventSource).toBeDefined();
     });
@@ -159,7 +178,7 @@ describe('Endless Mode v7.1 - SSE Wait Logic', () => {
     it('should fetch all observations and format with separators', async () => {
       global.EventSource = createImmediateSuccessMockEventSource() as any;
 
-      const mockFetch = vi.fn()
+      const mockFetch = mock()
         .mockResolvedValueOnce({
           ok: true,
           status: 200,
@@ -214,10 +233,10 @@ describe('Endless Mode v7.1 - SSE Wait Logic', () => {
       // Expected: Hook waits through queueDepth: 3, 2, 1 and reacts at 0
 
       // Advance through countdown
-      vi.advanceTimersByTime(50); // queueDepth: 3
-      vi.advanceTimersByTime(100); // queueDepth: 2
-      vi.advanceTimersByTime(100); // queueDepth: 1
-      vi.advanceTimersByTime(100); // queueDepth: 0 - should resolve here
+      setSystemTime(new Date(Date.now() + 50)); // queueDepth: 3
+      setSystemTime(new Date(Date.now() + 100)); // queueDepth: 2
+      setSystemTime(new Date(Date.now() + 100)); // queueDepth: 1
+      setSystemTime(new Date(Date.now() + 100)); // queueDepth: 0 - should resolve here
 
       expect(global.EventSource).toBeDefined();
     });
@@ -232,7 +251,7 @@ describe('Endless Mode v7.1 - SSE Wait Logic', () => {
       global.fetch = mockFetch as any;
 
       // Advance to trigger error
-      vi.advanceTimersByTime(600);
+      setSystemTime(new Date(Date.now() + 600));
 
       expect(global.EventSource).toBeDefined();
     });
@@ -252,7 +271,7 @@ describe('Endless Mode v7.1 - SSE Wait Logic', () => {
       global.fetch = mockFetch as any;
 
       // Advance through both events
-      vi.advanceTimersByTime(150);
+      setSystemTime(new Date(Date.now() + 150));
 
       // Expected: First event ignored, second event processed successfully
       expect(global.EventSource).toBeDefined();
@@ -339,7 +358,7 @@ describe('Endless Mode v7.1 - SSE Wait Logic', () => {
       });
 
       // Advance timers to trigger the event (50ms delay in createImmediateSuccessMockEventSource)
-      await vi.advanceTimersByTimeAsync(100);
+      setSystemTime(new Date(Date.now() + 100));
 
       const result = await resultPromise;
       expect(result).toBe(true);
@@ -379,7 +398,7 @@ describe('Endless Mode v7.1 - SSE Wait Logic', () => {
       });
 
       // Advance past timeout
-      vi.advanceTimersByTime(1100);
+      setSystemTime(new Date(Date.now() + 1100));
 
       const result = await resultPromise;
       expect(result).toBe(false);
@@ -419,7 +438,7 @@ describe('Endless Mode v7.1 - SSE Wait Logic', () => {
       });
 
       // Advance past error trigger
-      vi.advanceTimersByTime(100);
+      setSystemTime(new Date(Date.now() + 100));
 
       const result = await resultPromise;
       expect(result).toBe(false);

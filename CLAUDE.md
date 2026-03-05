@@ -8,7 +8,7 @@ Claude-mem is a Claude Code plugin providing persistent memory across sessions. 
 
 **Your Role**: You are working on the plugin itself. When users interact with Claude Code with this plugin installed, your observations get captured and become their persistent memory.
 
-**Current Version**: See `VERSION` file (currently 10.3.1)
+**Current Version**: See `VERSION` file
 
 ## IMPORTANT: Skills Are Auto-Invoked
 
@@ -199,7 +199,7 @@ npm install is expensive (2-5s). Caching version state and only installing on ch
 ### Why Web-Based Viewer UI
 Real-time visibility into memory stream helps users understand what's being captured and how context is being built. SSE provides instant updates without polling. Self-contained HTML bundle (esbuild) eliminates deployment complexity - everything served from a single file.
 
-## File Locations
+## Core File Locations
 
 **Source**: `<project-root>/src/` - TypeScript source files
 **Built Plugin**: `<project-root>/plugin/` - Compiled JavaScript outputs
@@ -207,6 +207,18 @@ Real-time visibility into memory stream helps users understand what's being capt
 **Database**: `~/.claude-mem/claude-mem.db` - SQLite database with observations, sessions, summaries
 **Chroma Database**: `~/.claude-mem/chroma/` - Vector embeddings for semantic search
 **Usage Logs**: `~/.claude-mem/usage-logs/usage-YYYY-MM-DD.jsonl` - Daily API usage tracking
+
+## Ecosystem Submodules (DO NOT IGNORE)
+- `vscode-extension/` — Visual memory browser
+- `openclaw/` — OpenClaw gateway integration
+- `gemini-cli-extension/` — Gemini Antigravity bridging
+- `opencode-plugin/` — OpenCode integration
+- `cursor-hooks/` — Cursor IDE compatibility
+- `installer/` — Deep cross-platform bootstrap
+- `benchmarks/` — Endurance tests
+- `ragtime/` — External narrative processing
+
+When modifying APIs or memory structures in `src/`, check these submodules for potential breaking changes.
 
 ## Quick Reference
 

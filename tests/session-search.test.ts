@@ -1,32 +1,37 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert';
-import Database from 'better-sqlite3';
+import { Database } from 'bun:sqlite';
 import { SessionSearch } from '../src/services/sqlite/SessionSearch';
 import fs from 'fs';
 import path from 'path';
 
-const TEST_DB_DIR = '/tmp/claude-mem-test';
-const TEST_DB_PATH = path.join(TEST_DB_DIR, 'test.db');
+let TEST_DB_DIR = '';
+let TEST_DB_PATH = '';
+
 
 describe('SessionSearch FTS5 Injection Tests', () => {
   let search: SessionSearch;
-  let db: Database.Database;
+  let db: Database;
 
   // Setup test database before each test
   function setupTestDB() {
+    const TEST_ID = Math.random().toString(36).substring(7);
+    TEST_DB_DIR = `/tmp/claude-mem-test-${TEST_ID}`;
+    TEST_DB_PATH = path.join(TEST_DB_DIR, 'test.db');
+
     // Clean up any existing test database
     if (fs.existsSync(TEST_DB_DIR)) {
-      fs.rmSync(TEST_DB_DIR, { recursive: true, force: true });
+      try { fs.rmSync(TEST_DB_DIR, { recursive: true, force: true }); } catch (e) { /* Windows EBUSY */ }
     }
     fs.mkdirSync(TEST_DB_DIR, { recursive: true });
 
     // Create database with required schema
     db = new Database(TEST_DB_PATH);
-    db.pragma('journal_mode = WAL');
+    db.run('PRAGMA journal_mode = WAL');
 
     // Create minimal schema needed for search tests
     // Note: Using claude_session_id to match SessionSearch expectations
-    db.exec(`
+    db.run(`
       CREATE TABLE sdk_sessions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         claude_session_id TEXT UNIQUE NOT NULL,
@@ -174,16 +179,16 @@ describe('SessionSearch FTS5 Injection Tests', () => {
       search = null;
     }
     if (fs.existsSync(TEST_DB_DIR)) {
-      fs.rmSync(TEST_DB_DIR, { recursive: true, force: true });
+      try { fs.rmSync(TEST_DB_DIR, { recursive: true, force: true }); } catch (e) { /* Windows EBUSY */ }
     }
   }
 
   test('should escape double quotes in search queries', () => {
     search = setupTestDB();
-    
+
     // Insert test data
     const db = new Database(TEST_DB_PATH);
-    db.exec(`
+    db.run(`
       INSERT INTO sdk_sessions (claude_session_id, project) VALUES ('test-session-1', 'test-project');
       INSERT INTO observations (claude_session_id, prompt_number, type, title, narrative, text, facts, concepts, files_read, files_modified, project)
       VALUES ('test-session-1', 1, 'feature', 'Test observation', 'A test "quoted" narrative', 'Some text', '[]', '[]', '[]', '[]', 'test-project');
@@ -192,23 +197,23 @@ describe('SessionSearch FTS5 Injection Tests', () => {
 
     // Test query with double quotes - should not cause injection
     const maliciousQuery = 'test" OR 1=1 --';
-    
+
     // This should not throw an error and should search safely
     const results = search.searchObservations(maliciousQuery);
-    
+
     // With proper escaping, this should return 0 results (no match for the literal string)
     // Without escaping, it could match everything due to OR 1=1
     assert.strictEqual(Array.isArray(results), true, 'Should return an array');
-    
+
     teardownTestDB();
   });
 
   test('should handle FTS5 special operators safely', () => {
     search = setupTestDB();
-    
+
     // Insert test data
     const db = new Database(TEST_DB_PATH);
-    db.exec(`
+    db.run(`
       INSERT INTO sdk_sessions (claude_session_id, project) VALUES ('test-session-2', 'test-project');
       INSERT INTO observations (claude_session_id, prompt_number, type, title, narrative, text, facts, concepts, files_read, files_modified, project)
       VALUES ('test-session-2', 1, 'feature', 'Security feature', 'Implements security', 'Authentication system', '[]', '[]', '[]', '[]', 'test-project');
@@ -228,16 +233,16 @@ describe('SessionSearch FTS5 Injection Tests', () => {
       const results = search.searchObservations(query);
       assert.strictEqual(Array.isArray(results), true, `Should return array for query: ${query}`);
     });
-    
+
     teardownTestDB();
   });
 
   test('should find exact phrase matches when properly escaped', () => {
     search = setupTestDB();
-    
+
     // Insert test data
     const db = new Database(TEST_DB_PATH);
-    db.exec(`
+    db.run(`
       INSERT INTO sdk_sessions (claude_session_id, project) VALUES ('test-session-3', 'test-project');
       INSERT INTO observations (claude_session_id, prompt_number, type, title, narrative, text, facts, concepts, files_read, files_modified, project)
       VALUES ('test-session-3', 1, 'feature', 'Hello world', 'This is a hello world example', 'Hello world program', '[]', '[]', '[]', '[]', 'test-project');
@@ -248,23 +253,23 @@ describe('SessionSearch FTS5 Injection Tests', () => {
 
     // Search for exact phrase
     const results = search.searchObservations('hello world');
-    
+
     assert.strictEqual(Array.isArray(results), true, 'Should return an array');
     assert.ok(results.length > 0, 'Should find at least one result');
     assert.ok(
       results.some(r => r.title?.toLowerCase().includes('hello') || r.narrative?.toLowerCase().includes('hello')),
       'Should find observation with "hello"'
     );
-    
+
     teardownTestDB();
   });
 
   test('should handle empty and special character queries safely', () => {
     search = setupTestDB();
-    
+
     // Insert test data
     const db = new Database(TEST_DB_PATH);
-    db.exec(`
+    db.run(`
       INSERT INTO sdk_sessions (claude_session_id, project) VALUES ('test-session-4', 'test-project');
       INSERT INTO observations (claude_session_id, prompt_number, type, title, narrative, text, facts, concepts, files_read, files_modified, project)
       VALUES ('test-session-4', 1, 'feature', 'Test', 'Test observation', 'Test content', '[]', '[]', '[]', '[]', 'test-project');
@@ -284,16 +289,16 @@ describe('SessionSearch FTS5 Injection Tests', () => {
       const results = search.searchObservations(query);
       assert.strictEqual(Array.isArray(results), true, `Should return array for edge case: "${query}"`);
     });
-    
+
     teardownTestDB();
   });
 
   test('should search session summaries safely', () => {
     search = setupTestDB();
-    
+
     // Insert test data
     const db = new Database(TEST_DB_PATH);
-    db.exec(`
+    db.run(`
       INSERT INTO sdk_sessions (claude_session_id, project) VALUES ('test-session-5', 'test-project');
       INSERT INTO session_summaries (claude_session_id, prompt_number, request, investigated, learned, completed, next_steps, notes, files_read, files_edited, project)
       VALUES ('test-session-5', 1, 'Implement feature', 'Looked into options', 'Learned new approach', 'Completed task', 'Next: testing', 'Notes here', '[]', '[]', 'test-project');
@@ -303,18 +308,18 @@ describe('SessionSearch FTS5 Injection Tests', () => {
     // Test with potential injection
     const maliciousQuery = 'feature" OR type:*';
     const results = search.searchSessions(maliciousQuery);
-    
+
     assert.strictEqual(Array.isArray(results), true, 'Should return an array');
-    
+
     teardownTestDB();
   });
 
   test('should search user prompts safely', () => {
     search = setupTestDB();
-    
+
     // Insert test data
     const db = new Database(TEST_DB_PATH);
-    db.exec(`
+    db.run(`
       INSERT INTO sdk_sessions (claude_session_id, project) VALUES ('test-session-6', 'test-project');
       INSERT INTO user_prompts (claude_session_id, prompt_number, prompt_text)
       VALUES ('test-session-6', 1, 'Please implement authentication');
@@ -324,22 +329,22 @@ describe('SessionSearch FTS5 Injection Tests', () => {
     // Test with potential injection
     const maliciousQuery = 'authentication" AND request:*';
     const results = search.searchUserPrompts(maliciousQuery);
-    
+
     assert.strictEqual(Array.isArray(results), true, 'Should return an array');
-    
+
     teardownTestDB();
   });
 
   test('should filter observations by date range using ISO strings', () => {
     search = setupTestDB();
-    
+
     // Insert test data with specific timestamps
     const db = new Database(TEST_DB_PATH);
     const now = Date.now();
     const yesterday = now - (24 * 60 * 60 * 1000);
     const weekAgo = now - (7 * 24 * 60 * 60 * 1000);
-    
-    db.exec(`
+
+    db.run(`
       INSERT INTO sdk_sessions (claude_session_id, project) VALUES ('test-session-7', 'test-project');
       INSERT INTO observations (claude_session_id, project, type, title, created_at_epoch)
       VALUES 
@@ -352,30 +357,30 @@ describe('SessionSearch FTS5 Injection Tests', () => {
     // Test date range filtering with ISO strings
     const yesterdayISO = new Date(yesterday).toISOString();
     const nowISO = new Date(now).toISOString();
-    
+
     const results = search.searchObservations('feature', {
       dateRange: {
         start: yesterdayISO,
         end: nowISO
       }
     });
-    
+
     assert.strictEqual(results.length, 1, 'Should find only 1 feature in date range');
     assert.strictEqual(results[0].title, 'Recent feature', 'Should find the recent feature');
-    
+
     teardownTestDB();
   });
 
   test('should filter observations by date range using Unix timestamps', () => {
     search = setupTestDB();
-    
+
     // Insert test data with specific timestamps
     const db = new Database(TEST_DB_PATH);
     const now = Date.now();
     const yesterday = now - (24 * 60 * 60 * 1000);
     const weekAgo = now - (7 * 24 * 60 * 60 * 1000);
-    
-    db.exec(`
+
+    db.run(`
       INSERT INTO sdk_sessions (claude_session_id, project) VALUES ('test-session-8', 'test-project');
       INSERT INTO observations (claude_session_id, project, type, title, created_at_epoch)
       VALUES 
@@ -392,22 +397,22 @@ describe('SessionSearch FTS5 Injection Tests', () => {
         end: now
       }
     });
-    
+
     assert.strictEqual(results.length, 1, 'Should find only 1 feature in date range');
     assert.strictEqual(results[0].title, 'Recent feature', 'Should find the recent feature');
-    
+
     teardownTestDB();
   });
 
   test('should filter by type with date range', () => {
     search = setupTestDB();
-    
+
     // Insert test data
     const db = new Database(TEST_DB_PATH);
     const now = Date.now();
     const yesterday = now - (24 * 60 * 60 * 1000);
-    
-    db.exec(`
+
+    db.run(`
       INSERT INTO sdk_sessions (claude_session_id, project) VALUES ('test-session-9', 'test-project');
       INSERT INTO observations (claude_session_id, project, type, title, created_at_epoch)
       VALUES 
@@ -423,20 +428,20 @@ describe('SessionSearch FTS5 Injection Tests', () => {
         end: now + 1000    // Just after now
       }
     });
-    
+
     assert.strictEqual(results.length, 1, 'Should find only 1 bugfix in date range');
     assert.strictEqual(results[0].title, 'Recent bug', 'Should find the recent bug');
-    
+
     teardownTestDB();
   });
 });
 
 describe('SessionSearch FTS5 Migration Tests', () => {
   let search: SessionSearch;
-  let db: Database.Database;
+  let db: Database;
 
-  const TEST_DB_DIR_MIGRATION = '/tmp/claude-mem-test-migration';
-  const TEST_DB_PATH_MIGRATION = path.join(TEST_DB_DIR_MIGRATION, 'test-migration.db');
+  let TEST_DB_DIR_MIGRATION = '';
+  let TEST_DB_PATH_MIGRATION = '';
 
   function teardownMigrationTestDB() {
     if (search) {
@@ -444,22 +449,26 @@ describe('SessionSearch FTS5 Migration Tests', () => {
       search = null;
     }
     if (fs.existsSync(TEST_DB_DIR_MIGRATION)) {
-      fs.rmSync(TEST_DB_DIR_MIGRATION, { recursive: true, force: true });
+      try { fs.rmSync(TEST_DB_DIR_MIGRATION, { recursive: true, force: true }); } catch (e) { /* Windows EBUSY */ }
     }
   }
 
   test('should create all FTS tables when observations_fts exists but session_summaries_fts is missing', () => {
+    const MIGRATION_TEST_ID = Math.random().toString(36).substring(7);
+    TEST_DB_DIR_MIGRATION = `/tmp/claude-mem-test-migration-${MIGRATION_TEST_ID}`;
+    TEST_DB_PATH_MIGRATION = path.join(TEST_DB_DIR_MIGRATION, 'test-migration.db');
+
     // Clean up any existing test database
     if (fs.existsSync(TEST_DB_DIR_MIGRATION)) {
-      fs.rmSync(TEST_DB_DIR_MIGRATION, { recursive: true, force: true });
+      try { fs.rmSync(TEST_DB_DIR_MIGRATION, { recursive: true, force: true }); } catch (e) { /* Windows EBUSY */ }
     }
     fs.mkdirSync(TEST_DB_DIR_MIGRATION, { recursive: true });
 
     // Create database with schema and ONLY observations_fts table (simulate partial migration)
     db = new Database(TEST_DB_PATH_MIGRATION);
-    db.pragma('journal_mode = WAL');
+    db.run('PRAGMA journal_mode = WAL');
 
-    db.exec(`
+    db.run(`
       CREATE TABLE sdk_sessions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         claude_session_id TEXT UNIQUE NOT NULL,
@@ -543,13 +552,13 @@ describe('SessionSearch FTS5 Migration Tests', () => {
     // Verify all FTS tables exist after SessionSearch instantiation
     const tablesAfter = search['db'].prepare("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE '%_fts'").all() as any[];
     const tableNamesAfter = tablesAfter.map((t: any) => t.name);
-    
+
     assert.ok(tableNamesAfter.includes('observations_fts'), 'observations_fts should still exist after');
     assert.ok(tableNamesAfter.includes('session_summaries_fts'), 'session_summaries_fts should be created');
 
     // Verify that session search works now
     const db2 = new Database(TEST_DB_PATH_MIGRATION);
-    db2.exec(`
+    db2.run(`
       INSERT INTO sdk_sessions (claude_session_id, project) VALUES ('test-migration-1', 'test-project');
       INSERT INTO session_summaries (claude_session_id, prompt_number, request, investigated, learned, completed, next_steps, notes, files_read, files_edited, project)
       VALUES ('test-migration-1', 1, 'Fix bug in search', 'Investigated FTS tables', 'Learned about migration', 'Fixed the bug', 'Test thoroughly', 'Notes here', '[]', '[]', 'test-project');

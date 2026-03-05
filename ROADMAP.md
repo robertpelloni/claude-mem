@@ -68,32 +68,30 @@
 - [ ] Configurable compression aggressiveness
 - [ ] Automatic mode switching based on session length
 
-### Phase B: VS Code Extension GA
-- [ ] Complete the VS Code extension
-- [ ] Memory browser panel
-- [ ] Inline observation annotations
-- [ ] Session timeline view
-- [ ] Settings management via extension UI
+### Phase B: Ecosystem Submodules (The Omnipresent Memory API)
+- [ ] **VS Code Extension** (`vscode-extension/`): Move from WIP to GA. Add memory browser panel, inline annotations, timeline view. Publish to marketplace.
+- [ ] **OpenClaw Integration** (`openclaw/`): Finalize the OpenClaw gateway connection to allow external multi-agent orchestrators to read/write memories.
+- [ ] **Gemini CLI Bridge** (`gemini-cli-extension/`): Stabilize the Antigravity engine compatibility layer.
+- [ ] **Cursor Integration** (`cursor-hooks/`): Verify compatibility with the latest Cursor IDE release and build specialized injection routes.
+- [ ] **OpenCode Integration** (`opencode-plugin/`): Document and verify the OpenCode environment plugin.
 
-### Phase C: Cross-Session Intelligence
-- [ ] Correlation engine: link related observations across sessions
-- [ ] Redundant memory defragmentation agent
-- [ ] Automatic HANDOFF.md generation at session end
-- [ ] Historical debt warnings
+### Phase C: Operations & Workflow Automation
+- [ ] **Autonomous Installer** (`installer/`): Provide a deep cross-platform installer that handles SQLite, Node, Bun, and system pathing gracefully.
+- [ ] **End-to-End Benchmarks** (`benchmarks/`): Run heavy endurance and throughput test suites for endless mode context saturation.
+- [ ] **Ragtime Exploration** (`ragtime/`): Integrate external RAG/timeline exploration tools for email and external databases.
+- [ ] **Automated Session Handoffs**: Auto-generate `HANDOFF.md` autonomously at session end.
 
-### Phase D: Advanced Search & Visualization
-- [ ] Interactive 3D context map in web viewer
-- [ ] Graph-based observation relationships
-- [ ] Temporal heatmaps (activity over time)
-- [ ] Export/import memory packs
+### Phase D: Cross-Session Intelligence (The Collective)
+- [ ] **Correlation Engine**: Link related observations across sessions (e.g. bugfix in Session A caused by design in Session B).
+- [ ] **Redundant Memory Defragmentation Agent**: Daemon process that prunes redundant context.
+- [ ] **Historical Debt Warnings**: Proactively warn Claude of architectural drift.
 
-### Phase E: Enterprise & Security
-- [ ] Vault-backed secret masking
-- [ ] Immutable audit trail
-- [ ] Multi-user/team shared memory
-- [ ] Role-based access control
+### Phase E: Advanced Visualization & Analytics
+- [ ] **Interactive 3D Context Map**: Real-time visual graph rendering at localhost:37777.
+- [ ] **Temporal Heatmaps**: Activity grouping over time.
+- [ ] **Memory Pack Export**: Export/share anonymized expert context packs.
 
-### Phase F: Performance
-- [ ] Rust-based local memory gateway (zero-latency hook lifecycle)
-- [ ] WASM-native mem-search plugin (bypass HTTP API)
-- [ ] Streaming observation compression
+### Phase F: Security & Extreme Performance
+- [ ] **Vault-backed Secret Masking**: Strip credentials before SQLite insertion.
+- [ ] **Rust-based Local Memory Gateway**: Replace Node-based hooks with a high-throughput Rust server for zero-latency hook lifecycles.
+- [ ] **WASM-native mem-search**: Bypass HTTP API for in-memory, ultra-fast SQLite search execution.

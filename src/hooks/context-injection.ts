@@ -25,9 +25,50 @@ export async function clearToolInputInTranscript(
 
   try {
     const transcriptContent = await readFile(transcriptPath, 'utf-8');
+
+    // First, try to parse the entire file as a JSON array
+    try {
+      const parsed = JSON.parse(transcriptContent);
+      if (Array.isArray(parsed)) {
+        let modified = false;
+        for (const message of parsed) {
+          if (message.content && Array.isArray(message.content)) {
+            for (const block of message.content) {
+              if (block.type === 'tool_use' && block.id === toolUseId) {
+                if (block.input && Object.keys(block.input).length > 0) {
+                  const inputStr = JSON.stringify(block.input);
+                  tokensSaved = Math.floor(inputStr.length / 4);
+                  block.input = {};
+                  modified = true;
+                }
+              }
+            }
+          } else if (message.message?.content && Array.isArray(message.message?.content)) {
+            // Also handle nested message.content
+            for (const block of message.message.content) {
+              if (block.type === 'tool_use' && block.id === toolUseId) {
+                if (block.input && Object.keys(block.input).length > 0) {
+                  const inputStr = JSON.stringify(block.input);
+                  tokensSaved = Math.floor(inputStr.length / 4);
+                  block.input = {};
+                  modified = true;
+                }
+              }
+            }
+          }
+        }
+
+        if (modified) {
+          await writeFile(transcriptPath, JSON.stringify(parsed, null, 2), 'utf-8');
+        }
+        return tokensSaved;
+      }
+    } catch (e) {
+      // Not a valid JSON array, fallback to JSONL format parsing
+    }
+
     const lines = transcriptContent.trim().split('\n');
 
-    // Parse each JSONL line
     let modified = false;
     const updatedLines: string[] = [];
 
@@ -40,16 +81,23 @@ export async function clearToolInputInTranscript(
       try {
         const message = JSON.parse(line);
 
-        // Check if this message has tool_use content
         if (message.message?.content && Array.isArray(message.message.content)) {
           for (const block of message.message.content) {
             if (block.type === 'tool_use' && block.id === toolUseId) {
               if (block.input && Object.keys(block.input).length > 0) {
-                // Estimate tokens saved (rough: 1 token ≈ 4 chars)
                 const inputStr = JSON.stringify(block.input);
                 tokensSaved = Math.floor(inputStr.length / 4);
-
-                // Clear the input
+                block.input = {};
+                modified = true;
+              }
+            }
+          }
+        } else if (message.content && Array.isArray(message.content)) {
+          for (const block of message.content) {
+            if (block.type === 'tool_use' && block.id === toolUseId) {
+              if (block.input && Object.keys(block.input).length > 0) {
+                const inputStr = JSON.stringify(block.input);
+                tokensSaved = Math.floor(inputStr.length / 4);
                 block.input = {};
                 modified = true;
               }
@@ -59,7 +107,6 @@ export async function clearToolInputInTranscript(
 
         updatedLines.push(JSON.stringify(message));
       } catch (parseError) {
-        // Keep malformed lines as-is
         updatedLines.push(line);
       }
     }

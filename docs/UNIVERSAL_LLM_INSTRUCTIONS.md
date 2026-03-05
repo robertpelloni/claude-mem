@@ -66,7 +66,18 @@ Claude-mem is a **persistent memory compression system** for Claude Code. It cap
 | Database | `src/services/sqlite/` | — | SQLite3 |
 | Vector | `src/services/sync/` | — | Chroma MCP |
 
-## 7. Key Commands
+## 7. Integrated Submodules & Ecosystem
+Claude-mem is not just a plugin; it is a multi-platform ecosystem. The following submodules are critical and MUST be maintained in sync with the core:
+1. **`vscode-extension/`**: VS Code extension displaying the memory stream visualizer.
+2. **`openclaw/`**: Integration gateway for the OpenClaw agent orchestrator.
+3. **`gemini-cli-extension/`**: Gemini CLI (Antigravity engine) compatibility layer.
+4. **`opencode-plugin/`**: Integration for OpenCode environments.
+5. **`cursor-hooks/`**: Compatibility bridge for the Cursor IDE.
+6. **`installer/`**: Cross-platform deep installer and dependency manager.
+7. **`benchmarks/`**: E2E endless mode throughput and load-testing suite.
+8. **`ragtime/`**: External RAG/timeline exploration tools for email and external DBs.
+
+## 8. Key Commands
 
 ```bash
 npm run build              # Compile TypeScript → plugin/

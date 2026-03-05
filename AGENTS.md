@@ -70,22 +70,21 @@ When making changes, update these files as appropriate:
 - `MEMORY.md` — if discovering codebase observations
 - `HANDOFF.md` — at end of session, document findings for next agent
 
-### 9. Key File Locations
-| Path | Purpose |
-|------|---------|
-| `src/` | TypeScript source |
-| `plugin/` | Built JavaScript output |
-| `tests/` | Test files |
-| `docs/` | Documentation |
-| `vscode-extension/` | VS Code extension (WIP) |
-| `openclaw/` | OpenClaw gateway plugin |
-| `gemini-cli-extension/` | Gemini CLI integration |
-| `opencode-plugin/` | OpenCode integration |
-| `cursor-hooks/` | Cursor IDE hooks |
-| `benchmarks/` | Performance benchmarks |
-| `scripts/` | Build and utility scripts |
-| `installer/` | Cross-platform installer |
-| `ragtime/` | Email investigation workflows |
+### 9. System Components & Ecosystem
+Claude-mem contains the core memory engine AND multiple ecosystem integration layers. When modifying core APIs or database structures, you MUST consider impacts on these submodules:
+| Path | Component | Description |
+|------|-----------|-------------|
+| `src/` | Core Engine | Core TypeScript source, hooks, worker Express service |
+| `plugin/` | Core Dist | Built JavaScript output and markdown skills |
+| `tests/` | QA        | Comprehensive test suite |
+| `vscode-extension/`| Ecosystem | Visual memory browser for VS Code users |
+| `openclaw/` | Ecosystem | Integration gateway for OpenClaw orchestrator |
+| `gemini-cli-extension/` | Ecosystem | Memory bridge for Gemini CLI (Antigravity) |
+| `opencode-plugin/` | Ecosystem | Memory tracking for OpenCode environments |
+| `cursor-hooks/` | Ecosystem | Compatibility bridge for Cursor IDE |
+| `benchmarks/` | Operations| Endurance and throughput testing suite |
+| `installer/` | Operations| Cross-platform autonomous setup scripts |
+| `ragtime/` | Workflow | External RAG/timeline analysis tools |
 
 ### 10. Environment
 - **Runtime**: Node.js ≥18, Bun (auto-installed)

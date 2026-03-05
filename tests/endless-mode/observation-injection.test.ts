@@ -5,7 +5,7 @@
  * Validates markdown formatting, transcript clearing, and additionalContext field.
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import { formatObservationAsMarkdown, clearToolInputInTranscript } from '../../src/hooks/context-injection';
 import { ObservationRow } from '../../src/services/sqlite/types';
 import { writeFile, readFile, unlink } from 'fs/promises';

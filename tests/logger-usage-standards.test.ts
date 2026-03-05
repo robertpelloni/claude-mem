@@ -89,7 +89,7 @@ async function findTypeScriptFiles(dir: string): Promise<string[]> {
  * Check if a file should be excluded from logger requirements
  */
 function shouldExclude(filePath: string): boolean {
-  const relativePath = relative(SRC_DIR, filePath);
+  const relativePath = relative(SRC_DIR, filePath).replace(/\\/g, '/');
   return EXCLUDED_PATTERNS.some(pattern => pattern.test(relativePath));
 }
 
@@ -97,7 +97,7 @@ function shouldExclude(filePath: string): boolean {
  * Check if a file is high priority for logging
  */
 function isHighPriority(filePath: string): boolean {
-  const relativePath = relative(SRC_DIR, filePath);
+  const relativePath = relative(SRC_DIR, filePath).replace(/\\/g, '/');
 
   // UI files are never high priority
   if (isUIFile(relativePath)) {
@@ -113,7 +113,7 @@ function isHighPriority(filePath: string): boolean {
 function analyzeFile(filePath: string): FileAnalysis {
   const content = readFileSync(filePath, "utf-8");
   const lines = content.split("\n");
-  const relativePath = relative(PROJECT_ROOT, filePath);
+  const relativePath = relative(PROJECT_ROOT, filePath).replace(/\\/g, '/');
 
   // Check for logger import (handles both .ts and .js extensions in import paths)
   const hasLoggerImport = /import\s+.*logger.*from\s+['"].*logger(\.(js|ts))?['"]/.test(content);

@@ -15,16 +15,19 @@ import type { RouteHandler, ServerOptions } from '../../src/services/server/Serv
 // Spy on logger methods to suppress output during tests
 let loggerSpies: ReturnType<typeof spyOn>[] = [];
 
+// Save original fetch
+const originalFetch = global.fetch;
+
 describe('Server', () => {
   let server: Server;
   let mockOptions: ServerOptions;
 
   beforeEach(() => {
     loggerSpies = [
-      spyOn(logger, 'info').mockImplementation(() => {}),
-      spyOn(logger, 'debug').mockImplementation(() => {}),
-      spyOn(logger, 'warn').mockImplementation(() => {}),
-      spyOn(logger, 'error').mockImplementation(() => {}),
+      spyOn(logger, 'info').mockImplementation(() => { }),
+      spyOn(logger, 'debug').mockImplementation(() => { }),
+      spyOn(logger, 'warn').mockImplementation(() => { }),
+      spyOn(logger, 'error').mockImplementation(() => { }),
     ];
 
     mockOptions = {
@@ -39,6 +42,11 @@ describe('Server', () => {
         lastInteraction: null,
       }),
     };
+
+    // Always use real fetch for server tests
+    if (originalFetch) {
+      global.fetch = originalFetch;
+    }
   });
 
   afterEach(async () => {
@@ -51,6 +59,10 @@ describe('Server', () => {
         // Ignore errors on cleanup
       }
     }
+    if (originalFetch) {
+      global.fetch = originalFetch;
+    }
+
     mock.restore();
   });
 
@@ -204,7 +216,7 @@ describe('Server', () => {
     it('should call setupRoutes on route handler', () => {
       server = new Server(mockOptions);
 
-      const setupRoutesMock = mock(() => {});
+      const setupRoutesMock = mock(() => { });
       const mockRouteHandler: RouteHandler = {
         setupRoutes: setupRoutesMock,
       };
@@ -218,8 +230,8 @@ describe('Server', () => {
     it('should register multiple route handlers', () => {
       server = new Server(mockOptions);
 
-      const handler1Mock = mock(() => {});
-      const handler2Mock = mock(() => {});
+      const handler1Mock = mock(() => { });
+      const handler2Mock = mock(() => { });
 
       const handler1: RouteHandler = { setupRoutes: handler1Mock };
       const handler2: RouteHandler = { setupRoutes: handler2Mock };

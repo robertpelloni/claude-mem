@@ -8,6 +8,7 @@
 import express, { Request, Response } from 'express';
 import path from 'path';
 import { readFileSync, existsSync } from 'fs';
+import { readFile } from 'fs/promises';
 import { logger } from '../../../../utils/logger.js';
 import { getPackageRoot } from '../../../../shared/paths.js';
 import { SSEBroadcaster } from '../../SSEBroadcaster.js';
@@ -31,7 +32,9 @@ export class ViewerRoutes extends BaseRouteHandler {
 
     app.get('/health', this.handleHealth.bind(this));
     app.get('/', this.handleViewerUI.bind(this));
+    app.get('/transcript-viewer', this.handleTranscriptUI.bind(this));
     app.get('/stream', this.handleSSEStream.bind(this));
+    app.get('/api/transcript', this.handleTranscriptAPI.bind(this));
   }
 
   /**
@@ -57,6 +60,28 @@ export class ViewerRoutes extends BaseRouteHandler {
 
     if (!viewerPath) {
       throw new Error('Viewer UI not found at any expected location');
+    }
+
+    const html = readFileSync(viewerPath, 'utf-8');
+    res.setHeader('Content-Type', 'text/html');
+    res.send(html);
+  });
+
+  /**
+   * Serve transcript viewer UI
+   */
+  private handleTranscriptUI = this.wrapHandler((req: Request, res: Response): void => {
+    const packageRoot = getPackageRoot();
+
+    const viewerPaths = [
+      path.join(packageRoot, 'ui', 'transcript-viewer.html'),
+      path.join(packageRoot, 'plugin', 'ui', 'transcript-viewer.html')
+    ];
+
+    const viewerPath = viewerPaths.find(p => existsSync(p));
+
+    if (!viewerPath) {
+      throw new Error('Transcript Viewer UI not found at any expected location');
     }
 
     const html = readFileSync(viewerPath, 'utf-8');
@@ -92,5 +117,45 @@ export class ViewerRoutes extends BaseRouteHandler {
       isProcessing,
       queueDepth
     });
+  });
+
+  /**
+   * Transcript API (serves JSONL messages)
+   */
+  private handleTranscriptAPI = this.wrapHandler(async (req: Request, res: Response): Promise<void> => {
+    const transcriptPath = req.query.path as string;
+
+    if (!transcriptPath) {
+      res.status(400).json({ error: 'Missing transcript path parameter' });
+      return;
+    }
+
+    if (!existsSync(transcriptPath)) {
+      res.status(404).json({ error: 'Transcript not found or inaccessible.' });
+      return;
+    }
+
+    try {
+      const content = await readFile(transcriptPath, 'utf-8');
+
+      // Parse as JSON array first, fallback to line-delimited JSONL
+      let messages = [];
+      try {
+        messages = JSON.parse(content);
+        if (!Array.isArray(messages)) messages = [messages];
+      } catch (e) {
+        messages = content.split('\n')
+          .filter(line => line.trim())
+          .map(line => {
+            try { return JSON.parse(line); } catch { return null; }
+          })
+          .filter(Boolean);
+      }
+
+      res.json({ messages });
+    } catch (e) {
+      logger.error('ViewerRoutes' as any, 'Failed to read transcript', { error: String(e) });
+      res.status(500).json({ error: 'Failed to read transcript file' });
+    }
   });
 }
