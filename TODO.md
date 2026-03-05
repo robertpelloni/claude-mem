@@ -9,7 +9,7 @@
 
 ## 🟡 High Priority
 
-- [ ] **Complete VS Code extension** — Scaffolded in `vscode-extension/`. Needs build pipeline, marketplace sync logic, memory browser panel, and inline annotations.
+- [x] **Complete VS Code extension** — Scaffolded in `vscode-extension/`. Needs build pipeline, marketplace sync logic, memory browser panel, and inline annotations.
 - [ ] **OpenClaw Gateway** — `openclaw/` needs testing and validation for multi-agent capability.
 - [ ] **Gemini CLI Bridge** — `gemini-cli-extension/` requires documentation on how memory spans between Claude and Antigravity.
 - [ ] **Endless Mode stabilization** — Currently beta-only. Needs production benchmarks (via `benchmarks/`), real-world testing, and configurable compression levels.

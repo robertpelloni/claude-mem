@@ -6,6 +6,8 @@
 import * as vscode from 'vscode';
 import { SessionManager } from './session-manager';
 import * as workerClient from './worker-client';
+import { MemoryViewerPanel } from './memory-viewer-panel';
+import { MemoryCodeLensProvider } from './codelens-provider';
 
 let sessionManager: SessionManager;
 let statusBarItem: vscode.StatusBarItem;
@@ -28,6 +30,12 @@ export async function activate(context: vscode.ExtensionContext) {
 
   // Setup status bar
   setupStatusBar(context);
+
+  // Register CodeLens Provider
+  const codeLensProvider = new MemoryCodeLensProvider();
+  context.subscriptions.push(
+    vscode.languages.registerCodeLensProvider({ scheme: 'file' }, codeLensProvider)
+  );
 
   // Start worker health checks
   startWorkerHealthChecks();
@@ -93,7 +101,10 @@ function registerTools(context: vscode.ExtensionContext) {
 
   // Tool 2: mem_user_prompt_log
   const promptLogTool = vscode.lm.registerTool('mem_user_prompt_log', {
-    prepareInvocation: async (options, token) => {
+    prepareInvocation: async (
+      options: vscode.LanguageModelToolInvocationPrepareOptions<{ prompt: string; }>,
+      token: vscode.CancellationToken
+    ) => {
       return {
         invocationMessage: 'Logging user prompt to memory'
       };
@@ -135,7 +146,15 @@ function registerTools(context: vscode.ExtensionContext) {
 
   // Tool 3: mem_observation_record
   const observationTool = vscode.lm.registerTool('mem_observation_record', {
-    prepareInvocation: async (options, token) => {
+    prepareInvocation: async (
+      options: vscode.LanguageModelToolInvocationPrepareOptions<{
+        tool_name: string;
+        tool_input: string;
+        tool_response: string;
+        cwd?: string;
+      }>,
+      token: vscode.CancellationToken
+    ) => {
       return {
         invocationMessage: 'Recording observation to memory'
       };
@@ -186,7 +205,10 @@ function registerTools(context: vscode.ExtensionContext) {
 
   // Tool 4: mem_summary_finalize
   const summaryTool = vscode.lm.registerTool('mem_summary_finalize', {
-    prepareInvocation: async (options, token) => {
+    prepareInvocation: async (
+      options: vscode.LanguageModelToolInvocationPrepareOptions<{ last_user_message?: string; }>,
+      token: vscode.CancellationToken
+    ) => {
       return {
         invocationMessage: 'Generating session summary'
       };
@@ -231,7 +253,10 @@ function registerTools(context: vscode.ExtensionContext) {
 
   // Tool 5: mem_session_cleanup
   const cleanupTool = vscode.lm.registerTool('mem_session_cleanup', {
-    prepareInvocation: async (options, token) => {
+    prepareInvocation: async (
+      options: vscode.LanguageModelToolInvocationPrepareOptions<{ reason?: string; }>,
+      token: vscode.CancellationToken
+    ) => {
       return {
         invocationMessage: 'Cleaning up memory session',
         confirmationMessages: {
@@ -289,7 +314,7 @@ function registerCommands(context: vscode.ExtensionContext) {
       vscode.window.showWarningMessage(
         '⚠️ Claude-mem worker is not responding',
         'Restart Worker'
-      ).then(selection => {
+      ).then((selection: string | undefined) => {
         if (selection === 'Restart Worker') {
           vscode.commands.executeCommand('claudeMem.restartWorker');
         }
@@ -308,8 +333,7 @@ function registerCommands(context: vscode.ExtensionContext) {
 
   // Open viewer
   const openViewerCmd = vscode.commands.registerCommand('claudeMem.openViewer', () => {
-    const url = workerClient.getViewerUrl();
-    vscode.env.openExternal(vscode.Uri.parse(url));
+    MemoryViewerPanel.createOrShow(context.extensionUri);
   });
 
   // Open settings

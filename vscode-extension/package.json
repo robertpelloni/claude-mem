@@ -19,7 +19,6 @@
     "ai",
     "claude"
   ],
-  "icon": "icon.png",
   "activationEvents": [
     "onLanguageModelTool:mem_session_init",
     "onLanguageModelTool:mem_user_prompt_log",
@@ -234,7 +233,9 @@
     "build": "node build.mjs",
     "watch": "node build.mjs --watch",
     "lint": "eslint src --ext ts",
-    "test": "node ./out/test/runTest.js"
+    "test": "node ./out/test/runTest.js",
+    "package": "vsce package",
+    "publish": "vsce publish"
   },
   "devDependencies": {
     "@types/mocha": "^10.x",
@@ -257,8 +258,5 @@
   },
   "bugs": {
     "url": "https://github.com/thedotmack/claude-mem/issues"
-  },
-  "dependencies": {
-    "better-sqlite3": "^11.0.0"
   }
 }

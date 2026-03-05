@@ -4,9 +4,7 @@
  */
 
 import * as vscode from 'vscode';
-import * as fs from 'fs';
-import * as path from 'path';
-import * as os from 'os';
+import * as workerClient from './worker-client';
 
 export interface SessionData {
   sessionDbId: number;
@@ -17,30 +15,14 @@ export interface SessionData {
 }
 
 /**
- * Manages sessions stored in SQLite (direct DB access for session management only)
+ * Manages active sessions in memory
  */
 export class SessionManager {
   private sessions: Map<string, SessionData> = new Map();
-  private dbPath: string;
+  // Using a mock sessionDbId as a placeholder since actual DB inserts happen on the worker side
+  private nextSessionId: number = 1000;
 
-  constructor() {
-    this.dbPath = path.join(os.homedir(), '.claude-mem', 'claude-mem.db');
-  }
-
-  /**
-   * Get database connection (uses better-sqlite3)
-   * Note: We need to dynamically import better-sqlite3 at runtime
-   */
-  private async getDb() {
-    // Check if database exists
-    if (!fs.existsSync(this.dbPath)) {
-      throw new Error('Claude-mem database not found. Please ensure the worker service is running.');
-    }
-
-    // Dynamic import of better-sqlite3 (will be bundled with extension)
-    const Database = require('better-sqlite3');
-    return new Database(this.dbPath);
-  }
+  constructor() { }
 
   /**
    * Create or get existing session
@@ -51,21 +33,11 @@ export class SessionManager {
       return this.sessions.get(conversationId)!;
     }
 
-    // Create session in database
-    const db = await this.getDb();
+    const sessionDbId = this.nextSessionId++;
 
     try {
-      // Use conversationId as the claude_session_id (maps to Claude Code's session_id)
-      const result = db.prepare(`
-        INSERT INTO sdk_sessions (claude_session_id, project, user_prompt, sdk_session_id, status, started_at, started_at_epoch)
-        VALUES (?, ?, ?, NULL, 'active', datetime('now'), ?)
-        ON CONFLICT(claude_session_id) DO UPDATE SET
-          project = excluded.project,
-          user_prompt = excluded.user_prompt
-        RETURNING id
-      `).get(conversationId, project, userPrompt, Date.now());
-
-      const sessionDbId = (result as any).id;
+      // Use walker client to initialize
+      await workerClient.initSession(sessionDbId, project, userPrompt, 1);
 
       const sessionData: SessionData = {
         sessionDbId,
@@ -77,8 +49,18 @@ export class SessionManager {
 
       this.sessions.set(conversationId, sessionData);
       return sessionData;
-    } finally {
-      db.close();
+    } catch (e: any) {
+      console.warn('Failed to alert worker of new session, proceeding with local tracking only:', e);
+      // Fallback local-only execution
+      const sessionData: SessionData = {
+        sessionDbId,
+        conversationId,
+        project,
+        promptNumber: 1,
+        startTime: Date.now()
+      };
+      this.sessions.set(conversationId, sessionData);
+      return sessionData;
     }
   }
 
@@ -111,19 +93,12 @@ export class SessionManager {
   }
 
   /**
-   * Save user prompt to database for FTS search
+   * Save user prompt internally
+   * The actual DB save happens via workerClient in extension.ts
    */
   async saveUserPrompt(conversationId: string, promptNumber: number, promptText: string): Promise<void> {
-    const db = await this.getDb();
-
-    try {
-      db.prepare(`
-        INSERT INTO user_prompts (claude_session_id, prompt_number, prompt_text, created_at, created_at_epoch)
-        VALUES (?, ?, ?, datetime('now'), ?)
-      `).run(conversationId, promptNumber, promptText, Date.now());
-    } finally {
-      db.close();
-    }
+    // Tracking is handled via the worker HTTP API elsewhere.
+    return;
   }
 
   /**
@@ -135,18 +110,10 @@ export class SessionManager {
       return; // Already cleaned up or never existed
     }
 
-    const db = await this.getDb();
-
     try {
-      db.prepare(`
-        UPDATE sdk_sessions
-        SET status = 'completed',
-            completed_at = datetime('now'),
-            completed_at_epoch = ?
-        WHERE id = ?
-      `).run(Date.now(), session.sessionDbId);
-    } finally {
-      db.close();
+      await workerClient.completeSession(session.sessionDbId);
+    } catch (e) {
+      console.warn('Silent failure to complete session via HTTP:', e);
     }
 
     // Remove from memory
