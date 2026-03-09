@@ -9,7 +9,7 @@
 
 import { DatabaseManager } from './DatabaseManager.js';
 import { logger } from '../../utils/logger.js';
-import type { ViewerSettings } from '../worker-types.js';
+import type { ViewerSettings } from "../../types/index.js";
 
 export class SettingsManager {
   private dbManager: DatabaseManager;

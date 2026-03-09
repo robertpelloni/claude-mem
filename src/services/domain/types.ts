@@ -60,6 +60,9 @@ export interface ModePrompts {
   summary_context_label: string;      // Label for Claude's response section (e.g., "Claude's Full Response to User:")
   summary_format_instruction: string; // Instruction to use XML format (e.g., "Respond in this XML format:")
   summary_footer: string;             // Footer with closing instructions and language requirement
+
+  // Endless Mode Prompts
+  compression_guidances?: Record<string, string>; // Dynamic instructions based on Endless Mode Compression (e.g. low, medium, high, extreme)
 }
 
 export interface ModeConfig {

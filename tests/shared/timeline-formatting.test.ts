@@ -24,7 +24,7 @@ describe('extractFirstFile', () => {
   it('should return first modified file as relative path', () => {
     const filesModified = JSON.stringify(['/Users/test/project/src/app.ts', '/Users/test/project/src/utils.ts']);
 
-    const result = extractFirstFile(filesModified, cwd);
+    const result = extractFirstFile(filesModified, cwd).replace(/\\/g, '/');
 
     expect(result).toBe('src/app.ts');
   });
@@ -33,7 +33,7 @@ describe('extractFirstFile', () => {
     const filesModified = JSON.stringify([]);
     const filesRead = JSON.stringify(['/Users/test/project/README.md']);
 
-    const result = extractFirstFile(filesModified, cwd, filesRead);
+    const result = extractFirstFile(filesModified, cwd, filesRead).replace(/\\/g, '/');
 
     expect(result).toBe('README.md');
   });
@@ -57,7 +57,7 @@ describe('extractFirstFile', () => {
     const filesModified = 'invalid json {]';
     const filesRead = JSON.stringify(['/Users/test/project/config.json']);
 
-    const result = extractFirstFile(filesModified, cwd, filesRead);
+    const result = extractFirstFile(filesModified, cwd, filesRead).replace(/\\/g, '/');
 
     expect(result).toBe('config.json');
   });
@@ -65,7 +65,7 @@ describe('extractFirstFile', () => {
   it('should return relative path (not absolute) for files inside cwd', () => {
     const filesModified = JSON.stringify(['/Users/test/project/deeply/nested/file.ts']);
 
-    const result = extractFirstFile(filesModified, cwd);
+    const result = extractFirstFile(filesModified, cwd).replace(/\\/g, '/');
 
     expect(result).toBe('deeply/nested/file.ts');
     expect(result).not.toContain('/Users/test/project');
@@ -74,7 +74,7 @@ describe('extractFirstFile', () => {
   it('should handle files that are already relative paths', () => {
     const filesModified = JSON.stringify(['src/component.tsx']);
 
-    const result = extractFirstFile(filesModified, cwd);
+    const result = extractFirstFile(filesModified, cwd).replace(/\\/g, '/');
 
     expect(result).toBe('src/component.tsx');
   });

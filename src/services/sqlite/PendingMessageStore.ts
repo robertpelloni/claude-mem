@@ -1,5 +1,5 @@
 import { Database } from './sqlite-compat.js';
-import type { PendingMessage } from '../worker-types.js';
+import type { PendingMessage } from "../../types/index.js";
 import { logger } from '../../utils/logger.js';
 
 /** Messages processing longer than this are considered stale and reset to pending by self-healing */

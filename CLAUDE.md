@@ -152,9 +152,8 @@ Changes to React components, styles, or viewer logic require rebuilding and rest
 
 ### Modifying Database Schema
 1. Update schema in `src/services/sqlite/schema.ts`
-2. Update SessionStore/SessionSearch classes
-3. Migration strategy: The plugin currently recreates on schema changes (acceptable for alpha)
-4. TODO: Add proper migrations for production
+2. Never store secrets in logs or SQLite
+3. Migration strategy: Migrations are handled idempotently via `MigrationRunner` in `src/services/sqlite/migrations/runner.ts`
 
 ### Debugging Worker Issues
 ```bash

@@ -14,7 +14,7 @@ import { describe, it, expect, mock } from 'bun:test';
 // Import directly from specific files to avoid worker-service import chain
 import { cleanupProcessedMessages } from '../../../src/services/worker/agents/SessionCleanupHelper.js';
 import type { WorkerRef } from '../../../src/services/worker/agents/types.js';
-import type { ActiveSession } from '../../../src/services/worker-types.js';
+import type { ActiveSession } from "../../../src/types/index.js";
 
 describe('SessionCleanupHelper', () => {
   // Helper to create a minimal mock session

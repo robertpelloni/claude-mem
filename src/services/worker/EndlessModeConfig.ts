@@ -17,6 +17,7 @@ export interface EndlessModeConfigType {
   keepRecentToolUses: number;
   maxToolHistoryMB: number;
   enableSynchronousMode: boolean;
+  compressionLevel: string;
 }
 
 function getBooleanSetting(settingsValue: any, envValue: string | undefined, defaultValue: boolean): boolean {
@@ -94,13 +95,18 @@ export function getConfig(): EndlessModeConfigType {
     enabled  // Default to same as Endless Mode enabled state
   );
 
+  const compressionLevel = settings.env?.CLAUDE_MEM_ENDLESS_COMPRESSION
+    || process.env.CLAUDE_MEM_ENDLESS_COMPRESSION
+    || 'auto';
+
   const config = {
     enabled,
     fallbackToOriginal,
     maxLookupTime,
     keepRecentToolUses,
     maxToolHistoryMB,
-    enableSynchronousMode
+    enableSynchronousMode,
+    compressionLevel
   };
 
   if (enabled) {
@@ -109,7 +115,8 @@ export function getConfig(): EndlessModeConfigType {
       maxLookupTime: `${maxLookupTime}ms`,
       keepRecent: keepRecentToolUses,
       maxToolHistoryMB: `${maxToolHistoryMB}MB`,
-      syncMode: enableSynchronousMode
+      syncMode: enableSynchronousMode,
+      compression: compressionLevel
     });
   } else {
     logger.debug('CONFIG', 'Endless Mode disabled');

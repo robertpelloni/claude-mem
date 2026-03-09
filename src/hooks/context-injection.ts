@@ -1,3 +1,4 @@
+import { logger } from '../utils/logger.js';
 /**
  * Context Injection Utilities
  *
@@ -8,6 +9,8 @@
 
 import { readFile, writeFile } from 'fs/promises';
 import { ObservationRow } from '../services/sqlite/types.js';
+import { SessionStore } from '../services/sqlite/SessionStore.js';
+import * as path from 'path';
 
 /**
  * Clears the tool input for a specific tool_use_id in the transcript.
@@ -189,4 +192,67 @@ export function formatObservationAsMarkdown(obs: ObservationRow): string {
   markdown += `Read: ~${Math.ceil((obs.text?.length || 0) / 4)}, Work: 🔍 ${obs.discovery_tokens}`;
 
   return `<claude-mem-context>\n${markdown.trim()}\n</claude-mem-context>`;
+}
+
+/**
+ * Returns historical warnings for the specified workspace files
+ */
+export function getDebtWarningsForFiles(files: string[], project: string, cwd: string): string | null {
+  if (!files || files.length === 0) return null;
+  const db = new SessionStore();
+
+  try {
+    const observations = db.db.prepare(`
+      SELECT * FROM observations
+      WHERE project = ? AND type IN ('bugfix', 'decision')
+      ORDER BY created_at_epoch DESC
+      LIMIT 100
+    `).all(project) as ObservationRow[];
+
+    if (observations.length === 0) return null;
+
+    const warnings: string[] = [];
+    const usedObsIds = new Set<number>();
+
+    for (const file of files) {
+      const relativeFile = path.isAbsolute(file) ? path.relative(cwd, file) : file;
+
+      const fileWarnings = observations.filter(obs => {
+        if (usedObsIds.has(obs.id)) return false;
+        try {
+          const modified = JSON.parse(obs.files_modified || '[]');
+          const read = JSON.parse(obs.files_read || '[]');
+
+          const isMatch = [...modified, ...read].some(storedPath =>
+            storedPath === relativeFile ||
+            storedPath.endsWith(relativeFile.replace(/\\\\/g, '/')) ||
+            relativeFile.endsWith(storedPath.replace(/\\\\/g, '/'))
+          );
+          return isMatch;
+        } catch {
+          return false;
+        }
+      });
+
+      if (fileWarnings.length > 0) {
+        warnings.push(`\n**Historical warnings for \`${relativeFile}\`:**`);
+        for (const obs of fileWarnings.slice(0, 3)) { // max 3 per file
+          usedObsIds.add(obs.id);
+          const emoji = obs.type === 'bugfix' ? '🔴' : '🧠';
+          const details = obs.subtitle ? obs.subtitle : (obs.narrative ? obs.narrative.slice(0, 100) + '...' : '');
+          warnings.push(`- [${emoji} ${obs.type.toUpperCase()}] **${obs.title}**: ${details}`);
+        }
+      }
+    }
+
+    if (warnings.length > 0) {
+      return `\n# ⚠️ Historical Context Inject\n${warnings.join('\n')}\n---`;
+    }
+    return null;
+
+  } catch (err) {
+    return null;
+  } finally {
+    db.close();
+  }
 }

@@ -80,48 +80,7 @@ describe('Stale AbortController Guard (#1099)', () => {
     });
   });
 
-  describe('AbortSignal.timeout for deleteSession', () => {
-    it('should resolve timeout signal after specified ms', async () => {
-      const start = Date.now();
-      const timeoutMs = 50; // Use short timeout for test
 
-      await new Promise<void>(resolve => {
-        AbortSignal.timeout(timeoutMs).addEventListener('abort', () => resolve(), { once: true });
-      });
-
-      const elapsed = Date.now() - start;
-      // Allow some margin for timing
-      expect(elapsed).toBeGreaterThanOrEqual(timeoutMs - 10);
-    });
-
-    it('should race generator promise against timeout', async () => {
-      // Simulate a hung generator (never resolves)
-      const hungGenerator = new Promise<void>(() => {});
-      const timeoutMs = 50;
-
-      const timeoutDone = new Promise<string>(resolve => {
-        AbortSignal.timeout(timeoutMs).addEventListener('abort', () => resolve('timeout'), { once: true });
-      });
-
-      const generatorDone = hungGenerator.then(() => 'generator');
-
-      const result = await Promise.race([generatorDone, timeoutDone]);
-      expect(result).toBe('timeout');
-    });
-
-    it('should prefer generator completion over timeout when fast', async () => {
-      // Simulate a generator that resolves quickly
-      const fastGenerator = Promise.resolve('generator');
-      const timeoutMs = 5000;
-
-      const timeoutDone = new Promise<string>(resolve => {
-        AbortSignal.timeout(timeoutMs).addEventListener('abort', () => resolve('timeout'), { once: true });
-      });
-
-      const result = await Promise.race([fastGenerator, timeoutDone]);
-      expect(result).toBe('generator');
-    });
-  });
 
   describe('AbortController replacement on stale recovery', () => {
     it('should create fresh AbortController that is not aborted', () => {

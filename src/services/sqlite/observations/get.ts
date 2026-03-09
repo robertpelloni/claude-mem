@@ -31,7 +31,7 @@ export function getObservationsByIds(
 ): ObservationRecord[] {
   if (ids.length === 0) return [];
 
-  const { orderBy = 'date_desc', limit, project, type, concepts, files } = options;
+  const { orderBy = 'date_desc', limit, project, type, concepts, files, branch_id } = options;
   const orderClause = orderBy === 'date_asc' ? 'ASC' : 'DESC';
   const limitClause = limit ? `LIMIT ${limit}` : '';
 
@@ -44,6 +44,12 @@ export function getObservationsByIds(
   if (project) {
     additionalConditions.push('project = ?');
     params.push(project);
+  }
+
+  // Apply branch filter
+  if (branch_id) {
+    additionalConditions.push('branch_id = ?');
+    params.push(branch_id);
   }
 
   // Apply type filter
@@ -100,14 +106,23 @@ export function getObservationsByIds(
  */
 export function getObservationsForSession(
   db: Database,
-  memorySessionId: string
+  memorySessionId: string,
+  branch_id?: string
 ): ObservationSessionRow[] {
-  const stmt = db.prepare(`
-    SELECT title, subtitle, type, prompt_number
-    FROM observations
-    WHERE memory_session_id = ?
-    ORDER BY created_at_epoch ASC
-  `);
+  const query = branch_id
+    ? `
+      SELECT title, subtitle, type, prompt_number
+      FROM observations
+      WHERE memory_session_id = ? AND branch_id = ?
+      ORDER BY created_at_epoch ASC
+    `
+    : `
+      SELECT title, subtitle, type, prompt_number
+      FROM observations
+      WHERE memory_session_id = ?
+      ORDER BY created_at_epoch ASC
+    `;
 
-  return stmt.all(memorySessionId) as ObservationSessionRow[];
+  const stmt = db.prepare(query);
+  return (branch_id ? stmt.all(memorySessionId, branch_id) : stmt.all(memorySessionId)) as ObservationSessionRow[];
 }

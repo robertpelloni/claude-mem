@@ -185,7 +185,7 @@ export class SessionRoutes extends BaseRouteHandler {
       .catch(error => {
         // Only log non-abort errors
         if (session.abortController.signal.aborted) return;
-        
+
         logger.error('SESSION', `Generator failed`, {
           sessionId: session.sessionDbId,
           provider: provider,
@@ -642,19 +642,22 @@ export class SessionRoutes extends BaseRouteHandler {
    * Fixes Issue #842: Sessions stay in map forever, reaper thinks all active.
    */
   private handleCompleteByClaudeId = this.wrapHandler(async (req: Request, res: Response): Promise<void> => {
-    const { contentSessionId } = req.body;
+    const { contentSessionId, claudeSessionId, cwd } = req.body;
 
-    logger.info('HTTP', '→ POST /api/sessions/complete', { contentSessionId });
+    // cleanup-hook sends claudeSessionId, plugin SDK might send contentSessionId
+    const targetSessionId = contentSessionId || claudeSessionId;
 
-    if (!contentSessionId) {
-      return this.badRequest(res, 'Missing contentSessionId');
+    logger.info('HTTP', '→ POST /api/sessions/complete', { targetSessionId, cwd });
+
+    if (!targetSessionId) {
+      return this.badRequest(res, 'Missing contentSessionId or claudeSessionId');
     }
 
     const store = this.dbManager.getSessionStore();
 
-    // Look up sessionDbId from contentSessionId (createSDKSession is idempotent)
+    // Look up sessionDbId from targetSessionId (createSDKSession is idempotent)
     // Pass empty strings - we only need the ID lookup, not to create a new session
-    const sessionDbId = store.createSDKSession(contentSessionId, '', '');
+    const sessionDbId = store.createSDKSession(targetSessionId, '', '');
 
     // Check if session is in the active sessions map
     const activeSession = this.sessionManager.getSession(sessionDbId);
@@ -669,11 +672,12 @@ export class SessionRoutes extends BaseRouteHandler {
     }
 
     // Complete the session (removes from active sessions map)
-    await this.completionHandler.completeByDbId(sessionDbId);
+    await this.completionHandler.completeByDbId(sessionDbId, cwd);
 
     logger.info('SESSION', 'Session completed via API', {
-      contentSessionId,
-      sessionDbId
+      targetSessionId,
+      sessionDbId,
+      cwd
     });
 
     res.json({ status: 'completed', sessionDbId });

@@ -5,11 +5,38 @@
  * Source: src/utils/project-filter.ts
  */
 
-import { describe, it, expect } from 'bun:test';
+import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import { isProjectExcluded } from '../../src/utils/project-filter.js';
 import { homedir } from 'os';
 
 describe('Project Filter', () => {
+  let originalEnv: Record<string, string | undefined> = {};
+
+  beforeEach(() => {
+    // Save all CLAUDE_MEM_ env vars and delete them to prevent test pollution
+    originalEnv = {};
+    for (const key of Object.keys(process.env)) {
+      if (key.startsWith('CLAUDE_MEM_') || key === 'HOME' || key === 'USERPROFILE') {
+        originalEnv[key] = process.env[key];
+        delete process.env[key];
+      }
+    }
+  });
+
+  afterEach(() => {
+    // Restore original env vars
+    for (const key of Object.keys(process.env)) {
+      if (key.startsWith('CLAUDE_MEM_') || key === 'HOME' || key === 'USERPROFILE') {
+        delete process.env[key];
+      }
+    }
+    for (const [key, value] of Object.entries(originalEnv)) {
+      if (value !== undefined) {
+        process.env[key] = value;
+      }
+    }
+  });
+
   describe('isProjectExcluded', () => {
     describe('with empty patterns', () => {
       it('returns false for empty pattern string', () => {

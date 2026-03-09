@@ -83,6 +83,7 @@ export class MigrationRunner {
         type TEXT NOT NULL,
         created_at TEXT NOT NULL,
         created_at_epoch INTEGER NOT NULL,
+        branch_id TEXT DEFAULT 'main' NOT NULL,
         FOREIGN KEY(memory_session_id) REFERENCES sdk_sessions(memory_session_id) ON DELETE CASCADE ON UPDATE CASCADE
       );
 
@@ -335,6 +336,7 @@ export class MigrationRunner {
         prompt_number INTEGER,
         created_at TEXT NOT NULL,
         created_at_epoch INTEGER NOT NULL,
+        branch_id TEXT DEFAULT 'main' NOT NULL,
         FOREIGN KEY(memory_session_id) REFERENCES sdk_sessions(memory_session_id) ON DELETE CASCADE
       )
     `);
@@ -344,7 +346,7 @@ export class MigrationRunner {
       INSERT INTO observations_new
       SELECT id, memory_session_id, project, text, type, title, subtitle, facts,
              narrative, concepts, files_read, files_modified, prompt_number,
-             created_at, created_at_epoch
+             created_at, created_at_epoch, branch_id
       FROM observations
     `);
 
@@ -683,6 +685,7 @@ export class MigrationRunner {
           discovery_tokens INTEGER DEFAULT 0,
           created_at TEXT NOT NULL,
           created_at_epoch INTEGER NOT NULL,
+          branch_id TEXT DEFAULT 'main' NOT NULL,
           FOREIGN KEY(memory_session_id) REFERENCES sdk_sessions(memory_session_id) ON DELETE CASCADE ON UPDATE CASCADE
         )
       `);
@@ -691,7 +694,7 @@ export class MigrationRunner {
         INSERT INTO observations_new
         SELECT id, memory_session_id, project, text, type, title, subtitle, facts,
                narrative, concepts, files_read, files_modified, prompt_number,
-               discovery_tokens, created_at, created_at_epoch
+               discovery_tokens, created_at, created_at_epoch, branch_id
         FROM observations
       `);
 

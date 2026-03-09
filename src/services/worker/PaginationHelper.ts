@@ -9,7 +9,7 @@
 
 import { DatabaseManager } from './DatabaseManager.js';
 import { logger } from '../../utils/logger.js';
-import type { PaginatedResult, Observation, Summary, UserPrompt } from '../worker-types.js';
+import type { PaginatedResult, Observation, Summary, UserPrompt } from "../../types/index.js";
 
 export class PaginationHelper {
   private dbManager: DatabaseManager;

@@ -11,7 +11,8 @@ export interface BinaryInfo {
 export function findBinary(name: string, extraPaths: string[] = []): BinaryInfo {
   // Check PATH first
   if (commandExists(name)) {
-    const result = runCommand('which', [name]);
+    const checkCmd = detectOS() === 'windows' ? 'where' : 'which';
+    const result = runCommand(checkCmd, [name]);
     const versionResult = runCommand(name, ['--version']);
     return {
       found: true,

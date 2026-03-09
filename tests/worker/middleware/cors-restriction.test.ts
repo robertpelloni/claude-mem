@@ -99,10 +99,10 @@ describe('CORS Restriction', () => {
         res.json({ ok: true });
       });
 
-      testPort = 41000 + Math.floor(Math.random() * 10000);
       await new Promise<void>((resolve) => {
-        server = app.listen(testPort, '127.0.0.1', resolve);
+        server = app.listen(0, '127.0.0.1', resolve);
       });
+      testPort = (server.address() as any).port;
     });
 
     afterEach(async () => {

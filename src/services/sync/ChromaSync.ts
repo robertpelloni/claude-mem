@@ -40,6 +40,7 @@ interface StoredObservation {
   discovery_tokens: number; // ROI metrics
   created_at: string;
   created_at_epoch: number;
+  branch_id: string;
 }
 
 interface StoredSummary {
@@ -135,7 +136,8 @@ export class ChromaSync {
       project: obs.project,
       created_at_epoch: obs.created_at_epoch,
       type: obs.type || 'discovery',
-      title: obs.title || 'Untitled'
+      title: obs.title || 'Untitled',
+      branch_id: obs.branch_id || 'main'
     };
 
     // Add optional metadata fields
@@ -327,7 +329,8 @@ export class ChromaSync {
       prompt_number: promptNumber,
       discovery_tokens: discoveryTokens,
       created_at: new Date(createdAtEpoch * 1000).toISOString(),
-      created_at_epoch: createdAtEpoch
+      created_at_epoch: createdAtEpoch,
+      branch_id: (obs as any).branch_id || 'main' // Fallback for parsed observation
     };
 
     const documents = this.formatObservationDocs(stored);
@@ -687,17 +690,34 @@ export class ChromaSync {
   async queryChroma(
     query: string,
     limit: number,
-    whereFilter?: Record<string, any>
+    whereFilter?: Record<string, any>,
+    branchIdFilter?: string | string[]
   ): Promise<{ ids: number[]; distances: number[]; metadatas: any[] }> {
     await this.ensureCollectionExists();
 
     try {
       const chromaMcp = ChromaMcpManager.getInstance();
+
+      // Combine where constraints with branch filter if provided
+      let finalWhere = whereFilter ? { ...whereFilter } : {};
+      
+      if (branchIdFilter) {
+        if (Array.isArray(branchIdFilter)) {
+          // If multiple branches (ancestors), use $in operator (assuming Chroma supports it via MCP)
+          if (branchIdFilter.length === 1) {
+            finalWhere.branch_id = branchIdFilter[0];
+          } else {
+            finalWhere.branch_id = { $in: branchIdFilter };
+          }
+        } else {
+          finalWhere.branch_id = branchIdFilter;
+        }
+      }
       const results = await chromaMcp.callTool('chroma_query_documents', {
         collection_name: this.collectionName,
         query_texts: [query],
         n_results: limit,
-        ...(whereFilter && { where: whereFilter }),
+        ...(Object.keys(finalWhere).length > 0 && { where: finalWhere }),
         include: ['documents', 'metadatas', 'distances']
       }) as any;
 

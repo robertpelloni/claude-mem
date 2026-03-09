@@ -1,3 +1,4 @@
+import { logger } from '../utils/logger.js';
 /**
  * New Hook - UserPromptSubmit
  * Consolidated entry point + logic with optional JIT context filtering

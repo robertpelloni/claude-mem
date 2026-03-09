@@ -88,6 +88,9 @@ export interface Settings {
   // Feature Toggles
   CLAUDE_MEM_CONTEXT_SHOW_LAST_SUMMARY?: string;
   CLAUDE_MEM_CONTEXT_SHOW_LAST_MESSAGE?: string;
+
+  // Endless Mode
+  CLAUDE_MEM_ENDLESS_COMPRESSION?: string;
 }
 
 export interface WorkerStats {

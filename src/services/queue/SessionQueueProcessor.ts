@@ -1,6 +1,6 @@
 import { EventEmitter } from 'events';
 import { PendingMessageStore, PersistentPendingMessage } from '../sqlite/PendingMessageStore.js';
-import type { PendingMessageWithId } from '../worker-types.js';
+import type { PendingMessageWithId } from "../../types/index.js";
 import { logger } from '../../utils/logger.js';
 
 const IDLE_TIMEOUT_MS = 3 * 60 * 1000; // 3 minutes

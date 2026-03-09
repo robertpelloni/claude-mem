@@ -2,6 +2,47 @@
 
 All notable changes to claude-mem.
 
+## [v10.5.6] - 2026-03-09
+
+### Bug Fixes
+- **Test Suite Stabilized**: Replaced random port allocation with port `0` dynamic allocation across all server tests to prevent intermittent `EADDRINUSE` failures on Windows.
+- **Cross-Platform Compatibility**: Fixed `path` resolution bugs in `claude-md-utils.ts` and `timeline-formatting.ts` that were causing test failures on Windows due to un-normalized absolute paths.
+- **Test Suite Performance**: Removed a redundant `AbortSignal.timeout` validation test that caused the `bun test` runner to hang up to 5 seconds indefinitely.
+
+### Technical Details
+- Added 8 submodules to project architecture documentation (`AGENTS.md`, `TODO.md`, `ROADMAP.md`).
+- Fully stabilized the test suite (71+ passes) for integration pipelines.
+
+## [v10.5.5] - 2026-03-07
+
+### Refactoring
+- **Type Consolidation**: Moved all type definitions from `src/services/worker-types.ts` into organized `src/types/` directory with `database.ts`, `worker.ts`, and barrel `index.ts`. Deleted redundant `worker-types.ts`. Updated 18 import statements across `src/` and `tests/`.
+
+### Technical Details
+- Added `afterAll(() => mock.restore())` to `context-reinjection-guard.test.ts` for improved test hygiene
+
+### Files Changed
+- `src/types/database.ts` — Added backward-compatible type aliases (Observation, Summary, UserPrompt, DBSession)
+- `src/types/worker.ts` — NEW: Worker-specific types (ActiveSession, PendingMessage, SSEEvent, PaginatedResult, etc.)
+- `src/types/index.ts` — NEW: Barrel re-export file
+- `src/services/worker-types.ts` — DELETED
+- 14 files in `src/services/` — Updated imports
+- 4 files in `tests/` — Updated imports
+- `tests/hooks/context-reinjection-guard.test.ts` — Added mock.restore() cleanup
+
+## [v10.5.4] - 2026-03-07
+
+### Bug Fixes
+- **Test Environment Pollution**: Fixed intermittent test failures across the suite by introducing comprehensive `process.env` isolation for `CLAUDE_MEM_` variables (`SettingsDefaultsManager`), as well as `HOME` and `USERPROFILE` (`ProjectFilter`).
+- **SecretMasker Patterns**: Fixed Regex boundaries and capture groups in `SecretMasker.ts` to correctly handle `api_key = "..."` without incorrectly capturing trailing quotes, and tightened Stripe identifier matching.
+- **Test Suite Integrity**: Increased timeouts on slow TypeScript static analysis audits (`log-level-audit.test.ts`) to prevent spurious sequence aborts. Added missing `getCorrelationEngine` method to `DatabaseManager` mock interfaces in `GeminiAgent` testing.
+
+## [v10.5.3] - 2026-03-07
+
+### Bug Fixes
+- **Windows Console Flash**: Added `windowsHide: true` to all raw `child_process.spawn` and `execSync` calls (ChromaMcpManager, ProcessManager, claude-md-commands) to prevent brief console popups when background processes are spawned on Windows.
+- **Hook Lifecycle**: Fixed `STANDARD_HOOK_RESPONSE` definition to include `suppressOutput: true` flag, aligning with test suite expectations and expected output suppression behavior.
+
 ## [v10.5.2] - 2026-02-26
 
 ## Smart Explore Benchmark Docs & Skill Update

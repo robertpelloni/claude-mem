@@ -1,3 +1,4 @@
+import { logger } from '../utils/logger.js';
 import { SessionStore } from '../services/sqlite/SessionStore.js';
 import { ensureWorkerRunning } from '../shared/worker-utils.js';
 

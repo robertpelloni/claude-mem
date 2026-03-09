@@ -30,6 +30,7 @@ import {
 import { getWorkerPort, getWorkerHost } from '../shared/worker-utils.js';
 import { searchCodebase, formatSearchResults } from '../services/smart-file-read/search.js';
 import { parseFile, formatFoldedView, unfoldSymbol } from '../services/smart-file-read/parser.js';
+import { formatObservationResult } from './search-server/formatters/index.js';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
@@ -221,21 +222,59 @@ NEVER fetch full details without filtering first. 10x token savings.`,
   },
   {
     name: 'get_observations',
-    description: 'Step 3: Fetch full details for filtered IDs. Params: ids (array of observation IDs, required), orderBy, limit, project',
+    description: 'Step 3: Fetch full details for filtered IDs. Params: ids (array of observation IDs, required). Max 10 IDs per request.',
     inputSchema: {
       type: 'object',
       properties: {
         ids: {
           type: 'array',
           items: { type: 'number' },
-          description: 'Array of observation IDs to fetch (required)'
+          description: 'Array of observation IDs to fetch (required). Max 10 items.'
         }
       },
       required: ['ids'],
       additionalProperties: true
     },
     handler: async (args: any) => {
-      return await callWorkerAPIPost('/api/observations/batch', args);
+      const requestedIdsCount = Array.isArray(args.ids) ? args.ids.length : 0;
+      if (requestedIdsCount > 10) {
+        args.ids = args.ids.slice(0, 10);
+      }
+
+      const result = await callWorkerAPIPost('/api/observations/batch', args);
+      if (result.isError) return result;
+
+      try {
+        const rawJson = result.content[0].text;
+        const data = JSON.parse(rawJson);
+
+        if (Array.isArray(data) && data.length > 0) {
+          const formattedResults = data.map((obs: any) => {
+            // Text chunking/truncation for extremely large payloads
+            if (obs.text && obs.text.length > 50000) {
+              obs.text = obs.text.substring(0, 50000) + '\n\n[...TRUNCATED due to maximum token limit...]';
+            }
+            return formatObservationResult(obs);
+          });
+
+          let combinedText = formattedResults.join('\n\n---\n\n');
+
+          if (requestedIdsCount > 10) {
+            combinedText = `[WARNING: Requested ${requestedIdsCount} observations. Truncated to the first 10 to protect context window limits.]\n\n${combinedText}`;
+          }
+
+          return {
+            content: [{ type: 'text' as const, text: combinedText }]
+          };
+        } else {
+          return {
+            content: [{ type: 'text' as const, text: 'No observations found for the provided IDs.' }]
+          };
+        }
+      } catch (e: any) {
+        logger.error('SYSTEM', 'Failed to format observations', undefined, e as Error);
+        return result; // Fallback to raw JSON
+      }
     }
   },
   {

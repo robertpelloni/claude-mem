@@ -3,8 +3,14 @@ import pc from 'picocolors';
 import { findBinary, compareVersions, installBun, installUv } from '../utils/dependencies.js';
 import { detectOS } from '../utils/system.js';
 
-const BUN_EXTRA_PATHS = ['~/.bun/bin/bun', '/usr/local/bin/bun', '/opt/homebrew/bin/bun'];
-const UV_EXTRA_PATHS = ['~/.local/bin/uv', '~/.cargo/bin/uv'];
+const BUN_EXTRA_PATHS = [
+  '~/.bun/bin/bun', '/usr/local/bin/bun', '/opt/homebrew/bin/bun',
+  '~/.bun/bin/bun.exe', '~/AppData/Local/bun/bun.exe', '~/AppData/Roaming/bun/bun.exe'
+];
+const UV_EXTRA_PATHS = [
+  '~/.local/bin/uv', '~/.cargo/bin/uv',
+  '~/.local/bin/uv.exe', '~/.cargo/bin/uv.exe'
+];
 
 interface DependencyStatus {
   nodeOk: boolean;

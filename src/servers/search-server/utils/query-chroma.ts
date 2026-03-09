@@ -1,3 +1,4 @@
+import { logger } from '../../../utils/logger.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { silentDebug } from '../../../utils/silent-debug.js';
 

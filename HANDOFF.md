@@ -4,65 +4,32 @@
 
 ---
 
-## Session: 2026-02-26 (Antigravity/Gemini)
+## Session: 2026-03-07 (Antigravity/Gemini)
 
 ### What Was Done
-
-1. **Deep project analysis** — Read README.md, package.json, CLAUDE.md, CHANGELOG.md (2000+ lines), IDEAS.md, all source directories, test files, and documentation.
-
-2. **Upstream sync assessment** — Fetched upstream/main (thedotmack/claude-mem). Found 20 new commits (v10.4.1 → v10.5.2). Attempted merge but aborted: 24 conflicted files across core TypeScript source, built plugins, and configuration files. Too risky for batch merge.
-
-3. **Fixed existing merge conflicts** — Removed merge conflict markers (leftover from previous merge) in:
-   - `README.md` (lines 13-50) — kept upstream i18n language links
-   - `CHANGELOG.md` (lines 1-6) — merged both headers
-
-4. **Created VERSION file** — `VERSION` containing `10.3.1` as single source of truth.
-
-5. **Created documentation suite** (12 new files):
-   - `VISION.md` — Project vision, phases, design principles, architecture
-   - `ROADMAP.md` — Completed milestones (v1-v10.3.1), pending upstream, future phases A-F
-   - `TODO.md` — Short-term tasks with priority levels
-   - `AGENTS.md` — Universal AI agent instructions
-   - `GEMINI.md` — Gemini-specific overrides
-   - `GPT.md` — GPT-specific overrides
-   - `.github/copilot-instructions.md` — GitHub Copilot guidance
-   - `DEPLOY.md` — Deployment guide (3 methods)
-   - `MEMORY.md` — Codebase observations and design preferences
-   - `HANDOFF.md` — This file
-   - `IDEAS.md` — Enhanced improvement ideas (already existed, will be expanded)
-
-6. **Updated CLAUDE.md** — Fixed stale version reference, added AGENTS.md cross-reference.
-
-7. **Updated docs/UNIVERSAL_LLM_INSTRUCTIONS.md** — Rewrote for claude-mem specificity.
+1. **Windows Console Flash Issue Fix**: Added `windowsHide: true` to all `child_process.spawn` and `execSync` calls across `ProcessManager.ts`, `ChromaMcpManager.ts`, `SDKAgent.ts`, and `claude-md-commands.ts` to prevent the command prompt window from flashing briefly on Windows during background worker operations.
+2. **Test Suite Fix**: Corrected a failing test in `hook-lifecycle.test.ts` by adding `suppressOutput: true` to the `STANDARD_HOOK_RESPONSE` definition, aligning it with the expected standard output suppression behavior for hooks.
+3. **Dependencies & Build**: Re-ran `npm install` and completely rebuilt the plugin (React viewer, worker service, MCP server, context generator) to ensure all changes work correctly and the `esbuild` platform binary mismatch issue in WSL was resolved.
+4. **Documentation Updates**: Updated `ROADMAP.md` and `TODO.md` noting the completion of the branch memory and ragtime investigation tasks.
+4. **Test Environment Pollution**: Introduced `process.env` isolation (`beforeEach`/`afterEach`) across the suite to prevent generic/system configurations (`CLAUDE_MEM_`, `HOME`, `USERPROFILE`) from bleeding between test executions (`SettingsDefaultsManager`, `ProjectFilter`).
+5. **SecretMasker Patterns**: Fixed Regex boundaries and capture groups in `SecretMasker.ts` to correctly handle `api_key = "..."` without incorrectly capturing trailing quotes, and tightened Stripe identifier matching.
+6. **Codebase Refactoring**: Deleted the duplicate `src/services/worker/settings/SettingsDefaultsManager.ts` and updated imports across 8+ worker services to use the single source of truth in `src/shared/SettingsDefaultsManager.ts`.
+7. **Test Suite Integrity**: Increased timeouts on slow TypeScript static analysis audits (`log-level-audit.test.ts`) to prevent spurious sequence aborts. Added missing `getCorrelationEngine` method to `DatabaseManager` mock interfaces in `GeminiAgent` testing.
+8. **Version Bump**: Bumped version to `v10.5.4` across the application (`package.json`, `VERSION`, `plugin.json`, `marketplace.json`) and added corresponding notes to `CHANGELOG.md` detailing the test suite and regex fixes.
+9. **Type Consolidation (v10.5.5)**: Moved all types from `src/services/worker-types.ts` into organized `src/types/` directory (`database.ts`, `worker.ts`, `index.ts` barrel). Updated 18 imports across `src/` and `tests/`. Deleted obsolete `worker-types.ts`. Added `afterAll(() => mock.restore())` to `context-reinjection-guard.test.ts` for test hygiene. Confirmed 44 test failures are pre-existing (Bun `mock.module` pollution).
 
 ### What Was NOT Done (Remaining)
-
-1. **Upstream merge** — 24 conflicted files need careful file-by-file resolution. Key conflicts in:
-   - `src/services/worker-service.ts`
-   - `src/services/sqlite/SessionStore.ts`, `SessionSearch.ts`
-   - `src/services/worker/DatabaseManager.ts`, `SessionManager.ts`
-   - `src/shared/paths.ts`
-   - `plugin/hooks/hooks.json`
-   - `scripts/build-hooks.js`, `scripts/smart-install.js`
-   - `package.json`
-   - Built files in `plugin/scripts/`
-
-2. **VS Code extension completion** — Scaffolded in `vscode-extension/` but needs feature completion.
-
-3. **Endless Mode stabilization** — Still beta, needs production benchmarks.
-
-4. **Database migration system** — Still uses schema recreation.
-
-5. **IDEAS.md expansion** — Already has good content, planned to expand further.
+1. **VS Code Extension**: Continues to be pending for completion.
+2. **Endless Mode Stabilization**: Still in beta, needs production benchmarks.
+3. **Pre-existing Test Failures**: 44 tests fail due to Bun's `mock.module()` polluting the global module registry across parallel test files. Root cause is in `context-reinjection-guard.test.ts` which mocks `SettingsDefaultsManager` and `project-filter` globally.
 
 ### Recommendations for Next Session
+1. **Fix Bun Mock Pollution**: Refactor `context-reinjection-guard.test.ts` to avoid `mock.module()` entirely — consider subprocess-based test isolation or restructuring the import chain to avoid needing global mocks.
+2. **Progress on Remaining Tasks**: Begin tackling the VS Code extension or work on stabilizing Endless Mode.
 
-1. **Start with upstream merge** — Do it file-by-file, starting with `package.json` (version), then config files (`hooks.json`, `build-hooks.js`), then source files. Test after each resolution.
-2. **Build and test** — After merge: `npm run build` and `npm test` to verify no regressions.
-3. **VS Code extension** — Low-hanging fruit for high impact. Extension shell exists.
-4. **Endless Mode benchmarks** — Would be valuable for moving from beta to stable.
+---
 
-### Technical Context
+## Session: 2026-02-26 (Antigravity/Gemini)
 
 - **Fork**: `robertpelloni/claude-mem` (origin) ← `thedotmack/claude-mem` (upstream)
 - **Branch**: `main`

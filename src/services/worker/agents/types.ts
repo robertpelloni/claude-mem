@@ -6,7 +6,7 @@
  * - Provide type safety for response processing and broadcasting
  */
 
-import type { ActiveSession } from '../../worker-types.js';
+import type { ActiveSession } from "../../../types/index.js";
 import type { ParsedObservation, ParsedSummary } from '../../../sdk/parser.js';
 
 // ============================================================================

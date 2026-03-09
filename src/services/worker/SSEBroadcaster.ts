@@ -10,7 +10,7 @@
 
 import type { Response } from 'express';
 import { logger } from '../../utils/logger.js';
-import type { SSEEvent, SSEClient } from '../worker-types.js';
+import type { SSEEvent, SSEClient } from "../../types/index.js";
 
 export class SSEBroadcaster {
   private sseClients: Set<SSEClient> = new Set();

@@ -353,8 +353,9 @@ describe('hookCommand - stderr suppression', () => {
     const { hookCommand } = await import('../src/cli/hook-command.js');
 
     // Verify the import includes logger
+    const { resolve } = await import('path');
     const hookCommandSource = await Bun.file(
-      new URL('../src/cli/hook-command.ts', import.meta.url).pathname
+      resolve(__dirname, '../src/cli/hook-command.ts')
     ).text();
 
     // Should import logger

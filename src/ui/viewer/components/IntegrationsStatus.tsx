@@ -70,7 +70,7 @@ export function IntegrationsStatus() {
         </div>
       </div>
 
-      {/* OpenCode Plugin Status */}
+      {/* Antigopilot Extension Status */}
       <div className="integration-card" style={{
         padding: '12px',
         border: '1px solid var(--color-border-primary)',
@@ -78,19 +78,16 @@ export function IntegrationsStatus() {
         backgroundColor: 'var(--color-bg-tertiary)'
       }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-          <span style={{ fontWeight: 600, fontSize: '13px' }}>OpenCode Plugin</span>
+          <span style={{ fontWeight: 600, fontSize: '13px' }}>Antigopilot Extension</span>
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <span style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>Client-Side</span>
+            <span style={{ fontSize: '11px', color: 'var(--color-text-muted)' }}>Browser</span>
             <div className="status-dot" style={{ backgroundColor: 'var(--color-text-muted)', animation: 'none' }} />
           </div>
         </div>
 
         <div style={{ fontSize: '12px', color: 'var(--color-text-secondary)' }}>
           <div style={{ lineHeight: '1.4' }}>
-            Status is managed by the OpenCode client. Ensure the plugin is installed in your project.
-          </div>
-          <div style={{ marginTop: '8px', fontSize: '11px', fontFamily: 'monospace', padding: '4px', background: 'var(--color-bg-input)', borderRadius: '4px' }}>
-            npm install @opencode-ai/plugin
+            Status is managed by the extension client via WebSocket. Ensure the extension is installed and running in your browser.
           </div>
         </div>
       </div>

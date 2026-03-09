@@ -1,3 +1,4 @@
+import { logger } from '../../../utils/logger.js';
 /**
  * Helper to normalize query parameters from URL-friendly format
  * Converts comma-separated strings to arrays and flattens date params

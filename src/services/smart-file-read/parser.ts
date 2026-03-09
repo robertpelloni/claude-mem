@@ -13,6 +13,7 @@ import { writeFileSync, mkdtempSync, rmSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { createRequire } from "node:module";
+import { SecretMasker } from "../security/SecretMasker.js";
 
 // CJS-safe require for resolving external packages at runtime.
 // In ESM: import.meta.url works. In CJS bundle (esbuild): __filename works.
@@ -340,8 +341,8 @@ function findCommentAbove(lines: string[], startRow: number): string | undefined
       continue;
     }
     if (trimmed.startsWith("/**") || trimmed.startsWith("*") || trimmed.startsWith("*/") ||
-        trimmed.startsWith("//") || trimmed.startsWith("///") || trimmed.startsWith("//!") ||
-        trimmed.startsWith("#") || trimmed.startsWith("@")) {
+      trimmed.startsWith("//") || trimmed.startsWith("///") || trimmed.startsWith("//!") ||
+      trimmed.startsWith("#") || trimmed.startsWith("@")) {
       commentLines.unshift(lines[i]);
       foundComment = true;
     } else {
@@ -451,7 +452,8 @@ function buildSymbols(matches: RawMatch[], lines: string[], language: string): {
 
 // --- Main parse functions ---
 
-export function parseFile(content: string, filePath: string): FoldedFile {
+export function parseFile(rawContent: string, filePath: string): FoldedFile {
+  const content = SecretMasker.maskContent(rawContent);
   const language = detectLanguage(filePath);
   const lines = content.split("\n");
 
@@ -498,8 +500,12 @@ export function parseFile(content: string, filePath: string): FoldedFile {
  * Much faster than calling parseFile() per file (one process spawn per language vs per file).
  */
 export function parseFilesBatch(
-  files: Array<{ absolutePath: string; relativePath: string; content: string }>
+  rawFiles: Array<{ absolutePath: string; relativePath: string; content: string }>
 ): Map<string, FoldedFile> {
+  const files = rawFiles.map(f => ({
+    ...f,
+    content: SecretMasker.maskContent(f.content)
+  }));
   const results = new Map<string, FoldedFile>();
 
   // Group files by language (and thus by query + grammar)
@@ -652,9 +658,9 @@ export function unfoldSymbol(content: string, filePath: string, symbolName: stri
   for (let i = symbol.lineStart - 1; i >= 0; i--) {
     const trimmed = lines[i].trim();
     if (trimmed === "" || trimmed.startsWith("*") || trimmed.startsWith("/**") ||
-        trimmed.startsWith("///") || trimmed.startsWith("//") ||
-        trimmed.startsWith("#") || trimmed.startsWith("@") ||
-        trimmed === "*/") {
+      trimmed.startsWith("///") || trimmed.startsWith("//") ||
+      trimmed.startsWith("#") || trimmed.startsWith("@") ||
+      trimmed === "*/") {
       start = i;
     } else {
       break;

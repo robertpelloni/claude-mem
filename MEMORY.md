@@ -19,7 +19,6 @@
 ### Database
 - Uses `better-sqlite3` — NOT `bun:sqlite` (that's legacy from an older version).
 - FTS5 virtual tables for full-text search. Automatic sync triggers keep FTS5 synchronized.
-- Schema migration system is immature — currently recreates on schema changes. Proper migrations are a known TODO.
 - Foreign key constraints have caused issues — `ON UPDATE CASCADE` was added in v9.1.0.
 - `CHECK` constraints on observation type column were removed in v9.1.1 because the mode system (v8.0.0+) allows custom types.
 

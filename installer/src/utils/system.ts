@@ -14,7 +14,8 @@ export function detectOS(): OSType {
 
 export function commandExists(command: string): boolean {
   try {
-    execSync(`which ${command}`, { stdio: 'pipe' });
+    const checkCmd = process.platform === 'win32' ? 'where' : 'which';
+    execSync(`${checkCmd} ${command}`, { stdio: 'pipe' });
     return true;
   } catch {
     return false;

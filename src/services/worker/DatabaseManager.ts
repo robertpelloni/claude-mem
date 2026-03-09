@@ -14,12 +14,14 @@ import { ChromaSync } from '../sync/ChromaSync.js';
 import { SettingsDefaultsManager } from '../../shared/SettingsDefaultsManager.js';
 import { USER_SETTINGS_PATH } from '../../shared/paths.js';
 import { logger } from '../../utils/logger.js';
-import type { DBSession } from '../worker-types.js';
+import type { DBSession } from "../../types/index.js";
+import { CorrelationEngine } from '../domain/CorrelationEngine.js';
 
 export class DatabaseManager {
   private sessionStore: SessionStore | null = null;
   private sessionSearch: SessionSearch | null = null;
   private chromaSync: ChromaSync | null = null;
+  private correlationEngine: CorrelationEngine | null = null;
 
   /**
    * Initialize database connection (once, stays open)
@@ -34,6 +36,7 @@ export class DatabaseManager {
     const chromaEnabled = settings.CLAUDE_MEM_CHROMA_ENABLED !== 'false';
     if (chromaEnabled) {
       this.chromaSync = new ChromaSync('claude-mem');
+      this.correlationEngine = new CorrelationEngine(this.sessionStore!.db);
     } else {
       logger.info('DB', 'Chroma disabled via CLAUDE_MEM_CHROMA_ENABLED=false, using SQLite-only search');
     }
@@ -87,6 +90,13 @@ export class DatabaseManager {
    */
   getChromaSync(): ChromaSync | null {
     return this.chromaSync;
+  }
+
+  /**
+   * Get CorrelationEngine instance (returns null if Chroma is disabled)
+   */
+  getCorrelationEngine(): CorrelationEngine | null {
+    return this.correlationEngine;
   }
 
   // REMOVED: cleanupOrphanedSessions - violates "EVERYTHING SHOULD SAVE ALWAYS"

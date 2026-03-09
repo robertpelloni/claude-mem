@@ -76,25 +76,12 @@ claude-mem cursor install
 
 **User-level** (recommended - applies to all projects):
 ```bash
-# Copy hooks.json to your home directory
-cp cursor-hooks/hooks.json ~/.cursor/hooks.json
-
-# Copy hook scripts
-mkdir -p ~/.cursor/hooks
-cp cursor-hooks/*.sh ~/.cursor/hooks/
-chmod +x ~/.cursor/hooks/*.sh
+claude-mem cursor install user
 ```
 
 **Project-level** (for per-project hooks):
 ```bash
-# Copy hooks.json to your project
-mkdir -p .cursor
-cp cursor-hooks/hooks.json .cursor/hooks.json
-
-# Copy hook scripts to your project
-mkdir -p .cursor/hooks
-cp cursor-hooks/*.sh .cursor/hooks/
-chmod +x .cursor/hooks/*.sh
+claude-mem cursor install project
 ```
 
 </details>
@@ -115,39 +102,39 @@ chmod +x .cursor/hooks/*.sh
 
 ## Hook Mappings
 
-| Cursor Hook | Script | Purpose |
+| Cursor Hook | Command | Purpose |
 |-------------|--------|---------|
-| `beforeSubmitPrompt` | `session-init.sh` | Initialize claude-mem session |
-| `beforeSubmitPrompt` | `context-inject.sh` | Ensure worker is running |
-| `afterMCPExecution` | `save-observation.sh` | Capture MCP tool usage |
-| `afterShellExecution` | `save-observation.sh` | Capture shell command execution |
-| `afterFileEdit` | `save-file-edit.sh` | Capture file edits |
-| `stop` | `session-summary.sh` | Generate summary + update context file |
+| `beforeSubmitPrompt` | `claude-mem hook cursor session-init` | Initialize claude-mem session |
+| `beforeSubmitPrompt` | `claude-mem hook cursor context` | Ensure worker is running |
+| `afterMCPExecution` | `claude-mem hook cursor observation` | Capture MCP tool usage |
+| `afterShellExecution` | `claude-mem hook cursor observation` | Capture shell command execution |
+| `afterFileEdit` | `claude-mem hook cursor file-edit` | Capture file edits |
+| `stop` | `claude-mem hook cursor summarize` | Generate summary + update context file |
 
 ## How It Works
 
-### Session Initialization (`session-init.sh`)
+### Session Initialization (`session-init`)
 - Called before each prompt submission
 - Initializes a new session in claude-mem using `conversation_id` as the session ID
 - Extracts project name from workspace root
 - Outputs `{"continue": true}` to allow prompt submission
 
-### Context Hook (`context-inject.sh`)
+### Context Hook (`context`)
 - Ensures claude-mem worker is running before session
 - Outputs `{"continue": true}` to allow prompt submission
-- Note: Context file is updated by `session-summary.sh` (stop hook), not here
+- Note: Context file is updated by `summarize` (stop hook), not here
 
-### Observation Capture (`save-observation.sh`)
+### Observation Capture (`observation`)
 - Captures MCP tool executions and shell commands
 - Maps them to claude-mem's observation format
 - Sends to `/api/sessions/observations` endpoint (fire-and-forget)
 
-### File Edit Capture (`save-file-edit.sh`)
+### File Edit Capture (`file-edit`)
 - Captures file edits made by the agent
 - Treats edits as "write_file" tool usage
 - Includes edit summaries in observations
 
-### Session Summary (`session-summary.sh`)
+### Session Summary (`summarize`)
 - Called when agent loop ends (stop hook)
 - Requests summary generation from claude-mem
 - **Updates context file** in `.cursor/rules/claude-mem-context.mdc` for next session
@@ -177,11 +164,6 @@ Install on Ubuntu: `apt-get install jq curl`
    ```bash
    ls .cursor/hooks.json  # Project-level
    ls ~/.cursor/hooks.json  # User-level
-   ```
-
-2. Verify scripts are executable:
-   ```bash
-   chmod +x ~/.cursor/hooks/*.sh
    ```
 
 3. Check Cursor Settings → Hooks tab for configuration status

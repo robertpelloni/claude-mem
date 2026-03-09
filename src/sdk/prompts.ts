@@ -26,7 +26,7 @@ export interface SDKSession {
 /**
  * Build initial prompt to initialize the SDK agent
  */
-export function buildInitPrompt(project: string, sessionId: string, userPrompt: string, mode: ModeConfig): string {
+export function buildInitPrompt(project: string, sessionId: string, userPrompt: string, mode: ModeConfig, compressionLevel?: string): string {
   return `${mode.prompts.system_identity}
 
 <observed_from_primary_session>
@@ -81,6 +81,8 @@ ${mode.prompts.output_format_header}
 ${mode.prompts.format_examples}
 
 ${mode.prompts.footer}
+
+${compressionLevel && mode.prompts.compression_guidances?.[compressionLevel] ? `\n<compression_guidance>\n${mode.prompts.compression_guidances[compressionLevel]}\n</compression_guidance>\n` : ''}
 
 ${mode.prompts.header_memory_start}`;
 }
@@ -170,7 +172,7 @@ ${mode.prompts.summary_footer}`;
  * Called when: promptNumber > 1 (see SDKAgent.ts line 150)
  * First prompt: Uses buildInitPrompt instead (promptNumber === 1)
  */
-export function buildContinuationPrompt(userPrompt: string, promptNumber: number, contentSessionId: string, mode: ModeConfig): string {
+export function buildContinuationPrompt(userPrompt: string, promptNumber: number, contentSessionId: string, mode: ModeConfig, compressionLevel?: string): string {
   return `${mode.prompts.continuation_greeting}
 
 <observed_from_primary_session>
@@ -230,5 +232,7 @@ ${mode.prompts.format_examples}
 
 ${mode.prompts.footer}
 
+${compressionLevel && mode.prompts.compression_guidances?.[compressionLevel] ? `\n<compression_guidance>\n${mode.prompts.compression_guidances[compressionLevel]}\n</compression_guidance>\n` : ''}
+
 ${mode.prompts.header_memory_continued}`;
-} 
+}

@@ -96,14 +96,18 @@ export async function recordObservation(
 ): Promise<void> {
   const port = getWorkerPort();
 
-  const response = await fetch(`http://127.0.0.1:${port}/sessions/${sessionDbId}/observations`, {
+  const response = await fetch(`http://127.0.0.1:${port}/api/hooks/inject`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
+      hook_type: toolName, // Re-mapped to Rust schema
+      content: toolInput,
+      // Original fields nested for backward compat if needed or just omitted for pure speed mapping
       tool_name: toolName,
       tool_input: toolInput,
       tool_response: toolResponse,
       prompt_number: promptNumber,
+      session_id: sessionDbId,
       cwd: cwd || ''
     }),
     signal: AbortSignal.timeout(2000)

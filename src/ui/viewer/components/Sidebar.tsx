@@ -20,6 +20,7 @@ export function Sidebar({ isOpen, settings, stats, isSaving, saveStatus, isConne
   const [model, setModel] = useState(settings.CLAUDE_MEM_MODEL || DEFAULT_SETTINGS.CLAUDE_MEM_MODEL);
   const [contextObs, setContextObs] = useState(settings.CLAUDE_MEM_CONTEXT_OBSERVATIONS || DEFAULT_SETTINGS.CLAUDE_MEM_CONTEXT_OBSERVATIONS);
   const [workerPort, setWorkerPort] = useState(settings.CLAUDE_MEM_WORKER_PORT || DEFAULT_SETTINGS.CLAUDE_MEM_WORKER_PORT);
+  const [endlessCompression, setEndlessCompression] = useState(settings.CLAUDE_MEM_ENDLESS_COMPRESSION || 'auto');
 
   // MCP toggle state (separate from settings)
   const [mcpEnabled, setMcpEnabled] = useState(true);
@@ -31,13 +32,14 @@ export function Sidebar({ isOpen, settings, stats, isSaving, saveStatus, isConne
     setModel(settings.CLAUDE_MEM_MODEL || DEFAULT_SETTINGS.CLAUDE_MEM_MODEL);
     setContextObs(settings.CLAUDE_MEM_CONTEXT_OBSERVATIONS || DEFAULT_SETTINGS.CLAUDE_MEM_CONTEXT_OBSERVATIONS);
     setWorkerPort(settings.CLAUDE_MEM_WORKER_PORT || DEFAULT_SETTINGS.CLAUDE_MEM_WORKER_PORT);
+    setEndlessCompression(settings.CLAUDE_MEM_ENDLESS_COMPRESSION || 'auto');
   }, [settings]);
 
   // Fetch MCP status on mount
   useEffect(() => {
     fetch('/api/mcp/status')
       .then(res => res.json())
-      .then(data => setMcpEnabled(data.enabled))
+      .then(data => setMcpEnabled((data as { enabled: boolean }).enabled))
       .catch(error => console.error('Failed to load MCP status:', error));
   }, []);
 
@@ -52,7 +54,9 @@ export function Sidebar({ isOpen, settings, stats, isSaving, saveStatus, isConne
     onSave({
       CLAUDE_MEM_MODEL: model,
       CLAUDE_MEM_CONTEXT_OBSERVATIONS: contextObs,
-      CLAUDE_MEM_WORKER_PORT: workerPort
+      CLAUDE_MEM_WORKER_PORT: workerPort,
+      CLAUDE_MEM_WORKER_HOST: settings.CLAUDE_MEM_WORKER_HOST || '127.0.0.1',
+      CLAUDE_MEM_ENDLESS_COMPRESSION: endlessCompression
     });
   };
 
@@ -67,14 +71,14 @@ export function Sidebar({ isOpen, settings, stats, isSaving, saveStatus, isConne
         body: JSON.stringify({ enabled })
       });
 
-      const result = await response.json();
+      const result = await response.json() as { success: boolean; enabled: boolean; error?: string };
 
       if (result.success) {
         setMcpEnabled(result.enabled);
         setMcpStatus('✓ Updated (restart Claude Code to apply)');
         setTimeout(() => setMcpStatus(''), 3000);
       } else {
-        setMcpStatus(`✗ Error: ${result.error}`);
+        setMcpStatus(`✗ Error: ${result.error || 'Unknown error'}`);
         setTimeout(() => setMcpStatus(''), 3000);
       }
     } catch (error) {
@@ -130,7 +134,7 @@ export function Sidebar({ isOpen, settings, stats, isSaving, saveStatus, isConne
             <select
               id="model"
               value={model}
-              onChange={e => setModel(e.target.value)}
+              onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setModel(e.currentTarget.value)}
             >
               {/* Shorthand names forward to latest model version */}
               <option value="haiku">haiku</option>
@@ -149,7 +153,7 @@ export function Sidebar({ isOpen, settings, stats, isSaving, saveStatus, isConne
               min="1"
               max="200"
               value={contextObs}
-              onChange={e => setContextObs(e.target.value)}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setContextObs(e.currentTarget.value)}
             />
           </div>
           <div className="form-group">
@@ -163,8 +167,25 @@ export function Sidebar({ isOpen, settings, stats, isSaving, saveStatus, isConne
               min="1024"
               max="65535"
               value={workerPort}
-              onChange={e => setWorkerPort(e.target.value)}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setWorkerPort(e.currentTarget.value)}
             />
+          </div>
+          <div className="form-group">
+            <label htmlFor="endlessCompression">CLAUDE_MEM_ENDLESS_COMPRESSION</label>
+            <div className="setting-description">
+              Compression level for Endless Mode observation summarization. Choose extreme for longest session lifetime.
+            </div>
+            <select
+              id="endlessCompression"
+              value={endlessCompression}
+              onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setEndlessCompression(e.currentTarget.value)}
+            >
+              <option value="auto">auto (Default)</option>
+              <option value="low">low (High detail)</option>
+              <option value="medium">medium (Balanced)</option>
+              <option value="high">high (High compression)</option>
+              <option value="extreme">extreme (Maximum endurance)</option>
+            </select>
           </div>
           {saveStatus && (
             <div className="save-status">{saveStatus}</div>
@@ -179,7 +200,7 @@ export function Sidebar({ isOpen, settings, stats, isSaving, saveStatus, isConne
                 type="checkbox"
                 id="mcpEnabled"
                 checked={mcpEnabled}
-                onChange={e => handleMcpToggle(e.target.checked)}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => handleMcpToggle(e.currentTarget.checked)}
                 disabled={mcpToggling}
                 style={{ cursor: mcpToggling ? 'not-allowed' : 'pointer' }}
               />

@@ -73,14 +73,14 @@ export const SystemStatus: React.FC<SystemStatusProps> = ({ isConnected, mcpRead
           <div className="status-card-meta">Gemini / Claude Code</div>
         </div>
 
-        {/* OpenCode Plugin Status */}
+        {/* Antigopilot Extension Status */}
         <div className="status-card">
-          <div className="status-card-label">OpenCode Plugin</div>
+          <div className="status-card-label">Antigopilot Extension</div>
           <div className="status-card-value">
             <span className={`status-dot ${isConnected ? 'connected' : 'disconnected'}`}></span>
-            <span className="status-text">{isConnected ? 'Ready' : 'Unknown'}</span>
+            <span className="status-text">{isConnected ? 'Ready' : 'Waiting'}</span>
           </div>
-          <div className="status-card-meta">Via HTTP Proxy</div>
+          <div className="status-card-meta">Via Extension Bridge</div>
         </div>
       </div>
 
@@ -140,8 +140,8 @@ export const SystemStatus: React.FC<SystemStatusProps> = ({ isConnected, mcpRead
                 </span>
                 <span style={{
                   color: log.level === 'ERROR' ? 'var(--color-accent-error)' :
-                         log.level === 'WARN' ? 'var(--color-accent-summary)' :
-                         'var(--color-text-secondary)',
+                    log.level === 'WARN' ? 'var(--color-accent-summary)' :
+                      'var(--color-text-secondary)',
                   width: '50px',
                   display: 'inline-block',
                   fontWeight: 600

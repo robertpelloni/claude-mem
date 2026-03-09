@@ -137,3 +137,27 @@ export interface ObservationWithContext {
   prompt_number?: number;
   discovery_tokens?: number;
 }
+
+// ============================================================================
+// Legacy worker-type aliases mapping to consolidated names
+// ============================================================================
+
+export interface Observation extends Omit<ObservationRecord, 'source_files'> {
+  subtitle: string | null;
+  narrative: string | null;
+  facts: string | null;
+  concepts: string | null;
+  files_read: string | null;
+  files_modified: string | null;
+}
+
+export interface Summary extends SessionSummaryRecord {
+  session_id: string; // Alias for backward compatibility representing content_session_id
+  notes: string | null; // Missing in SessionSummaryRecord
+}
+
+export interface UserPrompt extends UserPromptRecord {}
+
+export interface DBSession extends SdkSessionRecord {
+  user_prompt: string; // Enforce required in DBSession vs optional in SdkSessionRecord
+}

@@ -27,7 +27,7 @@ export class MemoryRoutes extends BaseRouteHandler {
    * Body: { text: string, title?: string, project?: string }
    */
   private handleSaveMemory = this.wrapHandler(async (req: Request, res: Response): Promise<void> => {
-    const { text, title, project } = req.body;
+    const { text, title, project, branch_id } = req.body;
     const targetProject = project || this.defaultProject;
 
     if (!text || typeof text !== 'string' || text.trim().length === 0) {
@@ -50,7 +50,8 @@ export class MemoryRoutes extends BaseRouteHandler {
       narrative: text,
       concepts: [] as string[],
       files_read: [] as string[],
-      files_modified: [] as string[]
+      files_modified: [] as string[],
+      branch_id: branch_id || 'main'
     };
 
     // 3. Store to SQLite
@@ -69,7 +70,7 @@ export class MemoryRoutes extends BaseRouteHandler {
     });
 
     // 4. Sync to ChromaDB (async, fire-and-forget)
-    chromaSync.syncObservation(
+    chromaSync?.syncObservation(
       result.id,
       memorySessionId,
       targetProject,

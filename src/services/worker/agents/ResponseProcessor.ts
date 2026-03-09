@@ -18,7 +18,7 @@ import { updateFolderClaudeMdFiles } from '../../../utils/claude-md-utils.js';
 import { getWorkerPort } from '../../../shared/worker-utils.js';
 import { SettingsDefaultsManager } from '../../../shared/SettingsDefaultsManager.js';
 import { USER_SETTINGS_PATH } from '../../../shared/paths.js';
-import type { ActiveSession } from '../../worker-types.js';
+import type { ActiveSession } from "../../../types/index.js";
 import type { DatabaseManager } from '../DatabaseManager.js';
 import type { SessionManager } from '../SessionManager.js';
 import type { WorkerRef, StorageResult } from './types.js';
@@ -217,6 +217,25 @@ async function syncAndBroadcastObservations(
       }, error);
     });
 
+    // Run Correlation Engine (fire-and-forget)
+    dbManager.getCorrelationEngine()?.correlateObservation({
+      id: obsId,
+      memory_session_id: session.memorySessionId!,
+      session_id: session.contentSessionId,
+      project: session.project,
+      title: obs.title ?? undefined,
+      subtitle: obs.subtitle ?? undefined,
+      facts: JSON.stringify(obs.facts || []),
+      concepts: JSON.stringify(obs.concepts || []),
+      files_touched: JSON.stringify(obs.files_modified || []),
+      created_at_epoch: result.createdAtEpoch,
+      created_at: new Date(result.createdAtEpoch).toISOString(),
+      origin: 'worker',
+      text: '' // text is deprecated
+    }).catch(error => {
+      logger.warn('CHROMA_SYNC', 'Failed to correlate observation', { obsId }, error as Error);
+    });
+
     // Broadcast to SSE clients (for web UI)
     // BUGFIX: Use obs.files_read and obs.files_modified (not obs.files)
     broadcastObservation(worker, {
@@ -243,7 +262,7 @@ async function syncAndBroadcastObservations(
   // Only runs if CLAUDE_MEM_FOLDER_CLAUDEMD_ENABLED is true (default: false)
   const settings = SettingsDefaultsManager.loadFromFile(USER_SETTINGS_PATH);
   // Handle both string 'true' and boolean true from JSON settings
-  const settingValue = settings.CLAUDE_MEM_FOLDER_CLAUDEMD_ENABLED;
+  const settingValue = settings.CLAUDE_MEM_FOLDER_CLAUDEMD_ENABLED as any;
   const folderClaudeMdEnabled = settingValue === 'true' || settingValue === true;
 
   if (folderClaudeMdEnabled) {
@@ -325,6 +344,6 @@ async function syncAndBroadcastSummary(
 
   // Update Cursor context file for registered projects (fire-and-forget)
   updateCursorContextForProject(session.project, getWorkerPort()).catch(error => {
-    logger.warn('CURSOR', 'Context update failed (non-critical)', { project: session.project }, error as Error);
+    logger.warn('WORKER', 'Context update failed (non-critical)', { project: session.project }, error as Error);
   });
 }

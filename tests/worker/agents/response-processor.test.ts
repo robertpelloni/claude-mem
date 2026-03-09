@@ -32,7 +32,7 @@ mock.module('../../../src/services/domain/ModeManager.js', () => ({
 // Import after mocks
 import { processAgentResponse } from '../../../src/services/worker/agents/ResponseProcessor.js';
 import type { WorkerRef, StorageResult } from '../../../src/services/worker/agents/types.js';
-import type { ActiveSession } from '../../../src/services/worker-types.js';
+import type { ActiveSession } from "../../../src/types/index.js";
 import type { DatabaseManager } from '../../../src/services/worker/DatabaseManager.js';
 import type { SessionManager } from '../../../src/services/worker/SessionManager.js';
 
@@ -78,6 +78,9 @@ describe('ResponseProcessor', () => {
       getChromaSync: () => ({
         syncObservation: mockChromaSyncObservation,
         syncSummary: mockChromaSyncSummary,
+      }),
+      getCorrelationEngine: () => ({
+        correlateObservation: mock(() => Promise.resolve()),
       }),
     } as unknown as DatabaseManager;
 

@@ -3,6 +3,7 @@
  */
 
 import type { Response } from 'express';
+import type { SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 
 // ============================================================================
 // Active Session Types
@@ -37,8 +38,6 @@ export interface ActiveSession {
   forceInit?: boolean;  // Force fresh SDK session (skip resume)
   idleTimedOut?: boolean;  // Set when session exits due to idle timeout (prevents restart loop)
   lastGeneratorActivity: number;  // Timestamp of last generator progress (for stale detection, Issue #1099)
-  // CLAIM-CONFIRM FIX: Track IDs of messages currently being processed
-  // These IDs will be confirmed (deleted) after successful storage
   processingMessageIds: number[];
 }
 
@@ -80,6 +79,7 @@ export interface SSEEvent {
   [key: string]: any;
 }
 
+// Note: express typing required
 export type SSEClient = Response;
 
 // ============================================================================
@@ -106,74 +106,12 @@ export interface PaginationParams {
 export interface ViewerSettings {
   sidebarOpen: boolean;
   selectedProject: string | null;
-  theme: 'light' | 'dark' | 'system';
+  theme: 'light' | 'system' | 'dark';
 }
 
 // ============================================================================
-// Database Record Types
+// Parsed Types
 // ============================================================================
-
-export interface Observation {
-  id: number;
-  memory_session_id: string;  // Renamed from sdk_session_id
-  project: string;
-  type: string;
-  title: string;
-  subtitle: string | null;
-  text: string | null;
-  narrative: string | null;
-  facts: string | null;
-  concepts: string | null;
-  files_read: string | null;
-  files_modified: string | null;
-  prompt_number: number;
-  created_at: string;
-  created_at_epoch: number;
-}
-
-export interface Summary {
-  id: number;
-  session_id: string; // content_session_id (from JOIN)
-  project: string;
-  request: string | null;
-  investigated: string | null;
-  learned: string | null;
-  completed: string | null;
-  next_steps: string | null;
-  notes: string | null;
-  created_at: string;
-  created_at_epoch: number;
-}
-
-export interface UserPrompt {
-  id: number;
-  content_session_id: string;  // Renamed from claude_session_id
-  project: string; // From JOIN with sdk_sessions
-  prompt_number: number;
-  prompt_text: string;
-  created_at: string;
-  created_at_epoch: number;
-}
-
-export interface DBSession {
-  id: number;
-  content_session_id: string;    // Renamed from claude_session_id
-  project: string;
-  user_prompt: string;
-  memory_session_id: string | null;  // Renamed from sdk_session_id
-  status: 'active' | 'completed' | 'failed';
-  started_at: string;
-  started_at_epoch: number;
-  completed_at: string | null;
-  completed_at_epoch: number | null;
-}
-
-// ============================================================================
-// SDK Types
-// ============================================================================
-
-// Re-export the actual SDK type to ensure compatibility
-export type { SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 
 export interface ParsedObservation {
   type: string;
@@ -209,3 +147,6 @@ export interface DatabaseStats {
     summaries: number;
   }>;
 }
+
+// Re-export SDK type for convenience downstream
+export type { SDKUserMessage };

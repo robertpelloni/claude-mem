@@ -175,7 +175,7 @@ test_check_bun_fails_when_not_found() {
     echo "main() { :; }" >> "$tmp"
     source "$tmp"
     rm -f "$tmp"
-    PATH="/nonexistent"
+    PATH="/nonexistent:$(dirname $(which node 2>/dev/null || echo ''))"
     BUN_PATH=""
     check_bun
   ' >/dev/null 2>&1 || exit_code=$?
@@ -207,7 +207,7 @@ FAKEBUN
 
   # Hide bun from PATH
   local saved_path="$PATH"
-  PATH="/nonexistent"
+  PATH="/nonexistent:$(dirname $(which node 2>/dev/null || echo ''))"
 
   if find_bun_path 2>/dev/null; then
     assert_eq "${fake_home}/.bun/bin/bun" "$BUN_PATH" "find_bun_path finds bun in ~/.bun/bin/"
@@ -273,7 +273,7 @@ test_check_uv_fails_when_not_found() {
     echo "main() { :; }" >> "$tmp"
     source "$tmp"
     rm -f "$tmp"
-    PATH="/nonexistent"
+    PATH="/nonexistent:$(dirname $(which node 2>/dev/null || echo ''))"
     UV_PATH=""
     check_uv
   ' >/dev/null 2>&1 || exit_code=$?
@@ -305,7 +305,7 @@ FAKEUV
 
   # Hide uv from PATH
   local saved_path="$PATH"
-  PATH="/nonexistent"
+  PATH="/nonexistent:$(dirname $(which node 2>/dev/null || echo ''))"
 
   if find_uv_path 2>/dev/null; then
     assert_eq "${fake_home}/.local/bin/uv" "$UV_PATH" "find_uv_path finds uv in ~/.local/bin/"
@@ -336,7 +336,7 @@ test_find_openclaw_not_found() {
   local fake_home
   fake_home="$(mktemp -d)"
   HOME="$fake_home"
-  PATH="/nonexistent"
+  PATH="/nonexistent:$(dirname $(which node 2>/dev/null || echo ''))"
   OPENCLAW_PATH=""
 
   if find_openclaw 2>/dev/null; then
@@ -362,7 +362,7 @@ test_find_openclaw_in_home() {
   touch "${fake_home}/.openclaw/openclaw.mjs"
 
   HOME="$fake_home"
-  PATH="/nonexistent"
+  PATH="/nonexistent:$(dirname $(which node 2>/dev/null || echo ''))"
   OPENCLAW_PATH=""
 
   if find_openclaw 2>/dev/null; then

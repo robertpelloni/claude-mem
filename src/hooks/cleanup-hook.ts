@@ -1,3 +1,4 @@
+import { logger } from '../utils/logger.js';
 /**
  * Cleanup Hook - SessionEnd
  *
@@ -53,6 +54,7 @@ async function cleanupHook(input?: SessionEndInput): Promise<void> {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         claudeSessionId: session_id,
+        cwd: input.cwd,
         reason
       }),
       signal: AbortSignal.timeout(2000)

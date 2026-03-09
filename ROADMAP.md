@@ -44,54 +44,56 @@
 - [x] PID-based + port-based daemon guards (prevent duplicate workers)
 - [x] Self-healing message queue
 
-## Current: v10.3.1
+### v10.4-v10.5: Upstream Merge & UI Polish
+- [x] VS Code extension completion (`vscode-extension/`)
+- [x] Endless Mode stabilization
+- [x] Transcript viewer UI integration
+- [x] **v10.5.0**: `smart-explore` AST-based code navigation skill
+- [x] **v10.5.1–v10.5.2**: Benchmark data and hooks.json restoration
+- [x] **v10.4.4**: Remove `save_observation` from MCP tool surface
+- [x] **v10.4.3**: Fix hook crashes and `CLAUDE_PLUGIN_ROOT` fallback
+- [x] **v10.4.1**: Convert `make-plan` and `do` commands to skills; terminal output control
+
+## Current: v10.5.2
 
 ### In Progress
-- [ ] VS Code extension (scaffolded in `vscode-extension/`)
-- [ ] Endless Mode refinement (beta channel)
-- [ ] Transcript viewer UI (`src/ui/transcript-viewer.html`)
-
-## Upstream Pending (v10.4–v10.5)
-> 20 commits on upstream/main not yet merged (24 file conflicts).
-
-- [ ] **v10.5.0**: `smart-explore` AST-based code navigation skill
-- [ ] **v10.5.1–v10.5.2**: Benchmark data and hooks.json restoration
-- [ ] **v10.4.4**: Remove `save_observation` from MCP tool surface
-- [ ] **v10.4.3**: Fix hook crashes and `CLAUDE_PLUGIN_ROOT` fallback
-- [ ] **v10.4.1**: Convert `make-plan` and `do` commands to skills; terminal output control
+- [x] Windows console window briefly appears when worker starts
 
 ## Future Phases
 
 ### Phase A: Endless Mode GA
-- [ ] Move Endless Mode from beta to stable
-- [ ] Production benchmarks (real-world, not theoretical)
-- [ ] Configurable compression aggressiveness
-- [ ] Automatic mode switching based on session length
+- [x] Move Endless Mode from beta to stable
+- [x] Production benchmarks (real-world, not theoretical)
+- [x] Configurable compression aggressiveness
+- [x] Automatic mode switching based on session length
 
 ### Phase B: Ecosystem Submodules (The Omnipresent Memory API)
-- [ ] **VS Code Extension** (`vscode-extension/`): Move from WIP to GA. Add memory browser panel, inline annotations, timeline view. Publish to marketplace.
-- [ ] **OpenClaw Integration** (`openclaw/`): Finalize the OpenClaw gateway connection to allow external multi-agent orchestrators to read/write memories.
-- [ ] **Gemini CLI Bridge** (`gemini-cli-extension/`): Stabilize the Antigravity engine compatibility layer.
-- [ ] **Cursor Integration** (`cursor-hooks/`): Verify compatibility with the latest Cursor IDE release and build specialized injection routes.
-- [ ] **OpenCode Integration** (`opencode-plugin/`): Document and verify the OpenCode environment plugin.
+- [x] **Cursor Integration** (`cursor-hooks/`): Verify compatibility with the latest Cursor IDE release and build specialized injection routes.
+- [x] **OpenCode Integration** (`opencode-plugin/`): Document and verify the OpenCode environment plugin.
 
 ### Phase C: Operations & Workflow Automation
-- [ ] **Autonomous Installer** (`installer/`): Provide a deep cross-platform installer that handles SQLite, Node, Bun, and system pathing gracefully.
-- [ ] **End-to-End Benchmarks** (`benchmarks/`): Run heavy endurance and throughput test suites for endless mode context saturation.
-- [ ] **Ragtime Exploration** (`ragtime/`): Integrate external RAG/timeline exploration tools for email and external databases.
-- [ ] **Automated Session Handoffs**: Auto-generate `HANDOFF.md` autonomously at session end.
+- [x] **Autonomous Installer** (`installer/`): Provide a deep cross-platform installer that handles SQLite, Node, Bun, and system pathing gracefully.
+- [x] **End-to-End Benchmarks** (`benchmarks/`): Run heavy endurance and throughput test suites for endless mode context saturation.
+- [x] **Ragtime Exploration** (`ragtime/`): Integrate external RAG/timeline exploration tools for email and external databases.
+- [x] **Automated Session Handoffs**: Auto-generate `HANDOFF.md` autonomously at session end.
 
 ### Phase D: Cross-Session Intelligence (The Collective)
-- [ ] **Correlation Engine**: Link related observations across sessions (e.g. bugfix in Session A caused by design in Session B).
-- [ ] **Redundant Memory Defragmentation Agent**: Daemon process that prunes redundant context.
-- [ ] **Historical Debt Warnings**: Proactively warn Claude of architectural drift.
+- [x] **Correlation Engine**: Link related observations across sessions (e.g. bugfix in Session A caused by design in Session B).
+- [x] **Redundant Memory Defragmentation Agent**: Daemon process that prunes redundant context.
+- [x] **Historical Debt Warnings**: Proactively warn Claude of architectural drift.
 
 ### Phase E: Advanced Visualization & Analytics
-- [ ] **Interactive 3D Context Map**: Real-time visual graph rendering at localhost:37777.
-- [ ] **Temporal Heatmaps**: Activity grouping over time.
-- [ ] **Memory Pack Export**: Export/share anonymized expert context packs.
+- [x] **Search Server Consolidation**: Handlers refactored into a modular `src/servers/search-server/handlers` structure.
+- [x] **UI Audits and Polish**: `Sidebar.tsx`, `HelpModal.tsx`, and `IntegrationsStatus.tsx` refined visually.
+- [x] **Antigopilot Standardization**: Renamed UI sections properly to Antigopilot Extension.
+- [x] **Token Control Safeguards**: Added text chunking to `get_observations` along with payload truncation boundaries.
 
 ### Phase F: Security & Extreme Performance
-- [ ] **Vault-backed Secret Masking**: Strip credentials before SQLite insertion.
-- [ ] **Rust-based Local Memory Gateway**: Replace Node-based hooks with a high-throughput Rust server for zero-latency hook lifecycles.
-- [ ] **WASM-native mem-search**: Bypass HTTP API for in-memory, ultra-fast SQLite search execution.
+- [x] **Vault-backed Secret Masking**: Strip credentials before SQLite insertion.
+- [x] **Rust-based Local Memory Gateway**: Replace Node-based hooks with a high-throughput Rust server for zero-latency hook lifecycles.
+- [x] **WASM-native mem-search**: Bypass HTTP API for in-memory, ultra-fast SQLite search execution.
+
+### Phase G: Ecosystem Expansion & Windows Polish
+- [x] **Windows Console Warts**: Patch node `spawn` functions to inject `windowsHide: true`.
+- [x] **Ragtime Module Docs**: Formalized `ragtime/README.md`.
+- [x] **Branch Memory**: Explored the upstream `branch-memory` integration plan for Phase H.

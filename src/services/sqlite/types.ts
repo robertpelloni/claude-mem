@@ -29,6 +29,7 @@ export interface OverviewRow {
 export interface MemoryRow {
   id: number;
   session_id: string;
+  memory_session_id: string;
   text: string;
   document_id?: string;
   keywords?: string;
@@ -83,6 +84,14 @@ export interface TitleRow {
   title: string;
   created_at: string;
   project: string;
+}
+
+export interface ObservationCorrelationRow {
+  id: number;
+  source_observation_id: number;
+  target_observation_id: number;
+  similarity_score: number;
+  created_at_epoch: number;
 }
 
 /**
@@ -148,7 +157,7 @@ export interface TranscriptEventInput {
  */
 export function normalizeTimestamp(timestamp: string | Date | number | undefined): { isoString: string; epoch: number } {
   let date: Date;
-  
+
   if (!timestamp) {
     date = new Date();
   } else if (timestamp instanceof Date) {
@@ -166,7 +175,7 @@ export function normalizeTimestamp(timestamp: string | Date | number | undefined
         // Try common formats
         const cleaned = timestamp.replace(/\s+/g, 'T').replace(/T+/g, 'T');
         date = new Date(cleaned);
-        
+
         // Still invalid? Use current time
         if (isNaN(date.getTime())) {
           date = new Date();
@@ -176,7 +185,7 @@ export function normalizeTimestamp(timestamp: string | Date | number | undefined
   } else {
     date = new Date();
   }
-  
+
   return {
     isoString: date.toISOString(),
     epoch: date.getTime()
@@ -216,6 +225,7 @@ export interface ObservationRow {
   files_modified: string | null; // JSON array
   prompt_number: number | null;
   discovery_tokens: number; // ROI metrics: tokens spent discovering this observation
+  branch_id: string; // Used to isolate parallel conversation forks in Phase H
   created_at: string;
   created_at_epoch: number;
 }

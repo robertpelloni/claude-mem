@@ -1,0 +1,1 @@
+import { SessionSearch } from '../../services/sqlite/SessionSearch.js';\nimport { SessionStore } from '../../services/sqlite/SessionStore.js';\nimport { Client } from '@modelcontextprotocol/sdk/client/index.js';\n\nexport interface HandlerContext {\n  search: SessionSearch;\n  store: SessionStore;\n  chromaClient: Client | null;\n}

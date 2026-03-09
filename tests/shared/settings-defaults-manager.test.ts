@@ -21,7 +21,18 @@ describe('SettingsDefaultsManager', () => {
   let tempDir: string;
   let settingsPath: string;
 
+  let originalEnv: Record<string, string | undefined> = {};
+
   beforeEach(() => {
+    // Save all CLAUDE_MEM_ env vars and delete them to prevent test pollution
+    originalEnv = {};
+    for (const key of Object.keys(process.env)) {
+      if (key.startsWith('CLAUDE_MEM_')) {
+        originalEnv[key] = process.env[key];
+        delete process.env[key];
+      }
+    }
+    
     // Create unique temp directory for each test
     tempDir = join(tmpdir(), `settings-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     mkdirSync(tempDir, { recursive: true });
@@ -29,6 +40,18 @@ describe('SettingsDefaultsManager', () => {
   });
 
   afterEach(() => {
+    // Restore original env vars
+    for (const key of Object.keys(process.env)) {
+      if (key.startsWith('CLAUDE_MEM_')) {
+        delete process.env[key];
+      }
+    }
+    for (const [key, value] of Object.entries(originalEnv)) {
+      if (value !== undefined) {
+        process.env[key] = value;
+      }
+    }
+
     // Clean up temp directory
     try {
       rmSync(tempDir, { recursive: true, force: true });

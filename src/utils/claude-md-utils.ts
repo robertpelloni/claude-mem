@@ -58,7 +58,7 @@ function isValidPathForClaudeMd(filePath: string, projectRoot?: string): boolean
   // If projectRoot provided, ensure path stays within project boundaries
   if (projectRoot) {
     // For relative paths, resolve against projectRoot; for absolute paths, use directly
-    const resolved = path.isAbsolute(filePath) ? filePath : path.resolve(projectRoot, filePath);
+    const resolved = path.resolve(projectRoot, filePath);
     const normalizedRoot = path.resolve(projectRoot);
     if (!resolved.startsWith(normalizedRoot + path.sep) && resolved !== normalizedRoot) {
       return false;

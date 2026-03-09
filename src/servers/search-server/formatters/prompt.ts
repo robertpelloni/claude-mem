@@ -1,3 +1,4 @@
+import { logger } from '../../../utils/logger.js';
 import { UserPromptSearchResult } from '../../../services/sqlite/types.js';
 
 /**

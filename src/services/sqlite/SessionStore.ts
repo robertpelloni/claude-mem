@@ -51,6 +51,7 @@ export class SessionStore {
     this.addOnUpdateCascadeToForeignKeys();
     this.addObservationContentHashColumn();
     this.addSessionCustomTitleColumn();
+    this.addBranchIdColumn();
   }
 
   /**
@@ -100,6 +101,7 @@ export class SessionStore {
         type TEXT NOT NULL,
         created_at TEXT NOT NULL,
         created_at_epoch INTEGER NOT NULL,
+        branch_id TEXT DEFAULT 'main' NOT NULL,
         FOREIGN KEY(memory_session_id) REFERENCES sdk_sessions(memory_session_id) ON DELETE CASCADE ON UPDATE CASCADE
       );
 
@@ -874,6 +876,25 @@ export class SessionStore {
   }
 
   /**
+   * Add branch_id column to observations to support non-linear timeline forks (migration 24)
+   * The default is 'main' to keep existing observations intact.
+   */
+  private addBranchIdColumn(): void {
+    const applied = this.db.prepare('SELECT version FROM schema_versions WHERE version = ?').get(24) as SchemaVersion | undefined;
+    if (applied) return;
+
+    const tableInfo = this.db.query('PRAGMA table_info(observations)').all() as TableColumnInfo[];
+    const hasColumn = tableInfo.some(col => col.name === 'branch_id');
+
+    if (!hasColumn) {
+      this.db.run("ALTER TABLE observations ADD COLUMN branch_id TEXT DEFAULT 'main'");
+      logger.debug('DB', 'Added branch_id column to observations table');
+    }
+
+    this.db.prepare('INSERT OR IGNORE INTO schema_versions (version, applied_at) VALUES (?, ?)').run(24, new Date().toISOString());
+  }
+
+  /**
    * Update the memory session ID for a session
    * Called by SDKAgent when it captures the session ID from the first SDK message
    * Also used to RESET to null on stale resume failures (worker-service.ts)
@@ -1638,6 +1659,7 @@ export class SessionStore {
       concepts: string[];
       files_read: string[];
       files_modified: string[];
+      branch_id?: string;
     }>,
     summary: {
       request: string;
@@ -1663,8 +1685,8 @@ export class SessionStore {
       const obsStmt = this.db.prepare(`
         INSERT INTO observations
         (memory_session_id, project, type, title, subtitle, facts, narrative, concepts,
-         files_read, files_modified, prompt_number, discovery_tokens, created_at, created_at_epoch)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         files_read, files_modified, prompt_number, discovery_tokens, branch_id, created_at, created_at_epoch)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
 
       for (const observation of observations) {
@@ -1681,6 +1703,7 @@ export class SessionStore {
           JSON.stringify(observation.files_modified),
           promptNumber || null,
           discoveryTokens,
+          observation.branch_id || 'main',
           timestampIso,
           timestampEpoch
         );
@@ -1756,6 +1779,7 @@ export class SessionStore {
       concepts: string[];
       files_read: string[];
       files_modified: string[];
+      branch_id?: string;
     }>,
     summary: {
       request: string;
@@ -1783,8 +1807,8 @@ export class SessionStore {
       const obsStmt = this.db.prepare(`
         INSERT INTO observations
         (memory_session_id, project, type, title, subtitle, facts, narrative, concepts,
-         files_read, files_modified, prompt_number, discovery_tokens, created_at, created_at_epoch)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         files_read, files_modified, prompt_number, discovery_tokens, branch_id, created_at, created_at_epoch)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
 
       for (const observation of observations) {
@@ -1801,6 +1825,7 @@ export class SessionStore {
           JSON.stringify(observation.files_modified),
           promptNumber || null,
           discoveryTokens,
+          observation.branch_id || 'main',
           timestampIso,
           timestampEpoch
         );

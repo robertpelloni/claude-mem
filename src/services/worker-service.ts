@@ -114,6 +114,7 @@ import { SearchManager } from './worker/SearchManager.js';
 import { FormattingService } from './worker/FormattingService.js';
 import { TimelineService } from './worker/TimelineService.js';
 import { SessionEventBroadcaster } from './worker/events/SessionEventBroadcaster.js';
+import { DefragDaemon } from './worker/tasks/DefragDaemon.js';
 
 // HTTP route handlers
 import { ViewerRoutes } from './worker/http/routes/ViewerRoutes.js';
@@ -172,6 +173,9 @@ export class WorkerService {
   private settingsManager: SettingsManager;
   private sessionEventBroadcaster: SessionEventBroadcaster;
 
+  // Background Tasks
+  private defragDaemon: DefragDaemon;
+
   // Route handlers
   private searchRoutes: SearchRoutes | null = null;
 
@@ -214,6 +218,8 @@ export class WorkerService {
     this.settingsManager = new SettingsManager(this.dbManager);
     this.sessionEventBroadcaster = new SessionEventBroadcaster(this.sseBroadcaster, this);
 
+    this.defragDaemon = new DefragDaemon(this.dbManager, this.sdkAgent);
+
     // Set callback for when sessions are deleted
     this.sessionManager.setOnSessionDeleted(() => {
       this.broadcastProcessingStatus();
@@ -243,10 +249,10 @@ export class WorkerService {
           authMethod: getAuthMethodDescription(),
           lastInteraction: this.lastAiInteraction
             ? {
-                timestamp: this.lastAiInteraction.timestamp,
-                success: this.lastAiInteraction.success,
-                ...(this.lastAiInteraction.error && { error: this.lastAiInteraction.error }),
-              }
+              timestamp: this.lastAiInteraction.timestamp,
+              success: this.lastAiInteraction.success,
+              ...(this.lastAiInteraction.error && { error: this.lastAiInteraction.error }),
+            }
             : null,
         };
       },
@@ -428,6 +434,9 @@ export class WorkerService {
       this.server.registerRoutes(this.searchRoutes);
       logger.info('WORKER', 'SearchManager initialized and search routes registered');
 
+      // Start Background Daemons
+      this.defragDaemon.start();
+
       // DB and search are ready — mark initialization complete so hooks can proceed.
       // MCP connection is tracked separately via mcpReady and is NOT required for
       // the worker to serve context/search requests.
@@ -590,7 +599,7 @@ export class WorkerService {
 
         // Detect stale resume failures - SDK session context was lost
         if ((errorMessage.includes('aborted by user') || errorMessage.includes('No conversation found'))
-            && session.memorySessionId) {
+          && session.memorySessionId) {
           logger.warn('SDK', 'Detected stale resume failure, clearing memorySessionId for fresh start', {
             sessionId: session.sessionDbId,
             memorySessionId: session.memorySessionId,

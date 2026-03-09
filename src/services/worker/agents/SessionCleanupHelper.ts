@@ -9,7 +9,7 @@
  * so there's no pendingProcessingIds tracking or processed message cleanup.
  */
 
-import type { ActiveSession } from '../../worker-types.js';
+import type { ActiveSession } from "../../../types/index.js";
 import { logger } from '../../../utils/logger.js';
 import type { WorkerRef } from './types.js';
 

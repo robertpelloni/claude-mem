@@ -278,8 +278,8 @@ export function parseElapsedTime(etime: string): number {
   const dayMatch = cleaned.match(/^(\d+)-(\d+):(\d+):(\d+)$/);
   if (dayMatch) {
     totalMinutes = parseInt(dayMatch[1], 10) * 24 * 60 +
-                   parseInt(dayMatch[2], 10) * 60 +
-                   parseInt(dayMatch[3], 10);
+      parseInt(dayMatch[2], 10) * 60 +
+      parseInt(dayMatch[3], 10);
     return totalMinutes;
   }
 
@@ -668,7 +668,8 @@ export function spawnDaemon(
     const child = spawn(setsidPath, [process.execPath, scriptPath, '--daemon'], {
       detached: true,
       stdio: 'ignore',
-      env
+      env,
+      windowsHide: true
     });
 
     if (child.pid === undefined) {
@@ -683,7 +684,8 @@ export function spawnDaemon(
   const child = spawn(process.execPath, [scriptPath, '--daemon'], {
     detached: true,
     stdio: 'ignore',
-    env
+    env,
+    windowsHide: true
   });
 
   if (child.pid === undefined) {

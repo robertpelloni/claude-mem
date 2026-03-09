@@ -9,6 +9,7 @@ import { logger } from '../../../utils/logger.js';
  */
 export interface ObservationInput {
   type: string;
+  branch_id?: string;
   title: string | null;
   subtitle: string | null;
   facts: string[];
@@ -36,6 +37,7 @@ export interface GetObservationsByIdsOptions {
   type?: string | string[];
   concepts?: string | string[];
   files?: string | string[];
+  branch_id?: string;
 }
 
 /**

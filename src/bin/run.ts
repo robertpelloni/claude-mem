@@ -17,7 +17,8 @@ const [scriptPath, ...scriptArgs] = args;
 
 const child = spawn(runtime, [scriptPath, ...scriptArgs], {
   stdio: 'inherit',
-  env: process.env
+  env: process.env,
+  windowsHide: true
 });
 
 child.on('error', (err) => {

@@ -6,45 +6,45 @@
  * - session-init handler proceeds with SDK agent init when contextInjected=false
  * - SessionManager.getSession returns undefined for uninitialized sessions
  * - SessionManager.getSession returns session after initialization
+ *
+ * NOTE: This test file deliberately avoids mock.module() because Bun hoists
+ * mock.module calls and they permanently pollute the module registry for all
+ * parallel test files in the same process (see #1100). Instead, we use spyOn
+ * on already-imported modules, which cleans up properly via mockRestore().
  */
 import { describe, it, expect, beforeEach, afterEach, spyOn, mock } from 'bun:test';
 import { homedir } from 'os';
 import { join } from 'path';
 
-// Mock modules that cause import chain issues - MUST be before handler imports
-// paths.ts calls SettingsDefaultsManager.get() at module load time
-mock.module('../../src/shared/SettingsDefaultsManager.js', () => ({
-  SettingsDefaultsManager: {
-    get: (key: string) => {
-      if (key === 'CLAUDE_MEM_DATA_DIR') return join(homedir(), '.claude-mem');
-      return '';
-    },
-    getInt: () => 0,
-    loadFromFile: () => ({ CLAUDE_MEM_EXCLUDED_PROJECTS: [] }),
-  },
-}));
-
-mock.module('../../src/shared/worker-utils.js', () => ({
-  ensureWorkerRunning: () => Promise.resolve(true),
-  getWorkerPort: () => 37777,
-}));
-
-mock.module('../../src/utils/project-name.js', () => ({
-  getProjectName: () => 'test-project',
-}));
-
-mock.module('../../src/utils/project-filter.js', () => ({
-  isProjectExcluded: () => false,
-}));
-
-// Now import after mocks
+// Import the actual modules so we can spyOn them
+import { SettingsDefaultsManager } from '../../src/shared/SettingsDefaultsManager.js';
+import * as workerUtils from '../../src/shared/worker-utils.js';
+import * as projectName from '../../src/utils/project-name.js';
+import * as projectFilter from '../../src/utils/project-filter.js';
 import { logger } from '../../src/utils/logger.js';
 
-// Suppress logger output during tests
-let loggerSpies: ReturnType<typeof spyOn>[] = [];
+// Spies that get set up before each test and torn down after
+let spies: ReturnType<typeof spyOn>[] = [];
 
 beforeEach(() => {
-  loggerSpies = [
+  spies = [
+    // Mock SettingsDefaultsManager methods
+    spyOn(SettingsDefaultsManager, 'get').mockImplementation((key: string) => {
+      if (key === 'CLAUDE_MEM_DATA_DIR') return join(homedir(), '.claude-mem');
+      return '';
+    }),
+    spyOn(SettingsDefaultsManager, 'getInt').mockImplementation(() => 0),
+    spyOn(SettingsDefaultsManager, 'loadFromFile').mockImplementation(() => ({ CLAUDE_MEM_EXCLUDED_PROJECTS: '' } as any)),
+
+    // Mock worker utilities
+    spyOn(workerUtils, 'ensureWorkerRunning').mockImplementation(() => Promise.resolve(true)),
+    spyOn(workerUtils, 'getWorkerPort').mockImplementation(() => 37777),
+
+    // Mock project utilities
+    spyOn(projectName, 'getProjectName').mockImplementation(() => 'test-project'),
+    spyOn(projectFilter, 'isProjectExcluded').mockImplementation(() => false),
+
+    // Suppress logger output
     spyOn(logger, 'info').mockImplementation(() => {}),
     spyOn(logger, 'debug').mockImplementation(() => {}),
     spyOn(logger, 'warn').mockImplementation(() => {}),
@@ -54,7 +54,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  loggerSpies.forEach(spy => spy.mockRestore());
+  spies.forEach(spy => spy.mockRestore());
 });
 
 describe('Context Re-Injection Guard (#1079)', () => {

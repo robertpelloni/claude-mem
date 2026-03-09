@@ -262,6 +262,7 @@ export const migration004: Migration = {
         type TEXT NOT NULL,
         created_at TEXT NOT NULL,
         created_at_epoch INTEGER NOT NULL,
+        branch_id TEXT DEFAULT 'main' NOT NULL,
         FOREIGN KEY(memory_session_id) REFERENCES sdk_sessions(memory_session_id) ON DELETE CASCADE
       );
 
@@ -510,6 +511,34 @@ export const migration007: Migration = {
 
 
 /**
+ * Migration 008 - Add observation correlations table for Phase D Cross-Session Intelligence
+ */
+export const migration008: Migration = {
+  version: 8,
+  up: (db: Database) => {
+    db.run(`
+      CREATE TABLE IF NOT EXISTS observation_correlations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        source_observation_id INTEGER NOT NULL,
+        target_observation_id INTEGER NOT NULL,
+        similarity_score REAL NOT NULL,
+        created_at_epoch INTEGER NOT NULL,
+        FOREIGN KEY(source_observation_id) REFERENCES observations(id) ON DELETE CASCADE,
+        FOREIGN KEY(target_observation_id) REFERENCES observations(id) ON DELETE CASCADE,
+        UNIQUE(source_observation_id, target_observation_id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_correlations_source ON observation_correlations(source_observation_id);
+      CREATE INDEX IF NOT EXISTS idx_correlations_target ON observation_correlations(target_observation_id);
+    `);
+    console.log('✅ Created observation_correlations table for cross-session intelligence');
+  },
+  down: (db: Database) => {
+    db.run('DROP TABLE IF EXISTS observation_correlations');
+  }
+};
+
+/**
  * All migrations in order
  */
 export const migrations: Migration[] = [
@@ -519,5 +548,6 @@ export const migrations: Migration[] = [
   migration004,
   migration005,
   migration006,
-  migration007
+  migration007,
+  migration008
 ];

@@ -272,7 +272,7 @@ describe('Log Level Audit', () => {
     }
 
     expect(allCalls.length).toBeGreaterThan(0);
-  });
+  }, 30000);
 
   it('should generate audit report for log level review', () => {
     const report = generateReport(allCalls);

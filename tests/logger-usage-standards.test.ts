@@ -38,6 +38,9 @@ const EXCLUDED_PATTERNS = [
   /cli\/hook-command\.ts$/,  // CLI hook command uses console.log/error for hook protocol output
   /cli\/handlers\/user-message\.ts$/,  // User message handler uses console.error for user-visible context
   /services\/transcripts\/cli\.ts$/,  // CLI transcript subcommands use console.log for user-visible interactive output
+  /sdk\/worker\.ts$/,  // SDK worker is a spawned subprocess — uses console.error for stderr-based IPC logging
+  /utils\/silent-debug\.ts$/,  // Last-resort fallback when log file write fails — console.error is intentional
+  /smart-file-read\/wasm-binding\.ts$/,  // Low-level WASM initialization logging
 ];
 
 // Files that should always use logger (core business logic)

@@ -381,7 +381,7 @@ export class ChromaMcpManager {
       try {
         certifiPath = execSync(
           'uvx --with certifi python -c "import certifi; print(certifi.where())"',
-          { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 10000 }
+          { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 10000, windowsHide: true }
         ).trim();
       } catch {
         return undefined;
@@ -395,7 +395,7 @@ export class ChromaMcpManager {
       try {
         zscalerCert = execSync(
           'security find-certificate -a -c "Zscaler" -p /Library/Keychains/System.keychain',
-          { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 5000 }
+          { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 5000, windowsHide: true }
         );
       } catch {
         return undefined;

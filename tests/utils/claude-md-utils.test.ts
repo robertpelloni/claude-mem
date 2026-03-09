@@ -378,7 +378,7 @@ describe('updateFolderClaudeMdFiles', () => {
     // Should call API with absolute path /home/user/my-project/src/utils
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const callUrl = (fetchMock.mock.calls[0] as unknown[])[0] as string;
-    expect(callUrl).toContain(encodeURIComponent('/home/user/my-project/src/utils'));
+    expect(callUrl).toContain(encodeURIComponent(path.join('/home/user/my-project', 'src/utils')));
   });
 
   it('should accept absolute paths within projectRoot and use them directly', async () => {
@@ -463,8 +463,7 @@ describe('updateFolderClaudeMdFiles', () => {
     // Should call API with normalized path (no double slashes)
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const callUrl = (fetchMock.mock.calls[0] as unknown[])[0] as string;
-    // path.join normalizes the path, so /home/user/my-project/ + src/utils becomes /home/user/my-project/src/utils
-    expect(callUrl).toContain(encodeURIComponent('/home/user/my-project/src/utils'));
+    expect(callUrl).toContain(encodeURIComponent(path.join('/home/user/my-project', 'src/utils')));
     // Should NOT contain double slashes (except in http://)
     expect(callUrl.replace('http://', '')).not.toContain('//');
   });
@@ -525,7 +524,7 @@ describe('updateFolderClaudeMdFiles', () => {
     // Should only fetch once for the shared folder
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const callUrl = (fetchMock.mock.calls[0] as unknown[])[0] as string;
-    expect(callUrl).toContain(encodeURIComponent('/home/user/project/src/utils'));
+    expect(callUrl).toContain(encodeURIComponent(path.join('/home/user/project', 'src/utils')));
   });
 
   it('should handle empty string paths gracefully with projectRoot', async () => {
@@ -542,7 +541,7 @@ describe('updateFolderClaudeMdFiles', () => {
     // Should skip empty strings and only process valid path
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const callUrl = (fetchMock.mock.calls[0] as unknown[])[0] as string;
-    expect(callUrl).toContain(encodeURIComponent('/home/user/project/src'));
+    expect(callUrl).toContain(encodeURIComponent(path.join('/home/user/project', 'src')));
   });
 });
 

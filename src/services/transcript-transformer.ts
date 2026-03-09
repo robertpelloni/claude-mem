@@ -16,7 +16,7 @@ import { logger } from '../utils/logger.js';
 import { appendToolOutput, trimBackupFile } from '../shared/tool-output-backup.js';
 import { silentDebug } from '../utils/silent-debug.js';
 import type { TranscriptEntry, UserTranscriptEntry, ToolResultContent } from '../types/transcript.js';
-import type { Observation } from './worker-types.js';
+import type { Observation } from "../types/index.js";
 
 export interface TransformStats {
   originalTokens: number;
