@@ -44,7 +44,7 @@ export const HelpPage: React.FC = () => {
         {activeTab === 'overview' && (
           <HelpSection title="Overview">
             <p>
-              Claude-Mem is a persistent memory system for AI coding assistants. It automatically captures your work context,
+              Borg-Extension is a persistent memory system for AI coding assistants. It automatically captures your work context,
               summarizes it, and makes it available to future sessions.
             </p>
             <h4>Key Features</h4>
@@ -89,7 +89,7 @@ export const HelpPage: React.FC = () => {
             </p>
             <h4>Privacy Control</h4>
             <p>
-              Claude-Mem respects your privacy. You can exclude sensitive content from being stored by wrapping it in tags:
+              Borg-Extension respects your privacy. You can exclude sensitive content from being stored by wrapping it in tags:
             </p>
             <div className="code-block">
               &lt;private&gt;<br />
@@ -133,7 +133,7 @@ export const HelpPage: React.FC = () => {
           <HelpSection title="Integrations">
             <h4>Claude Code</h4>
             <p>
-              The primary integration. Uses the <code>claude-mem</code> plugin.
+              The primary integration. Uses the <code>borg-extension</code> plugin.
             </p>
             <h4>OpenCode</h4>
             <p>
@@ -155,7 +155,7 @@ export const HelpPage: React.FC = () => {
         {activeTab === 'config' && (
           <HelpSection title="Configuration">
             <p>
-              Configure Claude-Mem via <code>~/.claude-mem/settings.json</code> or the Settings menu in this UI.
+              Configure Borg-Extension via <code>~/.borg-extension/settings.json</code> or the Settings menu in this UI.
             </p>
             <h4>Key Settings</h4>
             <ul>

@@ -48,8 +48,8 @@ export class MemoryViewerPanel {
 
         // Otherwise, create a new panel.
         const panel = vscode.window.createWebviewPanel(
-            'claudeMemViewer',
-            'Claude Mem Viewer',
+            'borgExtensionViewer',
+            'Borg Extension Viewer',
             column || vscode.ViewColumn.One,
             {
                 enableScripts: true,
@@ -79,7 +79,7 @@ export class MemoryViewerPanel {
             const isHealthy = await workerClient.isWorkerHealthy();
 
             if (!isHealthy) {
-                this._panel.webview.html = this._getErrorHtml('Worker service is not running. Please start it using "npm run worker:restart" in your claude-mem installation folder.');
+                this._panel.webview.html = this._getErrorHtml('Worker service is not running. Please start it using "npm run worker:restart" in your borg-extension installation folder.');
                 return;
             }
 
@@ -99,7 +99,7 @@ export class MemoryViewerPanel {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Claude Mem Viewer</title>
+    <title>Borg Extension Viewer</title>
     <style>
         body, html {
             margin: 0;
@@ -116,7 +116,7 @@ export class MemoryViewerPanel {
     </style>
 </head>
 <body>
-    <iframe src="${url}" title="Claude Mem Web UI"></iframe>
+    <iframe src="${url}" title="Borg Extension Web UI"></iframe>
 </body>
 </html>`;
     }

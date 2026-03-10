@@ -99,7 +99,7 @@ export async function handle_get_timeline_by_query(args: any, context: HandlerCo
             if (obs.subtitle) {
               lines.push(`   - ${obs.subtitle}`);
             }
-            lines.push(`   - Source: claude-mem://observation/${obs.id}`);
+            lines.push(`   - Source: borg-extension://observation/${obs.id}`);
             lines.push('');
           }
 
@@ -230,7 +230,7 @@ export async function handle_get_timeline_by_query(args: any, context: HandlerCo
                 // Render session
                 const sess = item.data;
                 const title = sess.request || 'Session summary';
-                const link = `claude-mem://session-summary/${sess.id}`;
+                const link = `borg-extension://session-summary/${sess.id}`;
 
                 lines.push(`**🎯 #S${sess.id}** ${title} (${formatDateTime(item.epoch)}) [→](${link})`);
                 lines.push('');

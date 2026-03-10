@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
-import { ClaudeMemDatabase } from '../../src/services/sqlite/Database.js';
+import { BorgExtensionDatabase } from '../../src/services/sqlite/Database.js';
 import {
   storeObservation,
   getObservationById,
@@ -27,7 +27,7 @@ describe('Observations Module', () => {
   let db: Database;
 
   beforeEach(() => {
-    db = new ClaudeMemDatabase(':memory:').db;
+    db = new BorgExtensionDatabase(':memory:').db;
   });
 
   afterEach(() => {

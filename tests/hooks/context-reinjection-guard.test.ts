@@ -95,7 +95,7 @@ describe('Context Re-Injection Guard (#1079)', () => {
           sessionId: 'test-session-123',
           cwd: '/test/project',
           prompt: 'second prompt in this session',
-          platform: 'claude-code',
+          platform: 'borg-engine',
         });
 
         // Should return success without making the second /sessions/42/init call
@@ -149,7 +149,7 @@ describe('Context Re-Injection Guard (#1079)', () => {
           sessionId: 'test-session-456',
           cwd: '/test/project',
           prompt: 'first prompt in session',
-          platform: 'claude-code',
+          platform: 'borg-engine',
         });
 
         expect(result.continue).toBe(true);
@@ -201,7 +201,7 @@ describe('Context Re-Injection Guard (#1079)', () => {
           sessionId: 'test-session-789',
           cwd: '/test/project',
           prompt: 'test prompt',
-          platform: 'claude-code',
+          platform: 'borg-engine',
         });
 
         expect(result.continue).toBe(true);

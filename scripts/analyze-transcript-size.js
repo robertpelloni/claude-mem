@@ -3,7 +3,7 @@
 import fs from 'fs';
 import readline from 'readline';
 
-const TRANSCRIPT_PATH = process.argv[2] || '/Users/alexnewman/.claude/projects/-Users-alexnewman-Scripts-claude-mem/agent-e41f2b47.jsonl';
+const TRANSCRIPT_PATH = process.argv[2] || '/Users/alexnewman/.claude/projects/-Users-alexnewman-Scripts-borg-extension/agent-e41f2b47.jsonl';
 
 async function analyzeTranscript() {
   console.log(`Analyzing: ${TRANSCRIPT_PATH}\n`);

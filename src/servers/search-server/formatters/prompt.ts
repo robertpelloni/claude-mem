@@ -9,7 +9,7 @@ export function formatUserPromptIndex(prompt: UserPromptSearchResult, index: num
 
   return `${index + 1}. "${prompt.prompt_text}"
    Date: ${date} | Prompt #${prompt.prompt_number}
-   Source: claude-mem://user-prompt/${prompt.id}`;
+   Source: borg-extension://user-prompt/${prompt.id}`;
 }
 
 /**
@@ -18,7 +18,7 @@ export function formatUserPromptIndex(prompt: UserPromptSearchResult, index: num
 export function formatUserPromptResult(prompt: UserPromptSearchResult): string {
   const contentParts: string[] = [];
   contentParts.push(`## User Prompt #${prompt.prompt_number}`);
-  contentParts.push(`*Source: claude-mem://user-prompt/${prompt.id}*`);
+  contentParts.push(`*Source: borg-extension://user-prompt/${prompt.id}*`);
   contentParts.push('');
   contentParts.push(prompt.prompt_text);
   contentParts.push('');

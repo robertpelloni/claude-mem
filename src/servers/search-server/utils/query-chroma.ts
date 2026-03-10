@@ -2,7 +2,7 @@ import { logger } from '../../../utils/logger.js';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { silentDebug } from '../../../utils/silent-debug.js';
 
-const COLLECTION_NAME = 'cm__claude-mem';
+const COLLECTION_NAME = 'cm__borg-extension';
 
 /**
  * Query Chroma vector database via MCP

@@ -26,7 +26,7 @@ export function getConfiguredRuntime(): Runtime | undefined {
     return envRuntime;
   }
 
-  const settingsPath = join(homedir(), '.claude-mem', 'settings.json');
+  const settingsPath = join(homedir(), '.borg-extension', 'settings.json');
   if (existsSync(settingsPath)) {
     try {
       const settings = JSON.parse(readFileSync(settingsPath, 'utf-8'));

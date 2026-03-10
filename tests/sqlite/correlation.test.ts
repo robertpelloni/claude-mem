@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, mock } from 'bun:test';
 import { CorrelationEngine } from '../../src/services/domain/CorrelationEngine.js';
-import { ClaudeMemDatabase } from '../../src/services/sqlite/Database.js';
+import { BorgExtensionDatabase } from '../../src/services/sqlite/Database.js';
 
 // Mock ChromaOrchestrator so we don't need a real Chroma DB running
 const mockQueryDocuments = mock();
@@ -18,11 +18,11 @@ mock.module('../../src/services/chroma/ChromaOrchestrator.js', () => {
 });
 
 describe('CorrelationEngine Tests', () => {
-    let claudeDb: ClaudeMemDatabase;
+    let claudeDb: BorgExtensionDatabase;
     let engine: CorrelationEngine;
 
     beforeEach(() => {
-        claudeDb = new ClaudeMemDatabase(':memory:');
+        claudeDb = new BorgExtensionDatabase(':memory:');
 
         // Ensure missing tables from newer migrations are created manually
         // because the test env pathing prevents MigrationRunner from finding the scripts

@@ -5,18 +5,18 @@ import { SessionManager } from '../../src/services/worker/SessionManager.js';
 import { DefragDaemon } from '../../src/services/worker/tasks/DefragDaemon.js';
 import { createSDKSession, updateMemorySessionId } from '../../src/services/sqlite/Sessions.js';
 import { storeObservation } from '../../src/services/sqlite/Observations.js';
-import { ClaudeMemDatabase } from '../../src/services/sqlite/Database.js';
+import { BorgExtensionDatabase } from '../../src/services/sqlite/Database.js';
 
 describe('DefragDaemon Integration Tests', () => {
     let dbManager: DatabaseManager;
     let sessionManager: SessionManager;
     let sdkAgent: SDKAgent;
     let daemon: DefragDaemon;
-    let claudeDb: ClaudeMemDatabase;
+    let claudeDb: BorgExtensionDatabase;
 
     beforeEach(async () => {
         // 1. Create fully migrated in-memory DB
-        claudeDb = new ClaudeMemDatabase(':memory:');
+        claudeDb = new BorgExtensionDatabase(':memory:');
 
         // 2. Mock dbManager to return our migrated db
         dbManager = {

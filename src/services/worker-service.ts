@@ -347,7 +347,7 @@ export class WorkerService {
     this.server.registerRoutes(new DataRoutes(this.paginationHelper, this.dbManager, this.sessionManager, this.sseBroadcaster, this, this.startTime));
     this.server.registerRoutes(new SettingsRoutes(this.settingsManager));
     this.server.registerRoutes(new LogsRoutes());
-    this.server.registerRoutes(new MemoryRoutes(this.dbManager, 'claude-mem'));
+    this.server.registerRoutes(new MemoryRoutes(this.dbManager, 'borg-extension'));
   }
 
   /**
@@ -1121,8 +1121,8 @@ async function main() {
       const platform = process.argv[3];
       const event = process.argv[4];
       if (!platform || !event) {
-        console.error('Usage: claude-mem hook <platform> <event>');
-        console.error('Platforms: claude-code, cursor, raw');
+        console.error('Usage: borg-extension hook <platform> <event>');
+        console.error('Platforms: borg-engine, cursor, raw');
         console.error('Events: context, session-init, observation, summarize, session-complete');
         process.exit(1);
       }

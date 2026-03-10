@@ -13,7 +13,7 @@ const transcriptPath = process.argv[2];
 
 if (!transcriptPath) {
   console.error('Usage: node scripts/transform-transcript.js <transcript-path>');
-  console.error('Example: node scripts/transform-transcript.js ~/.claude/projects/-Users-alexnewman-Scripts-claude-mem/4094399f-bbd7-425b-855a-b985fe9c0dee.jsonl');
+  console.error('Example: node scripts/transform-transcript.js ~/.claude/projects/-Users-alexnewman-Scripts-borg-extension/4094399f-bbd7-425b-855a-b985fe9c0dee.jsonl');
   process.exit(1);
 }
 

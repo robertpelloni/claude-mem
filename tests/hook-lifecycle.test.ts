@@ -72,34 +72,34 @@ describe('Codex CLI Compatibility (#744)', () => {
     });
   });
 
-  describe('claudeCodeAdapter session_id fallbacks', () => {
+  describe('borgEngineAdapter session_id fallbacks', () => {
     it('should use session_id when present', async () => {
-      const { claudeCodeAdapter } = await import('../src/cli/adapters/claude-code.js');
-      const input = claudeCodeAdapter.normalizeInput({ session_id: 'claude-123', cwd: '/tmp' });
+      const { borgEngineAdapter } = await import('../src/cli/adapters/borg-engine.js');
+      const input = borgEngineAdapter.normalizeInput({ session_id: 'claude-123', cwd: '/tmp' });
       expect(input.sessionId).toBe('claude-123');
     });
 
     it('should fall back to id field (Codex CLI format)', async () => {
-      const { claudeCodeAdapter } = await import('../src/cli/adapters/claude-code.js');
-      const input = claudeCodeAdapter.normalizeInput({ id: 'codex-456', cwd: '/tmp' });
+      const { borgEngineAdapter } = await import('../src/cli/adapters/borg-engine.js');
+      const input = borgEngineAdapter.normalizeInput({ id: 'codex-456', cwd: '/tmp' });
       expect(input.sessionId).toBe('codex-456');
     });
 
     it('should fall back to sessionId field (camelCase format)', async () => {
-      const { claudeCodeAdapter } = await import('../src/cli/adapters/claude-code.js');
-      const input = claudeCodeAdapter.normalizeInput({ sessionId: 'camel-789', cwd: '/tmp' });
+      const { borgEngineAdapter } = await import('../src/cli/adapters/borg-engine.js');
+      const input = borgEngineAdapter.normalizeInput({ sessionId: 'camel-789', cwd: '/tmp' });
       expect(input.sessionId).toBe('camel-789');
     });
 
     it('should return undefined when no session ID field is present', async () => {
-      const { claudeCodeAdapter } = await import('../src/cli/adapters/claude-code.js');
-      const input = claudeCodeAdapter.normalizeInput({ cwd: '/tmp' });
+      const { borgEngineAdapter } = await import('../src/cli/adapters/borg-engine.js');
+      const input = borgEngineAdapter.normalizeInput({ cwd: '/tmp' });
       expect(input.sessionId).toBeUndefined();
     });
 
     it('should handle undefined input gracefully', async () => {
-      const { claudeCodeAdapter } = await import('../src/cli/adapters/claude-code.js');
-      const input = claudeCodeAdapter.normalizeInput(undefined);
+      const { borgEngineAdapter } = await import('../src/cli/adapters/borg-engine.js');
+      const input = borgEngineAdapter.normalizeInput(undefined);
       expect(input.sessionId).toBeUndefined();
       expect(input.cwd).toBe(process.cwd());
     });
@@ -257,35 +257,35 @@ describe('Cursor IDE Compatibility (#838, #1049)', () => {
 
 describe('Hook Lifecycle - Claude Code Adapter', () => {
   it('should default suppressOutput to true when not explicitly set', async () => {
-    const { claudeCodeAdapter } = await import('../src/cli/adapters/claude-code.js');
+    const { borgEngineAdapter } = await import('../src/cli/adapters/borg-engine.js');
 
     // Result with no suppressOutput field
-    const output = claudeCodeAdapter.formatOutput({ continue: true });
+    const output = borgEngineAdapter.formatOutput({ continue: true });
     expect(output).toEqual({ continue: true, suppressOutput: true });
   });
 
   it('should default both continue and suppressOutput to true for empty result', async () => {
-    const { claudeCodeAdapter } = await import('../src/cli/adapters/claude-code.js');
+    const { borgEngineAdapter } = await import('../src/cli/adapters/borg-engine.js');
 
-    const output = claudeCodeAdapter.formatOutput({});
+    const output = borgEngineAdapter.formatOutput({});
     expect(output).toEqual({ continue: true, suppressOutput: true });
   });
 
   it('should respect explicit suppressOutput: false', async () => {
-    const { claudeCodeAdapter } = await import('../src/cli/adapters/claude-code.js');
+    const { borgEngineAdapter } = await import('../src/cli/adapters/borg-engine.js');
 
-    const output = claudeCodeAdapter.formatOutput({ continue: true, suppressOutput: false });
+    const output = borgEngineAdapter.formatOutput({ continue: true, suppressOutput: false });
     expect(output).toEqual({ continue: true, suppressOutput: false });
   });
 
   it('should use hookSpecificOutput format for context injection', async () => {
-    const { claudeCodeAdapter } = await import('../src/cli/adapters/claude-code.js');
+    const { borgEngineAdapter } = await import('../src/cli/adapters/borg-engine.js');
 
     const result = {
       hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: 'test context' },
       systemMessage: 'test message'
     };
-    const output = claudeCodeAdapter.formatOutput(result) as Record<string, unknown>;
+    const output = borgEngineAdapter.formatOutput(result) as Record<string, unknown>;
     expect(output.hookSpecificOutput).toEqual({ hookEventName: 'SessionStart', additionalContext: 'test context' });
     expect(output.systemMessage).toBe('test message');
     // Should NOT have continue/suppressOutput when using hookSpecificOutput

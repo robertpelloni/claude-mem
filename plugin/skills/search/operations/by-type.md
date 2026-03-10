@@ -14,7 +14,7 @@ Find observations by their classification (bugfix, feature, refactor, decision, 
 
 Using the wrapper script (recommended - single permission prompt):
 ```bash
-claude-mem-search.cjs by-type bugfix --limit=10 --format=index
+borg-extension-search.cjs by-type bugfix --limit=10 --format=index
 ```
 
 Or using curl directly:
@@ -44,17 +44,17 @@ curl -s "http://localhost:37777/api/search/by-type?type=bugfix&limit=10&format=i
 
 **"Show me recent bugs we fixed"**
 ```bash
-claude-mem-search.cjs by-type bugfix --limit=10 --format=index
+borg-extension-search.cjs by-type bugfix --limit=10 --format=index
 ```
 
 **"What features did we add yesterday?"**
 ```bash
-claude-mem-search.cjs by-type feature --from=2025-11-09T00:00:00 --to=2025-11-09T23:59:59 --format=index
+borg-extension-search.cjs by-type feature --from=2025-11-09T00:00:00 --to=2025-11-09T23:59:59 --format=index
 ```
 
 **"What architectural decisions have we made?"**
 ```bash
-claude-mem-search.cjs by-type decision --limit=10 --format=full
+borg-extension-search.cjs by-type decision --limit=10 --format=full
 ```
 
 ## How to Present Results

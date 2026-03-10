@@ -4,8 +4,8 @@
 
 set -e
 
-SETTINGS_PATH="$HOME/.claude-mem/settings.json"
-BACKUP_PATH="$HOME/.claude-mem/settings.json.backup"
+SETTINGS_PATH="$HOME/.borg-extension/settings.json"
+BACKUP_PATH="$HOME/.borg-extension/settings.json.backup"
 
 echo "=== Endless Mode Toggle Validation ==="
 echo ""

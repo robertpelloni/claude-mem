@@ -20,7 +20,7 @@ import { fileURLToPath } from 'url';
 const IS_WINDOWS = process.platform === 'win32';
 
 // Self-resolve plugin root when CLAUDE_PLUGIN_ROOT is not set by Claude Code.
-// Upstream bug: anthropics/claude-code#24529 — Stop hooks (and on Linux, all hooks)
+// Upstream bug: anthropics/borg-engine#24529 — Stop hooks (and on Linux, all hooks)
 // don't receive CLAUDE_PLUGIN_ROOT, causing script paths to resolve to /scripts/...
 // which doesn't exist. This fallback derives the plugin root from bun-runner.js's
 // own filesystem location (this file lives in <plugin-root>/scripts/).
@@ -87,7 +87,7 @@ function isPluginDisabledInClaudeSettings() {
     const settingsPath = join(configDir, 'settings.json');
     if (!existsSync(settingsPath)) return false;
     const settings = JSON.parse(readFileSync(settingsPath, 'utf-8'));
-    return settings?.enabledPlugins?.['claude-mem@thedotmack'] === false;
+    return settings?.enabledPlugins?.['borg-extension@thedotmack'] === false;
   } catch {
     return false;
   }

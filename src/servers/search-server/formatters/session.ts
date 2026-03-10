@@ -10,7 +10,7 @@ export function formatSessionIndex(session: SessionSummarySearchResult, index: n
 
   return `${index + 1}. ${title}
    Date: ${date}
-   Source: claude-mem://session/${session.sdk_session_id}`;
+   Source: borg-extension://session/${session.sdk_session_id}`;
 }
 
 /**
@@ -22,7 +22,7 @@ export function formatSessionResult(session: SessionSummarySearchResult): string
   // Build content from available fields
   const contentParts: string[] = [];
   contentParts.push(`## ${title}`);
-  contentParts.push(`*Source: claude-mem://session/${session.sdk_session_id}*`);
+  contentParts.push(`*Source: borg-extension://session/${session.sdk_session_id}*`);
   contentParts.push('');
 
   if (session.completed) {

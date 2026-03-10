@@ -1,10 +1,10 @@
 {
-  "name": "claude-mem",
+  "name": "borg-extension",
   "version": "10.5.7",
   "description": "Memory compression system for Claude Code - persist context across sessions",
   "keywords": [
     "claude",
-    "claude-code",
+    "borg-engine",
     "claude-agent-sdk",
     "mcp",
     "plugin",
@@ -19,11 +19,11 @@
   "license": "AGPL-3.0",
   "repository": {
     "type": "git",
-    "url": "https://github.com/thedotmack/claude-mem.git"
+    "url": "https://github.com/thedotmack/borg-extension.git"
   },
-  "homepage": "https://github.com/thedotmack/claude-mem#readme",
+  "homepage": "https://github.com/thedotmack/borg-extension#readme",
   "bugs": {
-    "url": "https://github.com/thedotmack/claude-mem/issues"
+    "url": "https://github.com/thedotmack/borg-extension/issues"
   },
   "type": "module",
   "exports": {
@@ -52,8 +52,8 @@
     "sync-marketplace": "node scripts/sync-marketplace.cjs",
     "sync-marketplace:force": "node scripts/sync-marketplace.cjs --force",
     "build:binaries": "node scripts/build-worker-binary.js",
-    "worker:logs": "tail -n 50 ~/.claude-mem/logs/worker-$(date +%Y-%m-%d).log",
-    "worker:tail": "tail -f 50 ~/.claude-mem/logs/worker-$(date +%Y-%m-%d).log",
+    "worker:logs": "tail -n 50 ~/.borg-extension/logs/worker-$(date +%Y-%m-%d).log",
+    "worker:tail": "tail -f 50 ~/.borg-extension/logs/worker-$(date +%Y-%m-%d).log",
     "changelog:generate": "node scripts/generate-changelog.js",
     "discord:notify": "node scripts/discord-release-notify.js",
     "worker:start": "bun plugin/scripts/worker-service.cjs start",

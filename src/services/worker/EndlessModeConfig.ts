@@ -48,7 +48,7 @@ function getNumberSetting(settingsValue: any, envValue: string | undefined, defa
  * Get Endless Mode configuration from settings or environment
  */
 export function getConfig(): EndlessModeConfigType {
-  const settingsPath = path.join(homedir(), '.claude-mem', 'settings.json');
+  const settingsPath = path.join(homedir(), '.borg-extension', 'settings.json');
   let settings: any = {};
 
   if (existsSync(settingsPath)) {

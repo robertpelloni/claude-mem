@@ -23,7 +23,7 @@ if (!existsSync(nodeModulesPath)) {
    user messages in Claude Code UI until a better method is provided.
 ---
 
-⚠️  Claude-Mem: First-Time Setup
+⚠️  Borg-Extension: First-Time Setup
 
 Dependencies have been installed in the background. This only happens once.
 
@@ -32,7 +32,7 @@ Dependencies have been installed in the background. This only happens once.
    • Use /init to write or update your CLAUDE.md for better project context
    • Try /clear after one session to see what context looks like
 
-Thank you for installing Claude-Mem!
+Thank you for installing Borg-Extension!
 
 This message was not added to your startup context, so you can continue working as normal.
 `);
@@ -68,7 +68,7 @@ try {
 🚀 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 🚀
 
    We launched on Product Hunt!
-   https://tinyurl.com/claude-mem-ph
+   https://tinyurl.com/borg-extension-ph
 
    ⭐ Your upvote means the world - thank you!
 
@@ -97,7 +97,7 @@ try {
   }
 
   console.error(
-    "\n\n📝 Claude-Mem Context Loaded\n" +
+    "\n\n📝 Borg-Extension Context Loaded\n" +
     "   ℹ️  Note: This appears as stderr but is informational only\n\n" +
     output +
     "\n\n💡 New! Wrap all or part of any message with <private> ... </private> to prevent storing sensitive information in your observation history.\n" +

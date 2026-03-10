@@ -66,7 +66,7 @@ function extractToolUses(transcriptPath: string): ToolUseInfo[] {
  */
 async function testTransformation() {
   // Configuration
-  const TRANSCRIPT_PATH = process.argv[2] || '/Users/alexnewman/.claude/projects/-Users-alexnewman-Scripts-claude-mem/96890334-a801-4bce-bdc7-b3aa19678a21.jsonl';
+  const TRANSCRIPT_PATH = process.argv[2] || '/Users/alexnewman/.claude/projects/-Users-alexnewman-Scripts-borg-extension/96890334-a801-4bce-bdc7-b3aa19678a21.jsonl';
   const DRY_RUN = process.argv.includes('--dry-run');
 
   console.log('='.repeat(80));

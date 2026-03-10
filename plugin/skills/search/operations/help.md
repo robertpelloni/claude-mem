@@ -4,7 +4,7 @@ Get comprehensive API documentation from the search service.
 
 ## Wrapper Script (Recommended)
 
-The `claude-mem-search` wrapper script provides a unified interface to all search endpoints with:
+The `borg-extension-search` wrapper script provides a unified interface to all search endpoints with:
 - **Single permission prompt** (no repeated permission requests)
 - Proper error handling
 - Clean output formatting
@@ -13,22 +13,22 @@ The `claude-mem-search` wrapper script provides a unified interface to all searc
 
 ```bash
 # Search operations
-claude-mem-search.cjs observations "authentication" --format=index --limit=5
-claude-mem-search.cjs sessions "bug fix" --format=index
-claude-mem-search.cjs prompts "implement feature" --project=myapp
+borg-extension-search.cjs observations "authentication" --format=index --limit=5
+borg-extension-search.cjs sessions "bug fix" --format=index
+borg-extension-search.cjs prompts "implement feature" --project=myapp
 
 # Filtered search
-claude-mem-search.cjs by-type bugfix --limit=10 --from=2025-11-09T00:00:00
-claude-mem-search.cjs by-concept discovery --limit=5
-claude-mem-search.cjs by-file "auth/login.ts" --format=index
+borg-extension-search.cjs by-type bugfix --limit=10 --from=2025-11-09T00:00:00
+borg-extension-search.cjs by-concept discovery --limit=5
+borg-extension-search.cjs by-file "auth/login.ts" --format=index
 
 # Context retrieval
-claude-mem-search.cjs recent --project=myapp --limit=3
-claude-mem-search.cjs timeline 1234 --depth-before=5 --depth-after=5
-claude-mem-search.cjs timeline-by-query "authentication" --depth-before=10
+borg-extension-search.cjs recent --project=myapp --limit=3
+borg-extension-search.cjs timeline 1234 --depth-before=5 --depth-after=5
+borg-extension-search.cjs timeline-by-query "authentication" --depth-before=10
 
 # Documentation
-claude-mem-search.cjs help
+borg-extension-search.cjs help
 ```
 
 ## Direct API Command
@@ -53,7 +53,7 @@ Returns complete API documentation in JSON format including:
 
 ```json
 {
-  "title": "Claude-Mem Search API",
+  "title": "Borg-Extension Search API",
   "description": "HTTP API for searching persistent memory",
   "endpoints": [
     {
@@ -87,7 +87,7 @@ Returns complete API documentation in JSON format including:
 ## How to Present
 
 ```markdown
-## Claude-Mem Search API Documentation
+## Borg-Extension Search API Documentation
 
 **Base URL:** http://localhost:37777
 **Port:** Configurable via `CLAUDE_MEM_WORKER_PORT` (default: 37777)

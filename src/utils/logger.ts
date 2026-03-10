@@ -1,5 +1,5 @@
 /**
- * Structured Logger for claude-mem Worker Service
+ * Structured Logger for borg-extension Worker Service
  * Provides readable, traceable logging with correlation IDs and data flow tracking
  */
 
@@ -26,7 +26,7 @@ interface LogContext {
 
 // NOTE: This default must match DEFAULT_DATA_DIR in src/shared/SettingsDefaultsManager.ts
 // Inlined here to avoid circular dependency with SettingsDefaultsManager
-const DEFAULT_DATA_DIR = join(homedir(), '.claude-mem');
+const DEFAULT_DATA_DIR = join(homedir(), '.borg-extension');
 
 class Logger {
   private level: LogLevel | null = null;
@@ -59,7 +59,7 @@ class Logger {
 
       // Create log file path with date
       const date = new Date().toISOString().split('T')[0];
-      this.logFilePath = join(logsDir, `claude-mem-${date}.log`);
+      this.logFilePath = join(logsDir, `borg-extension-${date}.log`);
     } catch (error) {
       // If log file initialization fails, just log to console
       console.error('[LOGGER] Failed to initialize log file:', error);

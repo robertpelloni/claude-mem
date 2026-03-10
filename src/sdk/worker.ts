@@ -75,7 +75,7 @@ class SDKWorker {
     this.db = new SessionStore();
     this.abortController = new AbortController();
     this.socketPath = getWorkerSocketPath(sessionDbId);
-    console.error('[claude-mem worker] Worker instance created', {
+    console.error('[borg-extension worker] Worker instance created', {
       sessionDbId,
       socketPath: this.socketPath
     });
@@ -85,7 +85,7 @@ class SDKWorker {
    * Main run loop
    */
   async run(): Promise<void> {
-    console.error('[claude-mem worker] Worker run() started', {
+    console.error('[borg-extension worker] Worker run() started', {
       sessionDbId: this.sessionDbId,
       socketPath: this.socketPath
     });
@@ -94,13 +94,13 @@ class SDKWorker {
       // Load session info
       const session = await this.loadSession();
       if (!session) {
-        console.error('[claude-mem worker] Session not found in database', {
+        console.error('[borg-extension worker] Session not found in database', {
           sessionDbId: this.sessionDbId
         });
         process.exit(1);
       }
 
-      console.error('[claude-mem worker] Session loaded successfully', {
+      console.error('[borg-extension worker] Session loaded successfully', {
         sessionDbId: this.sessionDbId,
         project: session.project,
         sdkSessionId: session.sdk_session_id,
@@ -112,20 +112,20 @@ class SDKWorker {
 
       // Start Unix socket server
       await this.startSocketServer();
-      console.error('[claude-mem worker] Socket server started successfully', {
+      console.error('[borg-extension worker] Socket server started successfully', {
         socketPath: this.socketPath,
         sessionDbId: this.sessionDbId
       });
 
       // Run SDK agent with streaming input
-      console.error('[claude-mem worker] Starting SDK agent', {
+      console.error('[borg-extension worker] Starting SDK agent', {
         sessionDbId: this.sessionDbId,
         model: MODEL
       });
       await this.runSDKAgent();
 
       // Mark session as completed
-      console.error('[claude-mem worker] SDK agent completed, marking session as completed', {
+      console.error('[borg-extension worker] SDK agent completed, marking session as completed', {
         sessionDbId: this.sessionDbId,
         sdkSessionId: this.sdkSessionId
       });
@@ -134,7 +134,7 @@ class SDKWorker {
       this.cleanup();
 
     } catch (error: any) {
-      console.error('[claude-mem worker] Fatal error in run()', {
+      console.error('[borg-extension worker] Fatal error in run()', {
         sessionDbId: this.sessionDbId,
         error: error.message,
         stack: error.stack
@@ -162,14 +162,14 @@ class SDKWorker {
     return new Promise((resolve, reject) => {
       console.error(`[SDK Worker DEBUG] Creating net server...`);
       this.server = net.createServer((socket) => {
-        console.error('[claude-mem worker] Socket connection received', {
+        console.error('[borg-extension worker] Socket connection received', {
           sessionDbId: this.sessionDbId,
           socketPath: this.socketPath
         });
         let buffer = '';
 
         socket.on('data', (chunk) => {
-          console.error('[claude-mem worker] Data received on socket', {
+          console.error('[borg-extension worker] Data received on socket', {
             sessionDbId: this.sessionDbId,
             chunkSize: chunk.length
           });
@@ -183,14 +183,14 @@ class SDKWorker {
             if (line.trim()) {
               try {
                 const message: WorkerMessage = JSON.parse(line);
-                console.error('[claude-mem worker] Message received from socket', {
+                console.error('[borg-extension worker] Message received from socket', {
                   sessionDbId: this.sessionDbId,
                   messageType: message.type,
                   rawMessage: line.substring(0, 500) // Truncate to avoid massive logs
                 });
                 this.handleMessage(message);
               } catch (err) {
-                console.error('[claude-mem worker] Invalid message - failed to parse JSON', {
+                console.error('[borg-extension worker] Invalid message - failed to parse JSON', {
                   sessionDbId: this.sessionDbId,
                   error: err instanceof Error ? err.message : String(err),
                   rawLine: line.substring(0, 200)
@@ -201,7 +201,7 @@ class SDKWorker {
         });
 
         socket.on('error', (err) => {
-          console.error('[claude-mem worker] Socket connection error', {
+          console.error('[borg-extension worker] Socket connection error', {
             sessionDbId: this.sessionDbId,
             error: err.message,
             stack: err.stack
@@ -211,12 +211,12 @@ class SDKWorker {
 
       this.server.on('error', (err: any) => {
         if (err.code === 'EADDRINUSE') {
-          console.error('[claude-mem worker] Socket already in use', {
+          console.error('[borg-extension worker] Socket already in use', {
             socketPath: this.socketPath,
             sessionDbId: this.sessionDbId
           });
         } else {
-          console.error('[claude-mem worker] Server error', {
+          console.error('[borg-extension worker] Server error', {
             sessionDbId: this.sessionDbId,
             error: err.message,
             code: err.code,
@@ -238,7 +238,7 @@ class SDKWorker {
    * Handle incoming message from hook
    */
   private handleMessage(message: WorkerMessage): void {
-    console.error('[claude-mem worker] Processing message in handleMessage()', {
+    console.error('[borg-extension worker] Processing message in handleMessage()', {
       sessionDbId: this.sessionDbId,
       messageType: message.type,
       pendingMessagesCount: this.pendingMessages.length
@@ -247,13 +247,13 @@ class SDKWorker {
     this.pendingMessages.push(message);
 
     if (message.type === 'finalize') {
-      console.error('[claude-mem worker] FINALIZE message detected - queued for processing', {
+      console.error('[borg-extension worker] FINALIZE message detected - queued for processing', {
         sessionDbId: this.sessionDbId,
         pendingMessagesCount: this.pendingMessages.length
       });
       // DON'T set isFinalized here - let the generator set it after yielding finalize prompt
     } else if (message.type === 'observation') {
-      console.error('[claude-mem worker] Observation message queued', {
+      console.error('[borg-extension worker] Observation message queued', {
         sessionDbId: this.sessionDbId,
         toolName: message.tool_name,
         inputLength: message.tool_input?.length || 0,
@@ -298,7 +298,7 @@ class SDKWorker {
       if (message.type === 'system' && message.subtype === 'init') {
         const systemMsg = message as SDKSystemMessage;
         if (systemMsg.session_id) {
-          console.error('[claude-mem worker] SDK session initialized', {
+          console.error('[borg-extension worker] SDK session initialized', {
             sessionDbId: this.sessionDbId,
             sdkSessionId: systemMsg.session_id
           });
@@ -314,7 +314,7 @@ class SDKWorker {
           ? content.filter((c: any) => c.type === 'text').map((c: any) => c.text).join('\n')
           : typeof content === 'string' ? content : '';
 
-        console.error('[claude-mem worker] SDK agent response received', {
+        console.error('[borg-extension worker] SDK agent response received', {
           sessionDbId: this.sessionDbId,
           sdkSessionId: this.sdkSessionId,
           contentLength: textContent.length,
@@ -334,7 +334,7 @@ class SDKWorker {
     // Yield initial prompt
     const claudeSessionId = `session-${this.sessionDbId}`;
     const initPrompt = buildInitPrompt(this.project, claudeSessionId, this.userPrompt);
-    console.error('[claude-mem worker] Yielding initial prompt to SDK agent', {
+    console.error('[borg-extension worker] Yielding initial prompt to SDK agent', {
       sessionDbId: this.sessionDbId,
       claudeSessionId,
       project: this.project,
@@ -363,7 +363,7 @@ class SDKWorker {
         const message = this.pendingMessages.shift()!;
 
         if (message.type === 'finalize') {
-          console.error('[claude-mem worker] Processing FINALIZE message in generator', {
+          console.error('[borg-extension worker] Processing FINALIZE message in generator', {
             sessionDbId: this.sessionDbId,
             sdkSessionId: this.sdkSessionId
           });
@@ -371,7 +371,7 @@ class SDKWorker {
           const session = await this.loadSession();
           if (session) {
             const finalizePrompt = buildSummaryPrompt(session);
-            console.error('[claude-mem worker] Yielding finalize prompt to SDK agent', {
+            console.error('[borg-extension worker] Yielding finalize prompt to SDK agent', {
               sessionDbId: this.sessionDbId,
               sdkSessionId: this.sdkSessionId,
               promptLength: finalizePrompt.length,
@@ -387,7 +387,7 @@ class SDKWorker {
               }
             };
           } else {
-            console.error('[claude-mem worker] Failed to load session for finalize prompt', {
+            console.error('[borg-extension worker] Failed to load session for finalize prompt', {
               sessionDbId: this.sessionDbId
             });
           }
@@ -403,7 +403,7 @@ class SDKWorker {
             tool_output: message.tool_output,
             created_at_epoch: Date.now()
           });
-          console.error('[claude-mem worker] Yielding observation prompt to SDK agent', {
+          console.error('[borg-extension worker] Yielding observation prompt to SDK agent', {
             sessionDbId: this.sessionDbId,
             toolName: message.tool_name,
             promptLength: observationPrompt.length
@@ -426,7 +426,7 @@ class SDKWorker {
    * Handle agent message and parse observations/summaries
    */
   private handleAgentMessage(content: string): void {
-    console.error('[claude-mem worker] Parsing agent message for observations and summary', {
+    console.error('[borg-extension worker] Parsing agent message for observations and summary', {
       sessionDbId: this.sessionDbId,
       sdkSessionId: this.sdkSessionId,
       contentLength: content.length
@@ -434,7 +434,7 @@ class SDKWorker {
 
     // Parse observations
     const observations = parseObservations(content);
-    console.error('[claude-mem worker] Observations parsed from response', {
+    console.error('[borg-extension worker] Observations parsed from response', {
       sessionDbId: this.sessionDbId,
       sdkSessionId: this.sdkSessionId,
       observationCount: observations.length
@@ -442,7 +442,7 @@ class SDKWorker {
 
     for (const obs of observations) {
       if (this.sdkSessionId) {
-        console.error('[claude-mem worker] Storing observation in database', {
+        console.error('[borg-extension worker] Storing observation in database', {
           sessionDbId: this.sessionDbId,
           sdkSessionId: this.sdkSessionId,
           project: this.project,
@@ -451,7 +451,7 @@ class SDKWorker {
         });
         this.db.storeObservation(this.sdkSessionId, this.project, obs.type, obs.text);
       } else {
-        console.error('[claude-mem worker] Cannot store observation - no SDK session ID', {
+        console.error('[borg-extension worker] Cannot store observation - no SDK session ID', {
           sessionDbId: this.sessionDbId,
           observationType: obs.type
         });
@@ -459,14 +459,14 @@ class SDKWorker {
     }
 
     // Parse summary (if present)
-    console.error('[claude-mem worker] Attempting to parse summary from response', {
+    console.error('[borg-extension worker] Attempting to parse summary from response', {
       sessionDbId: this.sessionDbId,
       sdkSessionId: this.sdkSessionId
     });
 
     const summary = parseSummary(content);
     if (summary && this.sdkSessionId) {
-      console.error('[claude-mem worker] Summary parsed successfully', {
+      console.error('[borg-extension worker] Summary parsed successfully', {
         sessionDbId: this.sessionDbId,
         sdkSessionId: this.sdkSessionId,
         project: this.project,
@@ -490,7 +490,7 @@ class SDKWorker {
         notes: summary.notes
       };
 
-      console.error('[claude-mem worker] Storing summary in database', {
+      console.error('[borg-extension worker] Storing summary in database', {
         sessionDbId: this.sessionDbId,
         sdkSessionId: this.sdkSessionId,
         project: this.project
@@ -498,17 +498,17 @@ class SDKWorker {
 
       this.db.storeSummary(this.sdkSessionId, this.project, summaryWithArrays);
 
-      console.error('[claude-mem worker] Summary stored successfully in database', {
+      console.error('[borg-extension worker] Summary stored successfully in database', {
         sessionDbId: this.sessionDbId,
         sdkSessionId: this.sdkSessionId,
         project: this.project
       });
     } else if (summary && !this.sdkSessionId) {
-      console.error('[claude-mem worker] Summary parsed but cannot store - no SDK session ID', {
+      console.error('[borg-extension worker] Summary parsed but cannot store - no SDK session ID', {
         sessionDbId: this.sessionDbId
       });
     } else {
-      console.error('[claude-mem worker] No summary found in response', {
+      console.error('[borg-extension worker] No summary found in response', {
         sessionDbId: this.sessionDbId,
         sdkSessionId: this.sdkSessionId
       });
@@ -519,7 +519,7 @@ class SDKWorker {
    * Cleanup socket server and socket file
    */
   private cleanup(): void {
-    console.error('[claude-mem worker] Cleaning up worker resources', {
+    console.error('[borg-extension worker] Cleaning up worker resources', {
       sessionDbId: this.sessionDbId,
       socketPath: this.socketPath,
       hasServer: !!this.server,
@@ -533,7 +533,7 @@ class SDKWorker {
       unlinkSync(this.socketPath);
     }
 
-    console.error('[claude-mem worker] Cleanup complete', {
+    console.error('[borg-extension worker] Cleanup complete', {
       sessionDbId: this.sessionDbId
     });
   }

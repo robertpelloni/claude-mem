@@ -1,6 +1,6 @@
 // Export main components
 export {
-  ClaudeMemDatabase,
+  BorgExtensionDatabase,
   DatabaseManager,
   getDatabase,
   initializeDatabase,

@@ -1,10 +1,10 @@
 <h1 align="center">
   <br>
-  <a href="https://github.com/thedotmack/claude-mem">
+  <a href="https://github.com/thedotmack/borg-extension">
     <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/thedotmack/claude-mem/main/docs/public/claude-mem-logo-for-dark-mode.webp">
-      <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/thedotmack/claude-mem/main/docs/public/claude-mem-logo-for-light-mode.webp">
-      <img src="https://raw.githubusercontent.com/thedotmack/claude-mem/main/docs/public/claude-mem-logo-for-light-mode.webp" alt="Claude-Mem" width="400">
+      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/thedotmack/borg-extension/main/docs/public/borg-extension-logo-for-dark-mode.webp">
+      <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/thedotmack/borg-extension/main/docs/public/borg-extension-logo-for-light-mode.webp">
+      <img src="https://raw.githubusercontent.com/thedotmack/borg-extension/main/docs/public/borg-extension-logo-for-light-mode.webp" alt="Borg-Extension" width="400">
     </picture>
   </a>
   <br>
@@ -45,7 +45,7 @@
   <a href="docs/i18n/README.no.md">🇳🇴 Norsk</a>
 </p>
 
-<h4 align="center">Persistent memory compression system built for <a href="https://claude.com/claude-code" target="_blank">Claude Code</a>.</h4>
+<h4 align="center">Persistent memory compression system built for <a href="https://claude.com/borg-engine" target="_blank">Claude Code</a>.</h4>
 
 <p align="center">
   <a href="LICENSE">
@@ -57,7 +57,7 @@
   <a href="package.json">
     <img src="https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen.svg" alt="Node">
   </a>
-  <a href="https://github.com/thedotmack/awesome-claude-code">
+  <a href="https://github.com/thedotmack/awesome-borg-engine">
     <img src="https://awesome.re/mentioned-badge.svg" alt="Mentioned in Awesome Claude Code">
   </a>
 </p>
@@ -65,9 +65,9 @@
 <p align="center">
   <a href="https://trendshift.io/repositories/15496" target="_blank">
     <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/thedotmack/claude-mem/main/docs/public/trendshift-badge-dark.svg">
-      <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/thedotmack/claude-mem/main/docs/public/trendshift-badge.svg">
-      <img src="https://raw.githubusercontent.com/thedotmack/claude-mem/main/docs/public/trendshift-badge.svg" alt="thedotmack/claude-mem | Trendshift" width="250" height="55"/>
+      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/thedotmack/borg-extension/main/docs/public/trendshift-badge-dark.svg">
+      <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/thedotmack/borg-extension/main/docs/public/trendshift-badge.svg">
+      <img src="https://raw.githubusercontent.com/thedotmack/borg-extension/main/docs/public/trendshift-badge.svg" alt="thedotmack/borg-extension | Trendshift" width="250" height="55"/>
     </picture>
   </a>
 </p>
@@ -75,9 +75,9 @@
 <br>
 
 <p align="center">
-  <a href="https://github.com/thedotmack/claude-mem">
+  <a href="https://github.com/thedotmack/borg-extension">
     <picture>
-      <img src="https://raw.githubusercontent.com/thedotmack/claude-mem/main/docs/public/cm-preview.gif" alt="Claude-Mem Preview" width="800">
+      <img src="https://raw.githubusercontent.com/thedotmack/borg-extension/main/docs/public/cm-preview.gif" alt="Borg-Extension Preview" width="800">
     </picture>
   </a>
 </p>
@@ -93,7 +93,7 @@
 </p>
 
 <p align="center">
-  Claude-Mem seamlessly preserves context across sessions by automatically capturing tool usage observations, generating semantic summaries, and making them available to future sessions. This enables Claude to maintain continuity of knowledge about projects even after sessions end or reconnect.
+  Borg-Extension seamlessly preserves context across sessions by automatically capturing tool usage observations, generating semantic summaries, and making them available to future sessions. This enables Claude to maintain continuity of knowledge about projects even after sessions end or reconnect.
 </p>
 
 ---
@@ -103,24 +103,24 @@
 Start a new Claude Code session in the terminal and enter the following commands:
 
 ```
-> /plugin marketplace add thedotmack/claude-mem
+> /plugin marketplace add thedotmack/borg-extension
 
-> /plugin install claude-mem
+> /plugin install borg-extension
 ```
 
 Restart Claude Code. Context from previous sessions will automatically appear in new sessions.
 
-> **Note:** Claude-Mem is also published on npm, but `npm install -g claude-mem` installs the **SDK/library only** — it does not register the plugin hooks or set up the worker service. To use Claude-Mem as a plugin, always install via the `/plugin` commands above.
+> **Note:** Borg-Extension is also published on npm, but `npm install -g borg-extension` installs the **SDK/library only** — it does not register the plugin hooks or set up the worker service. To use Borg-Extension as a plugin, always install via the `/plugin` commands above.
 
 ### 🦞 OpenClaw Gateway
 
-Install claude-mem as a persistent memory plugin on [OpenClaw](https://openclaw.ai) gateways with a single command:
+Install borg-extension as a persistent memory plugin on [OpenClaw](https://openclaw.ai) gateways with a single command:
 
 ```bash
 curl -fsSL https://install.cmem.ai/openclaw.sh | bash
 ```
 
-The installer handles dependencies, plugin setup, AI provider configuration, worker startup, and optional real-time observation feeds to Telegram, Discord, Slack, and more. See the [OpenClaw Integration Guide](https://docs.claude-mem.ai/openclaw-integration) for details.
+The installer handles dependencies, plugin setup, AI provider configuration, worker startup, and optional real-time observation feeds to Telegram, Discord, Slack, and more. See the [OpenClaw Integration Guide](https://docs.borg-extension.ai/openclaw-integration) for details.
 
 **Key Features:**
 
@@ -150,31 +150,31 @@ npx mintlify dev
 
 ### Getting Started
 
-- **[Installation Guide](https://docs.claude-mem.ai/installation)** - Quick start & advanced installation
-- **[Usage Guide](https://docs.claude-mem.ai/usage/getting-started)** - How Claude-Mem works automatically
-- **[Search Tools](https://docs.claude-mem.ai/usage/search-tools)** - Query your project history with natural language
-- **[Beta Features](https://docs.claude-mem.ai/beta-features)** - Try experimental features like Endless Mode
+- **[Installation Guide](https://docs.borg-extension.ai/installation)** - Quick start & advanced installation
+- **[Usage Guide](https://docs.borg-extension.ai/usage/getting-started)** - How Borg-Extension works automatically
+- **[Search Tools](https://docs.borg-extension.ai/usage/search-tools)** - Query your project history with natural language
+- **[Beta Features](https://docs.borg-extension.ai/beta-features)** - Try experimental features like Endless Mode
 
 ### Best Practices
 
-- **[Context Engineering](https://docs.claude-mem.ai/context-engineering)** - AI agent context optimization principles
-- **[Progressive Disclosure](https://docs.claude-mem.ai/progressive-disclosure)** - Philosophy behind Claude-Mem's context priming strategy
+- **[Context Engineering](https://docs.borg-extension.ai/context-engineering)** - AI agent context optimization principles
+- **[Progressive Disclosure](https://docs.borg-extension.ai/progressive-disclosure)** - Philosophy behind Borg-Extension's context priming strategy
 
 ### Architecture
 
-- **[Overview](https://docs.claude-mem.ai/architecture/overview)** - System components & data flow
-- **[Architecture Evolution](https://docs.claude-mem.ai/architecture-evolution)** - The journey from v3 to v5
-- **[Hooks Architecture](https://docs.claude-mem.ai/hooks-architecture)** - How Claude-Mem uses lifecycle hooks
-- **[Hooks Reference](https://docs.claude-mem.ai/architecture/hooks)** - 7 hook scripts explained
-- **[Worker Service](https://docs.claude-mem.ai/architecture/worker-service)** - HTTP API & Bun management
-- **[Database](https://docs.claude-mem.ai/architecture/database)** - SQLite schema & FTS5 search
-- **[Search Architecture](https://docs.claude-mem.ai/architecture/search-architecture)** - Hybrid search with Chroma vector database
+- **[Overview](https://docs.borg-extension.ai/architecture/overview)** - System components & data flow
+- **[Architecture Evolution](https://docs.borg-extension.ai/architecture-evolution)** - The journey from v3 to v5
+- **[Hooks Architecture](https://docs.borg-extension.ai/hooks-architecture)** - How Borg-Extension uses lifecycle hooks
+- **[Hooks Reference](https://docs.borg-extension.ai/architecture/hooks)** - 7 hook scripts explained
+- **[Worker Service](https://docs.borg-extension.ai/architecture/worker-service)** - HTTP API & Bun management
+- **[Database](https://docs.borg-extension.ai/architecture/database)** - SQLite schema & FTS5 search
+- **[Search Architecture](https://docs.borg-extension.ai/architecture/search-architecture)** - Hybrid search with Chroma vector database
 
 ### Configuration & Development
 
-- **[Configuration](https://docs.claude-mem.ai/configuration)** - Environment variables & settings
-- **[Development](https://docs.claude-mem.ai/development)** - Building, testing, contributing
-- **[Troubleshooting](https://docs.claude-mem.ai/troubleshooting)** - Common issues & solutions
+- **[Configuration](https://docs.borg-extension.ai/configuration)** - Environment variables & settings
+- **[Development](https://docs.borg-extension.ai/development)** - Building, testing, contributing
+- **[Troubleshooting](https://docs.borg-extension.ai/troubleshooting)** - Common issues & solutions
 
 ---
 
@@ -211,13 +211,13 @@ npx mintlify dev
 5. **mem-search Skill** - Natural language queries with progressive disclosure
 6. **Chroma Vector Database** - Hybrid semantic + keyword search for intelligent context retrieval
 
-See [Architecture Overview](https://docs.claude-mem.ai/architecture/overview) for details.
+See [Architecture Overview](https://docs.borg-extension.ai/architecture/overview) for details.
 
 ---
 
 ## mem-search Skill
 
-Claude-Mem provides intelligent memory search through **4 MCP tools** following a token-efficient **3-layer workflow pattern**:
+Borg-Extension provides intelligent memory search through **4 MCP tools** following a token-efficient **3-layer workflow pattern**:
 
 **The 3-Layer Workflow:**
 
@@ -260,7 +260,7 @@ search(query="authentication bug", type="bugfix", limit=10)
 get_observations(ids=[123, 456])
 ```
 
-See [Search Tools Guide](https://docs.claude-mem.ai/usage/search-tools) for detailed examples.
+See [Search Tools Guide](https://docs.borg-extension.ai/usage/search-tools) for detailed examples.
 
 ---
 
@@ -268,7 +268,7 @@ See [Search Tools Guide](https://docs.claude-mem.ai/usage/search-tools) for deta
 
 > **Note**: Endless Mode is an **experimental feature in the beta branch only**. It is not included in the stable release you install via the marketplace. You must manually switch to the beta channel to try it, and it comes with significant caveats (see below).
 
-Claude-Mem offers a **beta channel** with experimental features. Switch between stable and beta versions directly from the web viewer UI.
+Borg-Extension offers a **beta channel** with experimental features. Switch between stable and beta versions directly from the web viewer UI.
 
 ### How to Try Beta
 
@@ -304,7 +304,7 @@ Archive Memory (Disk):        Full tool outputs preserved for recall
 - **Slower than standard mode** - Blocking observation generation adds latency to each tool use
 - **Theoretical projections** - The efficiency claims above are based on simulations, not real-world production data
 
-See [Beta Features Documentation](https://docs.claude-mem.ai/beta-features) for details.
+See [Beta Features Documentation](https://docs.borg-extension.ai/beta-features) for details.
 
 ---
 
@@ -323,7 +323,7 @@ See [Beta Features Documentation](https://docs.claude-mem.ai/beta-features) for 
 
 **v6.4.0 - Dual-Tag Privacy System:**
 - `<private>` tags for user-controlled privacy - wrap sensitive content to exclude from storage
-- System-level `<claude-mem-context>` tags prevent recursive observation storage
+- System-level `<borg-extension-context>` tags prevent recursive observation storage
 - Edge processing ensures private content never reaches database
 
 **v6.3.0 - Version Channel:**
@@ -390,7 +390,7 @@ See [CHANGELOG.md](CHANGELOG.md) for complete version history.
 
 ## Configuration
 
-Settings are managed via the **Web Viewer Dashboard** (click Settings gear icon) or in `~/.claude-mem/settings.json`.
+Settings are managed via the **Web Viewer Dashboard** (click Settings gear icon) or in `~/.borg-extension/settings.json`.
 
 **Available Settings:**
 
@@ -399,7 +399,7 @@ Settings are managed via the **Web Viewer Dashboard** (click Settings gear icon)
 | `CLAUDE_MEM_MODEL` | `claude-sonnet-4-5` | AI model for observations |
 | `CLAUDE_MEM_WORKER_PORT` | `37777` | Worker service port |
 | `CLAUDE_MEM_WORKER_HOST` | `127.0.0.1` | Worker bind address (use `0.0.0.0` for remote access) |
-| `CLAUDE_MEM_DATA_DIR` | `~/.claude-mem` | Data directory location |
+| `CLAUDE_MEM_DATA_DIR` | `~/.borg-extension` | Data directory location |
 | `CLAUDE_MEM_LOG_LEVEL` | `INFO` | Log verbosity (DEBUG, INFO, WARN, ERROR, SILENT) |
 | `CLAUDE_MEM_PYTHON_VERSION` | `3.13` | Python version for chroma-mcp |
 | `CLAUDE_CODE_PATH` | _(auto-detect)_ | Path to Claude executable |
@@ -409,10 +409,10 @@ Settings are managed via the **Web Viewer Dashboard** (click Settings gear icon)
 
 ```bash
 # Edit settings via CLI helper
-./claude-mem-settings.sh
+./borg-extension-settings.sh
 
 # Or edit directly
-nano ~/.claude-mem/settings.json
+nano ~/.borg-extension/settings.json
 
 # View current settings
 curl http://localhost:37777/api/settings
@@ -428,7 +428,7 @@ curl http://localhost:37777/api/settings
 }
 ```
 
-See [Configuration Guide](https://docs.claude-mem.ai/configuration) for details.
+See [Configuration Guide](https://docs.borg-extension.ai/configuration) for details.
 
 ---
 
@@ -436,8 +436,8 @@ See [Configuration Guide](https://docs.claude-mem.ai/configuration) for details.
 
 ```bash
 # Clone and build
-git clone https://github.com/thedotmack/claude-mem.git
-cd claude-mem
+git clone https://github.com/thedotmack/borg-extension.git
+cd borg-extension
 npm install
 npm run build
 
@@ -451,7 +451,7 @@ npm run worker:start
 npm run worker:logs
 ```
 
-See [Development Guide](https://docs.claude-mem.ai/development) for detailed instructions.
+See [Development Guide](https://docs.borg-extension.ai/development) for detailed instructions.
 
 ---
 
@@ -465,10 +465,10 @@ If you're experiencing issues, describe the problem to Claude and the troublesho
 
 - Worker not starting → `npm run worker:restart`
 - No context appearing → `npm run test:context`
-- Database issues → `sqlite3 ~/.claude-mem/claude-mem.db "PRAGMA integrity_check;"`
+- Database issues → `sqlite3 ~/.borg-extension/borg-extension.db "PRAGMA integrity_check;"`
 - Search not working → Check FTS5 tables exist
 
-See [Troubleshooting Guide](https://docs.claude-mem.ai/troubleshooting) for complete solutions.
+See [Troubleshooting Guide](https://docs.borg-extension.ai/troubleshooting) for complete solutions.
 
 ### Windows Known Issues
 
@@ -517,7 +517,7 @@ Contributions are welcome! Please:
 4. Update documentation
 5. Submit a Pull Request
 
-See [Development Guide](https://docs.claude-mem.ai/development) for contribution workflow.
+See [Development Guide](https://docs.borg-extension.ai/development) for contribution workflow.
 
 ---
 
@@ -541,8 +541,8 @@ See the [LICENSE](LICENSE) file for full details.
 ## Support
 
 - **Documentation**: [docs/](docs/)
-- **Issues**: [GitHub Issues](https://github.com/thedotmack/claude-mem/issues)
-- **Repository**: [github.com/thedotmack/claude-mem](https://github.com/thedotmack/claude-mem)
+- **Issues**: [GitHub Issues](https://github.com/thedotmack/borg-extension/issues)
+- **Repository**: [github.com/thedotmack/borg-extension](https://github.com/thedotmack/borg-extension)
 - **Author**: Alex Newman ([@thedotmack](https://github.com/thedotmack))
 
 ---

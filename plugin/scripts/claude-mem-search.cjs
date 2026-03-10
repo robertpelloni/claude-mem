@@ -1,22 +1,22 @@
 #!/usr/bin/env node
 
 /**
- * claude-mem-search: Unified search wrapper for claude-mem HTTP API
+ * borg-extension-search: Unified search wrapper for borg-extension HTTP API
  * 
  * This script wraps all search API endpoints with proper error handling
  * and output formatting, reducing permission prompts in Claude Code.
  * 
  * Usage:
- *   claude-mem-search observations "query" [--format=index] [--limit=20] [--project=name] [--from=date] [--to=date]
- *   claude-mem-search sessions "query" [options]
- *   claude-mem-search prompts "query" [options]
- *   claude-mem-search by-type <type> [options]
- *   claude-mem-search by-concept <concept> [options]
- *   claude-mem-search by-file <path> [options]
- *   claude-mem-search recent [--project=name] [--limit=3]
- *   claude-mem-search timeline <anchor> [--depth-before=10] [--depth-after=10] [--project=name]
- *   claude-mem-search timeline-by-query "query" [options]
- *   claude-mem-search help
+ *   borg-extension-search observations "query" [--format=index] [--limit=20] [--project=name] [--from=date] [--to=date]
+ *   borg-extension-search sessions "query" [options]
+ *   borg-extension-search prompts "query" [options]
+ *   borg-extension-search by-type <type> [options]
+ *   borg-extension-search by-concept <concept> [options]
+ *   borg-extension-search by-file <path> [options]
+ *   borg-extension-search recent [--project=name] [--limit=3]
+ *   borg-extension-search timeline <anchor> [--depth-before=10] [--depth-after=10] [--project=name]
+ *   borg-extension-search timeline-by-query "query" [options]
+ *   borg-extension-search help
  */
 
 const http = require('http');
@@ -106,8 +106,8 @@ async function main() {
   const args = process.argv.slice(2);
   
   if (args.length === 0) {
-    console.error('Usage: claude-mem-search <command> [arguments] [options]');
-    console.error('Run "claude-mem-search help" for more information');
+    console.error('Usage: borg-extension-search <command> [arguments] [options]');
+    console.error('Run "borg-extension-search help" for more information');
     process.exit(1);
   }
 
@@ -240,7 +240,7 @@ async function main() {
         break;
 
       default:
-        throw new Error(`Unknown command: ${command}. Run "claude-mem-search help" for available commands.`);
+        throw new Error(`Unknown command: ${command}. Run "borg-extension-search help" for available commands.`);
     }
 
     console.log(formatOutput(result));

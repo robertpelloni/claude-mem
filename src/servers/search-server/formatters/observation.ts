@@ -11,7 +11,7 @@ export function formatObservationIndex(obs: ObservationSearchResult, index: numb
 
   return `${index + 1}. ${type} ${title}
    Date: ${date}
-   Source: claude-mem://observation/${obs.id}`;
+   Source: borg-extension://observation/${obs.id}`;
 }
 
 /**
@@ -23,7 +23,7 @@ export function formatObservationResult(obs: ObservationSearchResult): string {
   // Build content from available fields
   const contentParts: string[] = [];
   contentParts.push(`## ${title}`);
-  contentParts.push(`*Source: claude-mem://observation/${obs.id}*`);
+  contentParts.push(`*Source: borg-extension://observation/${obs.id}*`);
   contentParts.push('');
 
   if (obs.subtitle) {

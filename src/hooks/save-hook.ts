@@ -43,7 +43,7 @@ const SKIP_TOOLS = new Set([
  */
 function loadEndlessModeConfig(): { enabled: boolean } {
   try {
-    const settingsPath = path.join(homedir(), '.claude-mem', 'settings.json');
+    const settingsPath = path.join(homedir(), '.borg-extension', 'settings.json');
     const settingsData = readFileSync(settingsPath, 'utf-8');
     const settings = JSON.parse(settingsData);
     const env = settings.env || {};
@@ -97,7 +97,7 @@ async function saveHook(input?: PostToolUseInput): Promise<void> {
       });
     } catch (error: any) {
       if (error.cause?.code === 'ECONNREFUSED' || error.name === 'TimeoutError') {
-        throw new Error("There's a problem with the worker. Try: pm2 restart claude-mem-worker");
+        throw new Error("There's a problem with the worker. Try: pm2 restart borg-extension-worker");
       }
     }
     console.log(createHookResponse('PostToolUse', true));
@@ -168,7 +168,7 @@ async function saveHook(input?: PostToolUseInput): Promise<void> {
 
   } catch (error: any) {
     if (error.cause?.code === 'ECONNREFUSED' || error.name === 'TimeoutError') {
-      throw new Error("There's a problem with the worker. Try: pm2 restart claude-mem-worker");
+      throw new Error("There's a problem with the worker. Try: pm2 restart borg-extension-worker");
     }
 
     // Other errors: log but don't block

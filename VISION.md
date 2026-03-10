@@ -1,10 +1,10 @@
-# VISION — Claude-Mem
+# VISION — Borg-Extension
 
 > **The Autonomous Collective Memory for AI Coding Agents**
 
-## What Claude-Mem Is
+## What Borg-Extension Is
 
-Claude-Mem is a **persistent memory compression system** for Claude Code. It seamlessly preserves context across sessions by automatically capturing tool usage observations, generating semantic summaries, and making them available to future sessions. Claude knows what happened last time without being told.
+Borg-Extension is a **persistent memory compression system** for Claude Code. It seamlessly preserves context across sessions by automatically capturing tool usage observations, generating semantic summaries, and making them available to future sessions. Claude knows what happened last time without being told.
 
 ## The Problem
 

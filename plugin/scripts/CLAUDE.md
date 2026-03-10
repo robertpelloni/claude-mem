@@ -1,6 +1,6 @@
 Never read built source files in this directory. These are compiled outputs — read the source files in `src/` instead.
 
-<claude-mem-context>
+<borg-extension-context>
 # Recent Activity
 
 ### Dec 4, 2025
@@ -48,7 +48,7 @@ Never read built source files in this directory. These are compiled outputs — 
 | ID | Time | T | Title | Read |
 |----|------|---|-------|------|
 | #24636 | 10:46 PM | 🔵 | Duplicate Smart Install Scripts in Project Structure | ~288 |
-| #24635 | " | 🔵 | Claude-Mem Smart Install Script Architecture | ~371 |
+| #24635 | " | 🔵 | Borg-Extension Smart Install Script Architecture | ~371 |
 | #24359 | 7:00 PM | 🟣 | Phase 1 Critical Code Fixes Completed via Agent Task | ~441 |
 | #24358 | 6:59 PM | ✅ | Completed Phase 1 Code Fixes for better-sqlite3 Migration | ~385 |
 | #24357 | " | ✅ | Removed createRequire Import from smart-install.js | ~284 |
@@ -122,4 +122,4 @@ Never read built source files in this directory. These are compiled outputs — 
 | #38162 | " | 🔵 | Smart-Install Script Auto-Installs Bun and UV Dependencies | ~495 |
 | #38161 | " | 🔵 | User-Message-Hook Outputs to stderr and Exits with Code 1 | ~211 |
 | #38160 | 7:18 PM | 🔵 | Context-Hook Returns JSON with hookSpecificOutput Structure | ~470 |
-</claude-mem-context>
+</borg-extension-context>

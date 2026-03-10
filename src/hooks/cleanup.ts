@@ -22,7 +22,7 @@ export interface SessionEndInput {
 export async function cleanupHook(input?: SessionEndInput): Promise<void> {
   try {
     // Log hook entry point
-    console.error('[claude-mem cleanup] Hook fired', {
+    console.error('[borg-extension cleanup] Hook fired', {
       input: input ? {
         session_id: input.session_id,
         cwd: input.cwd,
@@ -45,12 +45,12 @@ export async function cleanupHook(input?: SessionEndInput): Promise<void> {
     }
 
     const { session_id, reason } = input;
-    console.error('[claude-mem cleanup] Searching for active SDK session', { session_id, reason });
+    console.error('[borg-extension cleanup] Searching for active SDK session', { session_id, reason });
 
     // Ensure worker is running first (runs cleanup if restarting)
     const workerReady = await ensureWorkerRunning();
     if (!workerReady) {
-      console.error('[claude-mem cleanup] Worker not available - skipping HTTP cleanup');
+      console.error('[borg-extension cleanup] Worker not available - skipping HTTP cleanup');
     }
 
     // Find active SDK session
@@ -59,13 +59,13 @@ export async function cleanupHook(input?: SessionEndInput): Promise<void> {
 
     if (!session) {
       // No active session - nothing to clean up
-      console.error('[claude-mem cleanup] No active SDK session found', { session_id });
+      console.error('[borg-extension cleanup] No active SDK session found', { session_id });
       db.close();
       console.log('{"continue": true, "suppressOutput": true}');
       process.exit(0);
     }
 
-    console.error('[claude-mem cleanup] Active SDK session found', {
+    console.error('[borg-extension cleanup] Active SDK session found', {
       session_id: session.id,
       sdk_session_id: session.sdk_session_id,
       project: session.project
@@ -74,20 +74,20 @@ export async function cleanupHook(input?: SessionEndInput): Promise<void> {
     // 1. Mark session as completed in DB (if not already completed)
     try {
       db.markSessionCompleted(session.id);
-      console.error('[claude-mem cleanup] Session marked as completed in database');
+      console.error('[borg-extension cleanup] Session marked as completed in database');
     } catch (markErr: any) {
-      console.error('[claude-mem cleanup] Failed to mark session as completed:', markErr);
+      console.error('[borg-extension cleanup] Failed to mark session as completed:', markErr);
     }
 
     db.close();
 
-    console.error('[claude-mem cleanup] Cleanup completed successfully');
+    console.error('[borg-extension cleanup] Cleanup completed successfully');
     console.log('{"continue": true, "suppressOutput": true}');
     process.exit(0);
 
   } catch (error: any) {
     // On error, don't block Claude Code exit
-    console.error('[claude-mem cleanup] Unexpected error in hook', {
+    console.error('[borg-extension cleanup] Unexpected error in hook', {
       error: error.message,
       stack: error.stack,
       name: error.name

@@ -10,7 +10,7 @@ import {
 } from '../../types/database.js';
 import type { PendingMessageStore } from './PendingMessageStore.js';
 import { computeObservationContentHash, findDuplicateObservation } from './observations/store.js';
-import { ClaudeMemDatabase } from './Database.js';
+import { BorgExtensionDatabase } from './Database.js';
 
 /**
  * Session data store for SDK sessions, observations, and summaries
@@ -18,12 +18,12 @@ import { ClaudeMemDatabase } from './Database.js';
  */
 export class SessionStore {
   public db: Database;
-  private claudeDb: ClaudeMemDatabase | null = null;
+  private claudeDb: BorgExtensionDatabase | null = null;
 
   constructor(dbInput: string | Database = DB_PATH) {
     if (typeof dbInput === 'string') {
-      // String path: delegate all initialization and migrations to ClaudeMemDatabase
-      this.claudeDb = new ClaudeMemDatabase(dbInput);
+      // String path: delegate all initialization and migrations to BorgExtensionDatabase
+      this.claudeDb = new BorgExtensionDatabase(dbInput);
       this.db = this.claudeDb.db;
     } else {
       // Existing Database instance: use directly (assumes migrations already run)
@@ -561,7 +561,7 @@ export class SessionStore {
    *
    * CRITICAL ARCHITECTURE: Session ID Threading
    * ============================================
-   * This function is the KEY to how claude-mem stays unified across hooks:
+   * This function is the KEY to how borg-extension stays unified across hooks:
    *
    * - NEW hook calls: createSDKSession(session_id, project, prompt)
    * - SAVE hook calls: createSDKSession(session_id, '', '')

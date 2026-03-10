@@ -11,7 +11,7 @@ interface ChromaQueryResult {
 
 export class ChromaOrchestrator {
   private client: Client | null = null;
-  private collectionName = 'cm__claude-mem';
+  private collectionName = 'cm__borg-extension';
 
   async connect(): Promise<void> {
     const transport = new StdioClientTransport({
@@ -24,7 +24,7 @@ export class ChromaOrchestrator {
     });
 
     this.client = new Client({
-      name: 'claude-mem-search-orchestrator',
+      name: 'borg-extension-search-orchestrator',
       version: '1.0.0'
     }, { capabilities: {} });
 

@@ -1,7 +1,7 @@
 /**
  * Logs Routes
  *
- * Handles fetching and clearing log files from ~/.claude-mem/logs/
+ * Handles fetching and clearing log files from ~/.borg-extension/logs/
  */
 
 import express, { Request, Response } from 'express';
@@ -89,7 +89,7 @@ export class LogsRoutes extends BaseRouteHandler {
     const dataDir = SettingsDefaultsManager.get('CLAUDE_MEM_DATA_DIR');
     const logsDir = join(dataDir, 'logs');
     const date = new Date().toISOString().split('T')[0];
-    return join(logsDir, `claude-mem-${date}.log`);
+    return join(logsDir, `borg-extension-${date}.log`);
   }
 
   private getLogsDir(): string {

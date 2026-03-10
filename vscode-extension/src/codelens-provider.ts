@@ -25,9 +25,9 @@ export class MemoryCodeLensProvider implements vscode.CodeLensProvider {
         try {
             if (await workerClient.isWorkerHealthy()) {
                 defaultLenses.push(new vscode.CodeLens(topOfFile, {
-                    title: `$(database) Claude-Mem: View history for ${path.basename(document.uri.fsPath)}`,
-                    tooltip: "Search claude-mem for context related to this file",
-                    command: "claudeMem.openViewer",
+                    title: `$(database) Borg-Extension: View history for ${path.basename(document.uri.fsPath)}`,
+                    tooltip: "Search borg-extension for context related to this file",
+                    command: "borgExtension.openViewer",
                     arguments: [document.uri]
                 }));
             }

@@ -15,9 +15,9 @@ import { join } from 'path';
 import { homedir } from 'os';
 
 const PM2_LOG_DIR = join(homedir(), '.pm2', 'logs');
-const WORKER_OUT_LOG = join(PM2_LOG_DIR, 'claude-mem-worker-out.log');
-const WORKER_ERR_LOG = join(PM2_LOG_DIR, 'claude-mem-worker-error.log');
-const SILENT_LOG = join(homedir(), '.claude-mem', 'silent.log');
+const WORKER_OUT_LOG = join(PM2_LOG_DIR, 'borg-extension-worker-out.log');
+const WORKER_ERR_LOG = join(PM2_LOG_DIR, 'borg-extension-worker-error.log');
+const SILENT_LOG = join(homedir(), '.borg-extension', 'silent.log');
 
 interface ObservationMetric {
   timestamp: string;

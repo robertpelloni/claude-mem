@@ -22,11 +22,11 @@ import { logger } from '../../utils/logger.js';
 import { SettingsDefaultsManager } from '../../shared/SettingsDefaultsManager.js';
 import { USER_SETTINGS_PATH } from '../../shared/paths.js';
 
-const CHROMA_MCP_CLIENT_NAME = 'claude-mem-chroma';
+const CHROMA_MCP_CLIENT_NAME = 'borg-extension-chroma';
 const CHROMA_MCP_CLIENT_VERSION = '1.0.0';
 const MCP_CONNECTION_TIMEOUT_MS = 30_000;
 const RECONNECT_BACKOFF_MS = 10_000; // Don't retry connections faster than this after failure
-const DEFAULT_CHROMA_DATA_DIR = path.join(os.homedir(), '.claude-mem', 'chroma');
+const DEFAULT_CHROMA_DATA_DIR = path.join(os.homedir(), '.borg-extension', 'chroma');
 
 export class ChromaMcpManager {
   private static instance: ChromaMcpManager | null = null;
@@ -357,12 +357,12 @@ export class ChromaMcpManager {
   /**
    * Get or create a combined SSL certificate bundle for Zscaler/corporate proxy environments.
    * On macOS, combines the Python certifi CA bundle with any Zscaler certificates from
-   * the system keychain. Caches the result for 24 hours at ~/.claude-mem/combined_certs.pem.
+   * the system keychain. Caches the result for 24 hours at ~/.borg-extension/combined_certs.pem.
    *
    * Returns the path to the combined cert file, or undefined if not needed/available.
    */
   private getCombinedCertPath(): string | undefined {
-    const combinedCertPath = path.join(os.homedir(), '.claude-mem', 'combined_certs.pem');
+    const combinedCertPath = path.join(os.homedir(), '.borg-extension', 'combined_certs.pem');
 
     if (fs.existsSync(combinedCertPath)) {
       const stats = fs.statSync(combinedCertPath);

@@ -93,7 +93,7 @@ export class SDKAgent {
     const maxConcurrent = parseInt(settings.CLAUDE_MEM_MAX_CONCURRENT_AGENTS, 10) || 2;
     await waitForSlot(maxConcurrent);
 
-    // Build isolated environment from ~/.claude-mem/.env
+    // Build isolated environment from ~/.borg-extension/.env
     // This prevents Issue #733: random ANTHROPIC_API_KEY from project .env files
     // being used instead of the configured auth method (CLI subscription or explicit API key)
     const isolatedEnv = buildIsolatedEnv();
@@ -142,7 +142,7 @@ export class SDKAgent {
         pathToClaudeCodeExecutable: claudePath,
         // Custom spawn function captures PIDs to fix zombie process accumulation
         spawnClaudeCodeProcess: createPidCapturingSpawn(session.sessionDbId),
-        env: isolatedEnv  // Use isolated credentials from ~/.claude-mem/.env, not process.env
+        env: isolatedEnv  // Use isolated credentials from ~/.borg-extension/.env, not process.env
       }
     });
 
@@ -256,7 +256,7 @@ export class SDKAgent {
           // Detect invalid API key — SDK returns this as response text, not an error.
           // Throw so it surfaces in health endpoint and prevents silent failures.
           if (typeof textContent === 'string' && textContent.includes('Invalid API key')) {
-            throw new Error('Invalid API key: check your API key configuration in ~/.claude-mem/settings.json or ~/.claude-mem/.env');
+            throw new Error('Invalid API key: check your API key configuration in ~/.borg-extension/settings.json or ~/.borg-extension/.env');
           }
 
           // Parse and process response using shared ResponseProcessor
@@ -347,7 +347,7 @@ export class SDKAgent {
     });
 
     // Load compression level setting
-    const settingsPath = path.join(homedir(), '.claude-mem', 'settings.json');
+    const settingsPath = path.join(homedir(), '.borg-extension', 'settings.json');
     const settings = SettingsDefaultsManager.loadFromFile(settingsPath);
     const compressionLevel = settings.CLAUDE_MEM_ENDLESS_COMPRESSION || 'auto';
 
@@ -479,14 +479,14 @@ export class SDKAgent {
       logger.debug('SDK', 'Claude executable auto-detection failed', {}, error as Error);
     }
 
-    throw new Error('Claude executable not found. Please either:\n1. Add "claude" to your system PATH, or\n2. Set CLAUDE_CODE_PATH in ~/.claude-mem/settings.json');
+    throw new Error('Claude executable not found. Please either:\n1. Add "claude" to your system PATH, or\n2. Set CLAUDE_CODE_PATH in ~/.borg-extension/settings.json');
   }
 
   /**
    * Get model ID from settings or environment
    */
   private getModelId(): string {
-    const settingsPath = path.join(homedir(), '.claude-mem', 'settings.json');
+    const settingsPath = path.join(homedir(), '.borg-extension', 'settings.json');
     const settings = SettingsDefaultsManager.loadFromFile(settingsPath);
     return settings.CLAUDE_MEM_MODEL;
   }

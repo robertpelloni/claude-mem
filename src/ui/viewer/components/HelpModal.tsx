@@ -52,8 +52,8 @@ export function HelpModal({ isOpen, onClose }: HelpModalProps) {
           <div style={{ padding: '24px', overflowY: 'auto', flex: 1, lineHeight: '1.6', color: 'var(--color-text-secondary)' }}>
             {activeTab === 'general' && (
               <div>
-                <h3 style={{ color: 'var(--color-text-title)', marginBottom: '16px' }}>Claude-Mem</h3>
-                <p>Claude-Mem seamlessly preserves context across sessions by automatically capturing tool usage observations, generating semantic summaries, and making them available to future sessions.</p>
+                <h3 style={{ color: 'var(--color-text-title)', marginBottom: '16px' }}>Borg-Extension</h3>
+                <p>Borg-Extension seamlessly preserves context across sessions by automatically capturing tool usage observations, generating semantic summaries, and making them available to future sessions.</p>
 
                 <h4 style={{ marginTop: '20px', marginBottom: '10px', color: 'var(--color-text-title)' }}>Key Features</h4>
                 <ul style={{ paddingLeft: '20px' }}>
@@ -100,12 +100,12 @@ export function HelpModal({ isOpen, onClose }: HelpModalProps) {
             {activeTab === 'about' && (
               <div>
                 <h3 style={{ color: 'var(--color-text-title)', marginBottom: '16px' }}>About</h3>
-                <p><strong>Claude-Mem</strong> v{process.env.npm_package_version || '10.5.2'}</p>
+                <p><strong>Borg-Extension</strong> v{process.env.npm_package_version || '10.5.2'}</p>
                 <p>Persistent memory compression system built for Claude Code.</p>
 
                 <div style={{ marginTop: '24px', display: 'flex', gap: '12px' }}>
-                  <a href="https://docs.claude-mem.ai" target="_blank" rel="noopener noreferrer" className="community-btn">Documentation</a>
-                  <a href="https://github.com/thedotmack/claude-mem" target="_blank" rel="noopener noreferrer" className="community-btn">GitHub</a>
+                  <a href="https://docs.borg-extension.ai" target="_blank" rel="noopener noreferrer" className="community-btn">Documentation</a>
+                  <a href="https://github.com/thedotmack/borg-extension" target="_blank" rel="noopener noreferrer" className="community-btn">GitHub</a>
                 </div>
               </div>
             )}

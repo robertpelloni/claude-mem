@@ -16,17 +16,17 @@ export interface Migration {
 let dbInstance: Database | null = null;
 
 /**
- * ClaudeMemDatabase - New entry point for the sqlite module
+ * BorgExtensionDatabase - New entry point for the sqlite module
  *
  * Replaces SessionStore as the database coordinator.
  * Sets up bun:sqlite with optimized settings and runs all migrations.
  *
  * Usage:
- *   const db = new ClaudeMemDatabase();  // uses default DB_PATH
- *   const db = new ClaudeMemDatabase('/path/to/db.sqlite');
- *   const db = new ClaudeMemDatabase(':memory:');  // for tests
+ *   const db = new BorgExtensionDatabase();  // uses default DB_PATH
+ *   const db = new BorgExtensionDatabase('/path/to/db.sqlite');
+ *   const db = new BorgExtensionDatabase(':memory:');  // for tests
  */
-export class ClaudeMemDatabase {
+export class BorgExtensionDatabase {
   public db: Database;
 
   constructor(dbPath: string = DB_PATH) {
@@ -61,7 +61,7 @@ export class ClaudeMemDatabase {
 
 /**
  * SQLite Database singleton with migration support and optimized settings
- * @deprecated Use ClaudeMemDatabase instead for new code
+ * @deprecated Use BorgExtensionDatabase instead for new code
  */
 export class DatabaseManager {
   private static instance: DatabaseManager;

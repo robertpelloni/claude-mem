@@ -90,11 +90,11 @@ export class SettingsDefaultsManager {
     CLAUDE_MEM_OPENROUTER_API_KEY: '',  // Empty by default, can be set via UI or env
     CLAUDE_MEM_OPENROUTER_MODEL: 'xiaomi/mimo-v2-flash:free',  // Default OpenRouter model (free tier)
     CLAUDE_MEM_OPENROUTER_SITE_URL: '',  // Optional: for OpenRouter analytics
-    CLAUDE_MEM_OPENROUTER_APP_NAME: 'claude-mem',  // App name for OpenRouter analytics
+    CLAUDE_MEM_OPENROUTER_APP_NAME: 'borg-extension',  // App name for OpenRouter analytics
     CLAUDE_MEM_OPENROUTER_MAX_CONTEXT_MESSAGES: '20',  // Max messages in context window
     CLAUDE_MEM_OPENROUTER_MAX_TOKENS: '100000',  // Max estimated tokens (~100k safety limit)
     // System Configuration
-    CLAUDE_MEM_DATA_DIR: join(homedir(), '.claude-mem'),
+    CLAUDE_MEM_DATA_DIR: join(homedir(), '.borg-extension'),
     CLAUDE_MEM_LOG_LEVEL: 'INFO',
     CLAUDE_MEM_PYTHON_VERSION: '3.13',
     CLAUDE_CODE_PATH: '', // Empty means auto-detect via 'which claude'
@@ -128,7 +128,7 @@ export class SettingsDefaultsManager {
     CLAUDE_MEM_CHROMA_HOST: '127.0.0.1',
     CLAUDE_MEM_CHROMA_PORT: '8000',
     CLAUDE_MEM_CHROMA_SSL: 'false',
-    // Future cloud support (claude-mem pro)
+    // Future cloud support (borg-extension pro)
     CLAUDE_MEM_CHROMA_API_KEY: '',
     CLAUDE_MEM_CHROMA_TENANT: 'default_tenant',
     CLAUDE_MEM_CHROMA_DATABASE: 'default_database',
@@ -187,7 +187,7 @@ export class SettingsDefaultsManager {
    *
    * Configuration Priority:
    *   1. Environment variables (highest priority)
-   *   2. Settings file (~/.claude-mem/settings.json)
+   *   2. Settings file (~/.borg-extension/settings.json)
    *   3. Default values (lowest priority)
    */
   static loadFromFile(settingsPath: string): SettingsDefaults {

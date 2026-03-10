@@ -1,7 +1,7 @@
 {
-  "name": "claude-mem-vscode",
-  "displayName": "Claude Mem for VSCode Copilot",
-  "description": "Persistent memory for GitHub Copilot conversations powered by claude-mem",
+  "name": "borg-extension-vscode",
+  "displayName": "Borg Extension for VSCode Copilot",
+  "description": "Persistent memory for GitHub Copilot conversations powered by borg-extension",
   "version": "0.1.0",
   "publisher": "thedotmack",
   "engines": {
@@ -32,7 +32,7 @@
       {
         "name": "mem_session_init",
         "displayName": "Initialize Memory Session",
-        "modelDescription": "Initialize a new claude-mem session for this conversation. This captures the project context and user's initial prompt. Call this once at the start of each conversation.",
+        "modelDescription": "Initialize a new borg-extension session for this conversation. This captures the project context and user's initial prompt. Call this once at the start of each conversation.",
         "userDescription": "Initializes memory tracking for this conversation",
         "icon": "$(database)",
         "tags": [
@@ -67,7 +67,7 @@
       {
         "name": "mem_user_prompt_log",
         "displayName": "Log User Prompt",
-        "modelDescription": "Log a user prompt to claude-mem for full-text search. Use this for each user message in the conversation (after session init).",
+        "modelDescription": "Log a user prompt to borg-extension for full-text search. Use this for each user message in the conversation (after session init).",
         "userDescription": "Logs user prompts for searchability",
         "icon": "$(comment)",
         "tags": [
@@ -92,7 +92,7 @@
       {
         "name": "mem_observation_record",
         "displayName": "Record Observation",
-        "modelDescription": "Record a tool usage observation (file edits, terminal commands, etc.) to claude-mem. The AI will compress this into structured knowledge. Call this after significant actions.",
+        "modelDescription": "Record a tool usage observation (file edits, terminal commands, etc.) to borg-extension. The AI will compress this into structured knowledge. Call this after significant actions.",
         "userDescription": "Records tool usage for memory building",
         "icon": "$(eye)",
         "tags": [
@@ -180,29 +180,29 @@
       }
     ],
     "configuration": {
-      "title": "Claude Mem",
+      "title": "Borg Extension",
       "properties": {
-        "claudeMem.workerPort": {
+        "borgExtension.workerPort": {
           "type": "number",
           "default": 37777,
-          "description": "Port for the claude-mem worker service"
+          "description": "Port for the borg-extension worker service"
         },
-        "claudeMem.autoInit": {
+        "borgExtension.autoInit": {
           "type": "boolean",
           "default": true,
           "description": "Automatically initialize memory session for new conversations"
         },
-        "claudeMem.autoCapture": {
+        "borgExtension.autoCapture": {
           "type": "boolean",
           "default": true,
           "description": "Automatically capture tool usage as observations"
         },
-        "claudeMem.maxObservationsPerPrompt": {
+        "borgExtension.maxObservationsPerPrompt": {
           "type": "number",
           "default": 10,
           "description": "Maximum observations to capture per user prompt"
         },
-        "claudeMem.showStatusBar": {
+        "borgExtension.showStatusBar": {
           "type": "boolean",
           "default": true,
           "description": "Show worker health status in status bar"
@@ -211,20 +211,20 @@
     },
     "commands": [
       {
-        "command": "claudeMem.checkWorkerHealth",
-        "title": "Claude Mem: Check Worker Health"
+        "command": "borgExtension.checkWorkerHealth",
+        "title": "Borg Extension: Check Worker Health"
       },
       {
-        "command": "claudeMem.restartWorker",
-        "title": "Claude Mem: Restart Worker"
+        "command": "borgExtension.restartWorker",
+        "title": "Borg Extension: Restart Worker"
       },
       {
-        "command": "claudeMem.openViewer",
-        "title": "Claude Mem: Open Memory Viewer"
+        "command": "borgExtension.openViewer",
+        "title": "Borg Extension: Open Memory Viewer"
       },
       {
-        "command": "claudeMem.openSettings",
-        "title": "Claude Mem: Open Settings"
+        "command": "borgExtension.openSettings",
+        "title": "Borg Extension: Open Settings"
       }
     ]
   },
@@ -254,9 +254,9 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/thedotmack/claude-mem"
+    "url": "https://github.com/thedotmack/borg-extension"
   },
   "bugs": {
-    "url": "https://github.com/thedotmack/claude-mem/issues"
+    "url": "https://github.com/thedotmack/borg-extension/issues"
   }
 }

@@ -23,7 +23,7 @@ function main() {
 
   if (args.length === 0) {
     console.error('Usage: npx tsx scripts/test-transcript-parser.ts <path-to-transcript.jsonl>');
-    console.error('\nExample: npx tsx scripts/test-transcript-parser.ts ~/.cache/claude-code/transcripts/latest.jsonl');
+    console.error('\nExample: npx tsx scripts/test-transcript-parser.ts ~/.cache/borg-engine/transcripts/latest.jsonl');
     process.exit(1);
   }
 

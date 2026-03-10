@@ -1,5 +1,5 @@
 /**
- * Claude Mem VSCode Extension
+ * Borg Extension VSCode Extension
  * Provides persistent memory for GitHub Copilot conversations
  */
 
@@ -17,7 +17,7 @@ let workerHealthCheckInterval: NodeJS.Timeout | undefined;
  * Extension activation
  */
 export async function activate(context: vscode.ExtensionContext) {
-  console.log('Claude Mem extension is now active');
+  console.log('Borg Extension extension is now active');
 
   // Initialize session manager
   sessionManager = new SessionManager();
@@ -300,7 +300,7 @@ function registerTools(context: vscode.ExtensionContext) {
  */
 function registerCommands(context: vscode.ExtensionContext) {
   // Check worker health
-  const checkHealthCmd = vscode.commands.registerCommand('claudeMem.checkWorkerHealth', async () => {
+  const checkHealthCmd = vscode.commands.registerCommand('borgExtension.checkWorkerHealth', async () => {
     const isHealthy = await workerClient.isWorkerHealthy();
     if (isHealthy) {
       vscode.window.showInformationMessage('✅ Claude-mem worker is healthy');
@@ -310,29 +310,29 @@ function registerCommands(context: vscode.ExtensionContext) {
         'Restart Worker'
       ).then((selection: string | undefined) => {
         if (selection === 'Restart Worker') {
-          vscode.commands.executeCommand('claudeMem.restartWorker');
+          vscode.commands.executeCommand('borgExtension.restartWorker');
         }
       });
     }
   });
 
   // Restart worker
-  const restartWorkerCmd = vscode.commands.registerCommand('claudeMem.restartWorker', async () => {
-    const terminal = vscode.window.createTerminal('Claude Mem Worker');
-    terminal.sendText('pm2 restart claude-mem-worker');
+  const restartWorkerCmd = vscode.commands.registerCommand('borgExtension.restartWorker', async () => {
+    const terminal = vscode.window.createTerminal('Borg Extension Worker');
+    terminal.sendText('pm2 restart borg-extension-worker');
     terminal.show();
 
     vscode.window.showInformationMessage('Worker restart command sent. Check terminal for output.');
   });
 
   // Open viewer
-  const openViewerCmd = vscode.commands.registerCommand('claudeMem.openViewer', (fileUri?: vscode.Uri) => {
+  const openViewerCmd = vscode.commands.registerCommand('borgExtension.openViewer', (fileUri?: vscode.Uri) => {
     MemoryViewerPanel.createOrShow(context.extensionUri, fileUri);
   });
 
   // Open settings
-  const openSettingsCmd = vscode.commands.registerCommand('claudeMem.openSettings', () => {
-    vscode.commands.executeCommand('workbench.action.openSettings', 'claudeMem');
+  const openSettingsCmd = vscode.commands.registerCommand('borgExtension.openSettings', () => {
+    vscode.commands.executeCommand('workbench.action.openSettings', 'borgExtension');
   });
 
   context.subscriptions.push(checkHealthCmd, restartWorkerCmd, openViewerCmd, openSettingsCmd);
@@ -342,14 +342,14 @@ function registerCommands(context: vscode.ExtensionContext) {
  * Setup status bar
  */
 function setupStatusBar(context: vscode.ExtensionContext) {
-  const config = vscode.workspace.getConfiguration('claudeMem');
+  const config = vscode.workspace.getConfiguration('borgExtension');
   if (!config.get('showStatusBar', true)) {
     return;
   }
 
   statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
-  statusBarItem.command = 'claudeMem.checkWorkerHealth';
-  statusBarItem.text = '$(database) Claude Mem';
+  statusBarItem.command = 'borgExtension.checkWorkerHealth';
+  statusBarItem.text = '$(database) Borg Extension';
   statusBarItem.show();
 
   context.subscriptions.push(statusBarItem);
@@ -364,11 +364,11 @@ function startWorkerHealthChecks() {
 
     const isHealthy = await workerClient.isWorkerHealthy();
     if (isHealthy) {
-      statusBarItem.text = '$(database) Claude Mem';
+      statusBarItem.text = '$(database) Borg Extension';
       statusBarItem.tooltip = 'Worker is healthy';
       statusBarItem.backgroundColor = undefined;
     } else {
-      statusBarItem.text = '$(database) Claude Mem $(warning)';
+      statusBarItem.text = '$(database) Borg Extension $(warning)';
       statusBarItem.tooltip = 'Worker is not responding. Click to check.';
       statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
     }

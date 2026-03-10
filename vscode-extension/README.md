@@ -1,6 +1,6 @@
 # Claude Mem for VSCode Copilot
 
-Persistent memory for GitHub Copilot conversations powered by claude-mem.
+Persistent memory for GitHub Copilot conversations powered by borg-extension.
 
 ## Features
 
@@ -19,14 +19,14 @@ Persistent memory for GitHub Copilot conversations powered by claude-mem.
 
 ## Installation
 
-1. Install the claude-mem worker service:
+1. Install the borg-extension worker service:
    ```bash
-   npm install -g claude-mem
+   npm install -g borg-extension
    ```
 
 2. Start the worker:
    ```bash
-   pm2 start claude-mem-worker
+   pm2 start borg-extension-worker
    ```
 
 3. Install this extension from the VSCode marketplace
@@ -67,7 +67,7 @@ This extension provides 5 Language Model Tools that Copilot can invoke:
 4. **mem_summary_finalize** - Generate session summary
 5. **mem_session_cleanup** - Mark session complete
 
-All data is stored in the same SQLite database as the Claude Code plugin (`~/.claude-mem/claude-mem.db`).
+All data is stored in the same SQLite database as the Claude Code plugin (`~/.borg-extension/borg-extension.db`).
 
 ## Troubleshooting
 
@@ -76,14 +76,14 @@ All data is stored in the same SQLite database as the Claude Code plugin (`~/.cl
 If you see a warning icon in the status bar:
 
 1. Click the status bar item to check health
-2. Run: `pm2 restart claude-mem-worker`
-3. Check logs: `pm2 logs claude-mem-worker`
+2. Run: `pm2 restart borg-extension-worker`
+3. Check logs: `pm2 logs borg-extension-worker`
 
 ### Session Not Initializing
 
 - Ensure worker is running: `pm2 list`
 - Check worker health: Click status bar item
-- Verify database exists: `~/.claude-mem/claude-mem.db`
+- Verify database exists: `~/.borg-extension/borg-extension.db`
 
 ## Development
 
@@ -95,5 +95,5 @@ MIT
 
 ## More Information
 
-- [Claude-mem Plugin](https://github.com/thedotmack/claude-mem)
-- [Report Issues](https://github.com/thedotmack/claude-mem/issues)
+- [Claude-mem Plugin](https://github.com/thedotmack/borg-extension)
+- [Report Issues](https://github.com/thedotmack/borg-extension/issues)

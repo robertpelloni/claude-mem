@@ -291,7 +291,7 @@ const tools = [
  */
 const server = new Server(
   {
-    name: 'claude-mem-search',
+    name: 'borg-extension-search',
     version: '1.0.0',
   },
   {
@@ -392,7 +392,7 @@ async function main() {
       });
 
       const client = new Client({
-        name: 'claude-mem-search-chroma-client',
+        name: 'borg-extension-search-chroma-client',
         version: '1.0.0'
       }, {
         capabilities: {}

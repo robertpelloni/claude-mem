@@ -1,6 +1,6 @@
 /**
  * Worker Client for VSCode Extension
- * Communicates with claude-mem worker service via HTTP
+ * Communicates with borg-extension worker service via HTTP
  */
 
 import * as fs from 'fs';
@@ -13,11 +13,11 @@ const DEFAULT_WORKER_PORT = 37777;
 
 /**
  * Get the worker port number
- * Priority: ~/.claude-mem/settings.json > env var > default
+ * Priority: ~/.borg-extension/settings.json > env var > default
  */
 export function getWorkerPort(): number {
   try {
-    const settingsPath = path.join(os.homedir(), '.claude-mem', 'settings.json');
+    const settingsPath = path.join(os.homedir(), '.borg-extension', 'settings.json');
     if (fs.existsSync(settingsPath)) {
       const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
       const port = parseInt(settings.env?.CLAUDE_MEM_WORKER_PORT, 10);

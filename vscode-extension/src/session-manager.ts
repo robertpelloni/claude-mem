@@ -1,6 +1,6 @@
 /**
  * Session Manager for VSCode Extension
- * Manages mapping between Copilot conversation IDs and claude-mem session IDs
+ * Manages mapping between Copilot conversation IDs and borg-extension session IDs
  */
 
 import * as vscode from 'vscode';

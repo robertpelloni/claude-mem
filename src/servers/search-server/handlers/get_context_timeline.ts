@@ -206,7 +206,7 @@ export async function handle_get_context_timeline(args: any, context: HandlerCon
               // Render session
               const sess = item.data;
               const title = sess.request || 'Session summary';
-              const link = `claude-mem://session-summary/${sess.id}`;
+              const link = `borg-extension://session-summary/${sess.id}`;
               const marker = isAnchor ? ' ← **ANCHOR**' : '';
 
               lines.push(`**🎯 #S${sess.id}** ${title} (${formatDateTime(item.epoch)}) [→](${link})${marker}`);

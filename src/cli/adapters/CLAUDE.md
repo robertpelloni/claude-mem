@@ -1,3 +1,3 @@
-<claude-mem-context>
+<borg-extension-context>
 
-</claude-mem-context>
+</borg-extension-context>

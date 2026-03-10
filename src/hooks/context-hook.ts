@@ -326,7 +326,7 @@ async function contextHook(input?: SessionStartInput, useColors: boolean = false
           // Render summary
           const summary = item.data;
           const summaryTitle = `${summary.request || 'Session started'} (${formatDateTime(summary.displayTime)})`;
-          const link = summary.shouldShowLink ? `claude-mem://session-summary/${summary.id}` : '';
+          const link = summary.shouldShowLink ? `borg-extension://session-summary/${summary.id}` : '';
 
           if (useColors) {
             const linkPart = link ? `${colors.dim}[${link}]${colors.reset}` : '';
@@ -436,9 +436,9 @@ async function contextHook(input?: SessionStartInput, useColors: boolean = false
 
     // Footer with MCP search instructions
     if (useColors) {
-      output.push(`${colors.dim}Use claude-mem MCP search to access records with the given ID${colors.reset}`);
+      output.push(`${colors.dim}Use borg-extension MCP search to access records with the given ID${colors.reset}`);
     } else {
-      output.push(`*Use claude-mem MCP search to access records with the given ID*`);
+      output.push(`*Use borg-extension MCP search to access records with the given ID*`);
     }
   }
 

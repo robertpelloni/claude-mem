@@ -14,7 +14,7 @@ Search all observations using natural language queries.
 
 Using the wrapper script (recommended - single permission prompt):
 ```bash
-claude-mem-search.cjs observations "authentication" --format=index --limit=20
+borg-extension-search.cjs observations "authentication" --format=index --limit=20
 ```
 
 Or using curl directly:
@@ -35,13 +35,13 @@ curl -s "http://localhost:37777/api/search/observations?query=authentication&for
 
 Search for observations from a specific day:
 ```bash
-claude-mem-search.cjs observations "bug" --from=2025-11-09T00:00:00 --to=2025-11-09T23:59:59
+borg-extension-search.cjs observations "bug" --from=2025-11-09T00:00:00 --to=2025-11-09T23:59:59
 ```
 
 Search for observations from the last 7 days using Unix timestamps:
 ```bash
 # Calculate timestamps: from = now - 7 days, to = now
-claude-mem-search.cjs observations "feature" --from=1731196800000 --to=1731801600000
+borg-extension-search.cjs observations "feature" --from=1731196800000 --to=1731801600000
 ```
 
 ## When to Use Each Format

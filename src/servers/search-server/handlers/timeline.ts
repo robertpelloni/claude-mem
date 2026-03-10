@@ -280,7 +280,7 @@ export async function handle_timeline(args: any, context: HandlerContext) {
 
               const sess = item.data;
               const title = sess.request || 'Session summary';
-              const link = `claude-mem://session-summary/${sess.id}`;
+              const link = `borg-extension://session-summary/${sess.id}`;
               const marker = isAnchor ? ' ← **ANCHOR**' : '';
 
               lines.push(`**🎯 #S${sess.id}** ${title} (${formatDateTime(item.epoch)}) [→](${link})${marker}`);

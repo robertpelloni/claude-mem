@@ -28,7 +28,7 @@ const project = basename(cwd);
 
 try {
   // Resolve data directory: env var → settings.json → default
-  let dataDir = process.env.CLAUDE_MEM_DATA_DIR || join(homedir(), ".claude-mem");
+  let dataDir = process.env.CLAUDE_MEM_DATA_DIR || join(homedir(), ".borg-extension");
   if (!process.env.CLAUDE_MEM_DATA_DIR) {
     const settingsPath = join(dataDir, "settings.json");
     if (existsSync(settingsPath)) {
@@ -39,7 +39,7 @@ try {
     }
   }
 
-  const dbPath = join(dataDir, "claude-mem.db");
+  const dbPath = join(dataDir, "borg-extension.db");
   if (!existsSync(dbPath)) {
     console.log(JSON.stringify({ observations: 0, prompts: 0, project }));
     process.exit(0);
