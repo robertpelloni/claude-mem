@@ -19,8 +19,6 @@ export interface SessionData {
  */
 export class SessionManager {
   private sessions: Map<string, SessionData> = new Map();
-  // Using a mock sessionDbId as a placeholder since actual DB inserts happen on the worker side
-  private nextSessionId: number = 1000;
 
   constructor() { }
 
@@ -33,17 +31,15 @@ export class SessionManager {
       return this.sessions.get(conversationId)!;
     }
 
-    const sessionDbId = this.nextSessionId++;
-
     try {
       // Use walker client to initialize
-      await workerClient.initSession(sessionDbId, project, userPrompt, 1);
+      const { sessionDbId, promptNumber } = await workerClient.initSession(conversationId, project, userPrompt);
 
       const sessionData: SessionData = {
         sessionDbId,
         conversationId,
         project,
-        promptNumber: 1,
+        promptNumber,
         startTime: Date.now()
       };
 
@@ -53,7 +49,7 @@ export class SessionManager {
       console.warn('Failed to alert worker of new session, proceeding with local tracking only:', e);
       // Fallback local-only execution
       const sessionData: SessionData = {
-        sessionDbId,
+        sessionDbId: -1,
         conversationId,
         project,
         promptNumber: 1,
@@ -111,7 +107,7 @@ export class SessionManager {
     }
 
     try {
-      await workerClient.completeSession(session.sessionDbId);
+      await workerClient.completeSession(conversationId);
     } catch (e) {
       console.warn('Silent failure to complete session via HTTP:', e);
     }

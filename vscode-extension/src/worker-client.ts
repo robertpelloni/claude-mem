@@ -63,17 +63,16 @@ export interface SessionData {
  * Initialize a new session
  */
 export async function initSession(
-  sessionDbId: number,
+  contentSessionId: string,
   project: string,
-  userPrompt: string,
-  promptNumber: number
-): Promise<void> {
+  userPrompt: string
+): Promise<{ sessionDbId: number; promptNumber: number }> {
   const port = getWorkerPort();
 
-  const response = await fetch(`http://127.0.0.1:${port}/sessions/${sessionDbId}/init`, {
+  const response = await fetch(`http://127.0.0.1:${port}/api/sessions/init`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ project, userPrompt, promptNumber }),
+    body: JSON.stringify({ contentSessionId, project, prompt: userPrompt }),
     signal: AbortSignal.timeout(5000)
   });
 
@@ -81,33 +80,30 @@ export async function initSession(
     const errorText = await response.text();
     throw new Error(`Failed to initialize session: ${response.status} ${errorText}`);
   }
+
+  return response.json();
 }
 
 /**
  * Record an observation (tool usage)
  */
 export async function recordObservation(
-  sessionDbId: number,
+  contentSessionId: string,
   toolName: string,
   toolInput: string,
   toolResponse: string,
-  promptNumber: number,
   cwd?: string
 ): Promise<void> {
   const port = getWorkerPort();
 
-  const response = await fetch(`http://127.0.0.1:${port}/api/hooks/inject`, {
+  const response = await fetch(`http://127.0.0.1:${port}/api/sessions/observations`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      hook_type: toolName, // Re-mapped to Rust schema
-      content: toolInput,
-      // Original fields nested for backward compat if needed or just omitted for pure speed mapping
+      contentSessionId,
       tool_name: toolName,
       tool_input: toolInput,
       tool_response: toolResponse,
-      prompt_number: promptNumber,
-      session_id: sessionDbId,
       cwd: cwd || ''
     }),
     signal: AbortSignal.timeout(2000)
@@ -123,18 +119,17 @@ export async function recordObservation(
  * Generate session summary
  */
 export async function generateSummary(
-  sessionDbId: number,
-  promptNumber: number,
+  contentSessionId: string,
   lastUserMessage?: string
 ): Promise<void> {
   const port = getWorkerPort();
 
-  const response = await fetch(`http://127.0.0.1:${port}/sessions/${sessionDbId}/summarize`, {
+  const response = await fetch(`http://127.0.0.1:${port}/api/sessions/summarize`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      prompt_number: promptNumber,
-      last_user_message: lastUserMessage || ''
+      contentSessionId,
+      last_assistant_message: lastUserMessage || ''
     }),
     signal: AbortSignal.timeout(2000)
   });
@@ -148,12 +143,14 @@ export async function generateSummary(
 /**
  * Mark session as complete
  */
-export async function completeSession(sessionDbId: number): Promise<void> {
+export async function completeSession(contentSessionId: string): Promise<void> {
   const port = getWorkerPort();
 
   try {
-    const response = await fetch(`http://127.0.0.1:${port}/sessions/${sessionDbId}/complete`, {
+    const response = await fetch(`http://127.0.0.1:${port}/api/sessions/complete`, {
       method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contentSessionId }),
       signal: AbortSignal.timeout(1000)
     });
 

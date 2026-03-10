@@ -1,13 +1,16 @@
 import * as vscode from 'vscode';
+import * as path from 'path';
 import * as workerClient from './worker-client';
 
 export class MemoryViewerPanel {
     public static currentPanel: MemoryViewerPanel | undefined;
     private readonly _panel: vscode.WebviewPanel;
+    private readonly _fileUri: vscode.Uri | undefined;
     private _disposables: vscode.Disposable[] = [];
 
-    private constructor(panel: vscode.WebviewPanel, extensionUri: vscode.Uri) {
+    private constructor(panel: vscode.WebviewPanel, extensionUri: vscode.Uri, fileUri?: vscode.Uri) {
         this._panel = panel;
+        this._fileUri = fileUri;
 
         // Set the webview's initial html content
         this._update();
@@ -27,15 +30,20 @@ export class MemoryViewerPanel {
         );
     }
 
-    public static createOrShow(extensionUri: vscode.Uri) {
+    public static createOrShow(extensionUri: vscode.Uri, fileUri?: vscode.Uri) {
         const column = vscode.window.activeTextEditor
             ? vscode.window.activeTextEditor.viewColumn
             : undefined;
 
-        // If we already have a panel, show it.
+        // If we already have a panel, show it and potentially update the file context.
         if (MemoryViewerPanel.currentPanel) {
-            MemoryViewerPanel.currentPanel._panel.reveal(column);
-            return;
+            if (fileUri && fileUri !== MemoryViewerPanel.currentPanel._fileUri) {
+                // If a new file is passed, we must reconstruct the panel to update state cleanly.
+                MemoryViewerPanel.currentPanel.dispose();
+            } else {
+                MemoryViewerPanel.currentPanel._panel.reveal(column);
+                return;
+            }
         }
 
         // Otherwise, create a new panel.
@@ -50,7 +58,7 @@ export class MemoryViewerPanel {
             }
         );
 
-        MemoryViewerPanel.currentPanel = new MemoryViewerPanel(panel, extensionUri);
+        MemoryViewerPanel.currentPanel = new MemoryViewerPanel(panel, extensionUri, fileUri);
     }
 
     public dispose() {
@@ -75,7 +83,10 @@ export class MemoryViewerPanel {
                 return;
             }
 
-            const viewerUrl = workerClient.getViewerUrl();
+            let viewerUrl = workerClient.getViewerUrl();
+            if (this._fileUri) {
+                viewerUrl += `?q=${encodeURIComponent(path.basename(this._fileUri.fsPath))}`;
+            }
             this._panel.webview.html = this._getIframeHtml(viewerUrl);
         } catch (e: any) {
             this._panel.webview.html = this._getErrorHtml(`Failed to load viewer: ${e.message}`);

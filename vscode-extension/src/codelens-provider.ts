@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import * as path from 'path';
 import * as workerClient from './worker-client';
 
 export class MemoryCodeLensProvider implements vscode.CodeLensProvider {
@@ -24,10 +25,10 @@ export class MemoryCodeLensProvider implements vscode.CodeLensProvider {
         try {
             if (await workerClient.isWorkerHealthy()) {
                 defaultLenses.push(new vscode.CodeLens(topOfFile, {
-                    title: "$(database) Ask Claude Mem about this file",
+                    title: `$(database) Claude-Mem: View history for ${path.basename(document.uri.fsPath)}`,
                     tooltip: "Search claude-mem for context related to this file",
                     command: "claudeMem.openViewer",
-                    arguments: []
+                    arguments: [document.uri]
                 }));
             }
         } catch {

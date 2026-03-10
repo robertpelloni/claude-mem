@@ -75,11 +75,8 @@ function registerTools(context: vscode.ExtensionContext) {
       try {
         const { project, userPrompt, conversationId } = options.input;
 
-        // Create session in database
+        // Create session in database and initialize via worker
         const session = await sessionManager.createSession(conversationId, project, userPrompt);
-
-        // Initialize session via worker
-        await workerClient.initSession(session.sessionDbId, project, userPrompt, session.promptNumber);
 
         // Save user prompt
         await sessionManager.saveUserPrompt(conversationId, session.promptNumber, userPrompt);
@@ -184,11 +181,10 @@ function registerTools(context: vscode.ExtensionContext) {
 
         // Record observation
         await workerClient.recordObservation(
-          session.sessionDbId,
+          session.conversationId,
           tool_name,
           tool_input,
           tool_response,
-          promptNumber,
           cwd
         );
 
@@ -235,8 +231,7 @@ function registerTools(context: vscode.ExtensionContext) {
 
         // Generate summary
         await workerClient.generateSummary(
-          session.sessionDbId,
-          promptNumber,
+          session.conversationId,
           last_user_message
         );
 
@@ -283,7 +278,6 @@ function registerTools(context: vscode.ExtensionContext) {
         const session = activeSessions[activeSessions.length - 1];
 
         // Complete session
-        await workerClient.completeSession(session.sessionDbId);
         await sessionManager.completeSession(session.conversationId);
 
         return new vscode.LanguageModelToolResult([
@@ -332,8 +326,8 @@ function registerCommands(context: vscode.ExtensionContext) {
   });
 
   // Open viewer
-  const openViewerCmd = vscode.commands.registerCommand('claudeMem.openViewer', () => {
-    MemoryViewerPanel.createOrShow(context.extensionUri);
+  const openViewerCmd = vscode.commands.registerCommand('claudeMem.openViewer', (fileUri?: vscode.Uri) => {
+    MemoryViewerPanel.createOrShow(context.extensionUri, fileUri);
   });
 
   // Open settings
@@ -398,7 +392,7 @@ export function deactivate() {
   // Complete any active sessions
   const activeSessions = sessionManager.getActiveSessions();
   for (const session of activeSessions) {
-    workerClient.completeSession(session.sessionDbId).catch(err => {
+    workerClient.completeSession(session.conversationId).catch(err => {
       console.error('Failed to complete session on deactivation:', err);
     });
   }

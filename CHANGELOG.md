@@ -3,6 +3,16 @@
 
 All notable changes to claude-mem.
 
+## [v10.5.7] - 2026-03-09
+
+### Features
+- **Endless Mode Stabilization**: Lifted Endless Mode from beta. The JSONL atomic compression transformer is now fully vetted for cross-framework context retention scaling.
+- **Endless Mode Configuration**: Compression levels (`low`, `medium`, `high`, `extreme`) are fully wired and exposed via `SettingsDefaultsManager.ts` to both the web UI panel and Agent SDK prompts in `modes/code.json`.
+- **Benchmarking**: Created a rigorous `endless-compression.json` multi-session production benchmark to track accuracy vs context savings at extreme compression margins.
+
+### Bug Fixes
+- **Atomic Fault Tolerance**: Hardened `transcript-transformer.ts` against potential crashes when no SQLite observations are initially matched for a given tool execution payload, replacing fatal exceptions with skipped compression passes and graceful log warnings.
+
 ## [v10.5.6] - 2026-03-09
 
 ### Bug Fixes

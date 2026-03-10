@@ -24,6 +24,7 @@ export interface TransformStats {
   originalSize: number;
   compressedSize: number;
   toolUseId: string;
+  skipped?: boolean;
 }
 
 export class TranscriptTransformer {
@@ -58,7 +59,15 @@ export class TranscriptTransformer {
     db.close();
 
     if (observations.length === 0) {
-      throw new Error(`No observations found for tool_use_id: ${toolUseId}`);
+      logger.warn('TRANSFORMER', `Observations empty for: ${toolUseId} - skipping compression`);
+      return {
+        originalTokens: 0,
+        compressedTokens: 0,
+        originalSize: 0,
+        compressedSize: 0,
+        toolUseId,
+        skipped: true
+      };
     }
 
     // Read from output path if it exists, otherwise read from original
@@ -106,7 +115,15 @@ export class TranscriptTransformer {
     }
 
     if (!found) {
-      throw new Error(`Tool use ID not found in transcript: ${toolUseId}`);
+      logger.warn('TRANSFORMER', `Tool use ID not found in transcript: ${toolUseId} - skipping`);
+      return {
+        originalTokens: 0,
+        compressedTokens: 0,
+        originalSize: 0,
+        compressedSize: 0,
+        toolUseId,
+        skipped: true
+      };
     }
 
     // Write to output path or original path

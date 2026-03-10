@@ -62,13 +62,13 @@ export class HandoffGenerator {
 
         for (const obs of observations) {
             if (obs.files_modified) {
-                try { JSON.parse(obs.files_modified).forEach((f: string) => filesModified.add(f)); } catch (e) { }
+                try { JSON.parse(obs.files_modified).forEach((f: string) => filesModified.add(f)); } catch (e) { logger.debug('SESSION', 'Failed to parse files_modified JSON', { observationId: obs.id }); }
             }
             if (obs.files_read) {
-                try { JSON.parse(obs.files_read).forEach((f: string) => filesRead.add(f)); } catch (e) { }
+                try { JSON.parse(obs.files_read).forEach((f: string) => filesRead.add(f)); } catch (e) { logger.debug('SESSION', 'Failed to parse files_read JSON', { observationId: obs.id }); }
             }
             if (obs.concepts) {
-                try { JSON.parse(obs.concepts).forEach((c: string) => concepts.add(c)); } catch (e) { }
+                try { JSON.parse(obs.concepts).forEach((c: string) => concepts.add(c)); } catch (e) { logger.debug('SESSION', 'Failed to parse concepts JSON', { observationId: obs.id }); }
             }
             if (obs.narrative && obs.narrative.trim() && obs.type !== 'discovery') {
                 narratives.push(`- **${obs.type.toUpperCase()}**: ${obs.narrative.trim()}`);
@@ -86,7 +86,7 @@ export class HandoffGenerator {
         lines.push('## Technical Details');
         lines.push('### Concepts Touched');
         if (concepts.size > 0) {
-            lines.push(Array.from(concepts).map(c => `- ${c}`).join('\\n'));
+            lines.push(Array.from(concepts).map(c => `- ${c}`).join('\n'));
         } else {
             lines.push('*(None)*');
         }
@@ -94,7 +94,7 @@ export class HandoffGenerator {
 
         lines.push('### Files Modified');
         if (filesModified.size > 0) {
-            lines.push(Array.from(filesModified).map(f => `- \`${f}\``).join('\\n'));
+            lines.push(Array.from(filesModified).map(f => `- \`${f}\``).join('\n'));
         } else {
             lines.push('*(None)*');
         }
@@ -102,7 +102,7 @@ export class HandoffGenerator {
 
         lines.push('### Files Read');
         if (filesRead.size > 0) {
-            lines.push(Array.from(filesRead).map(f => `- \`${f}\``).join('\\n'));
+            lines.push(Array.from(filesRead).map(f => `- \`${f}\``).join('\n'));
         } else {
             lines.push('*(None)*');
         }
@@ -111,6 +111,6 @@ export class HandoffGenerator {
         lines.push('## Next Steps & Remaining Uncertainties');
         lines.push('*(Agent should review this handoff and prioritize pending TODOs or continuing the task logic.*)');
 
-        return lines.join('\\n');
+        return lines.join('\n');
     }
 }

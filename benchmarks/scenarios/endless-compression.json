@@ -1,0 +1,101 @@
+{
+  "id": "endless-compression-auth",
+  "name": "Endless Mode Compression Benchmark",
+  "tier": 4,
+  "difficulty": "hard",
+  "estimatedTime": 45,
+  "sessions": [
+    {
+      "sessionNumber": 1,
+      "title": "Initial Implementation",
+      "prompt": "Create a dummy Express server with a basic /login endpoint that accepts JSON username and password.",
+      "contextDependencies": [],
+      "initialFiles": [],
+      "expectedOutputs": [
+        {
+          "type": "file",
+          "description": "server.js exists",
+          "validation": "test -f server.js"
+        }
+      ],
+      "validationQuestions": [
+        {
+          "question": "What is the endpoint for login?",
+          "correctAnswer": "/login",
+          "contextSource": 1,
+          "answerType": "exact",
+          "points": 10
+        }
+      ]
+    },
+    {
+      "sessionNumber": 2,
+      "title": "Compression Test Phase 1",
+      "prompt": "Modify the /login endpoint to use a mock database array created globally, rather than hardcoded credentials.",
+      "contextDependencies": [
+        {
+          "type": "implementation",
+          "description": "The logic connecting to the /login endpoint",
+          "fromSession": 1,
+          "critical": true
+        }
+      ],
+      "initialFiles": [],
+      "expectedOutputs": [
+        {
+          "type": "file_contents",
+          "description": "Mock database array exists",
+          "validation": "grep -q 'users =' server.js"
+        }
+      ],
+      "validationQuestions": [
+        {
+          "question": "What authentication system did we start with?",
+          "correctAnswer": "Hardcoded credentials",
+          "contextSource": 1,
+          "answerType": "exact",
+          "points": 10
+        }
+      ]
+    },
+    {
+      "sessionNumber": 3,
+      "title": "Extreme Compression Retrieval",
+      "prompt": "Add an /info endpoint that returns a 200 OK message without modifying the existing authentication system.",
+      "contextDependencies": [
+        {
+          "type": "implementation",
+          "description": "The mock database array must remain untouched.",
+          "fromSession": 2,
+          "critical": true
+        }
+      ],
+      "initialFiles": [],
+      "expectedOutputs": [
+        {
+          "type": "file_contents",
+          "description": "Info endpoint exists",
+          "validation": "grep -q '/info' server.js"
+        }
+      ],
+      "validationQuestions": [
+        {
+          "question": "Are we still using the mock database array added previously?",
+          "correctAnswer": "Yes",
+          "contextSource": 2,
+          "answerType": "semantic",
+          "points": 20
+        }
+      ]
+    }
+  ],
+  "validation": {
+    "testSuite": "node server.js & sleep 2 && curl -s http://localhost:3000/info | grep 200 && kill $!",
+    "successCriteria": ["Login works", "Info endpoint works"],
+    "qualityChecks": []
+  },
+  "metrics": {
+    "primary": ["context_accuracy", "resolved"],
+    "secondary": ["time"]
+  }
+}
